@@ -12,23 +12,18 @@ An unofficial native Windows port of **Splatoon (Wii U)**, made by statically re
 - Render resolution, Plaza 60 FPS on/off, fullscreen, FPS overlay
 - Gyro on/off, gyro and mouse sensitivity, invert gyro, volume
 - Rebind every button for keyboard/mouse and controller
-- Saved in `settings.ini` next to `Splatoon.exe`
 - HOME moved from Esc to H
 
 **Performance**
 - Plaza runs at 60 FPS with normal game speed (keeps NPCs)
 - Fewer shader stutters, faster rendering in levels
 
-**Fixes**
-- Normal ground no longer counts as enemy ink in Octo Valley
-- With gyro, the right stick no longer moves the camera up/down
-
 ---
 
 ## Requirements
 
 - **Windows 10 or 11, 64-bit**
-- **GPU with Vulkan 1.3** and an up-to-date driver (developed on an RTX 5060 Ti; a modern NVIDIA or AMD GPU is recommended)
+- **GPU with Vulkan 1.3** and an up-to-date driver (developed on an RTX 5060 Ti; a modern NVIDIA is recommended)
 - **CPU:** modern 6–8 cores or more · **RAM:** 16 GB minimum, 32 GB recommended (building the game uses a lot of memory)
 - **Disk:** about 40 GB free during setup FINAL BUILD IS 6GB COUNTING THE SHADER CACHES
 - **Your own game dump:** Splatoon **EUR (AGMP01) with update v16**, with the folders `code`, `content` and `meta` (for example made with *Dumpling* on your Wii U). Other regions and versions are not supported yet.
