@@ -579,10 +579,9 @@ static void GX2WaitForVsync(CPUState* cpu) {
     // and every swap has flipped, the frame is late anyway: return at once,
     // as adaptive vsync does (the flip itself stays paced by pace_flip).
     // The plaza steps its game logic in fixed 2-vblank steps (its pacer's 30
-    // FPS mode), so skipping this wait runs it faster than the console; on by
-    // default with RBREW_GAME_30FPS (user's choice). RBREW_VSYNC_WAIT_LATE=1
-    // waits as the console does.
-    static const bool wait_late = [] { const char* v = std::getenv("RBREW_VSYNC_WAIT_LATE"); return v && v[0] == '1'; }();
+    // FPS mode), so skipping this wait runs it faster than the console. Off by
+    // default; RBREW_VSYNC_WAIT_LATE=0 skips it (testing).
+    static const bool wait_late = [] { const char* v = std::getenv("RBREW_VSYNC_WAIT_LATE"); return !(v && v[0] == '0'); }();
     const uint64_t vblank_ticks = uint64_t(RBREW_TIMER_CLOCK) * 1001 / 60000;
     const uint64_t last_flip = s_last_flip.load(std::memory_order_relaxed);
     const bool late = !wait_late && last_flip && now > last_flip && now - last_flip >= vblank_ticks &&
@@ -590,17 +589,22 @@ static void GX2WaitForVsync(CPUState* cpu) {
     // Gambit's pacer in its 30 FPS mode (the plaza; flag bit 0 at +0x74 of
     // its frame object) also waits here until two vblanks have passed.
     // RBREW_GAME_30FPS=0 skips that wait (pace_flip still caps flips at 60).
-    // Default off (the user's choice, 2026-10-25): the plaza runs above 30 FPS
-    // and its fixed-step logic therefore runs faster than on the console
-    // until a time-step fix lands. RBREW_GAME_30FPS=1 keeps the console's 30.
-    static const bool keep_30 = [] { const char* v = std::getenv("RBREW_GAME_30FPS"); return v && v[0] == '1'; }();
+    // Kept by default: skipping it runs a 30 FPS-mode scene's fixed-step logic
+    // too fast (the plaza now runs in the 60 FPS mode, see RBREW_PLAZA_60FPS).
+    // RBREW_GAME_30FPS=0 skips the wait (testing).
+    static const bool keep_30 = [] { const char* v = std::getenv("RBREW_GAME_30FPS"); return !(v && v[0] == '0'); }();
     const bool pacer = cpu && cpu->lr == 0x02796D7Cu;
     // The pacer's object is in r31 (callee-saved) here: remember where its
     // 30 FPS-mode flag lives so GX2SwapScanBuffers can switch the game to its
     // 60 FPS mode (RBREW_GAME_60FPS_MODE).
     if (pacer && cpu->r[31] && rbrew_memory_accessible(MEM, cpu->r[31] + 0x74, 4))
         s_pacer_flag_address.store(cpu->r[31] + 0x74, std::memory_order_relaxed);
-    if (!keep_30 && pacer && s_flip_count.load() == s_swap_count.load()) {
+    // In the plaza the 60 FPS fix (RBREW_PLAZA_60FPS) inserts 30 FPS-mode
+    // frames only to catch up with real time; they must not wait for two
+    // vblanks, so the pacer's wait is skipped there.
+    const bool plaza_catch_up = pacer && rbrew_control_defaults::active_scene_type(MEM) == 2 && [] {
+        const char* v = std::getenv("RBREW_PLAZA_60FPS"); return !(v && (v[0] == '0' || v[0] == '1')); }();
+    if ((!keep_30 || plaza_catch_up) && pacer && s_flip_count.load() == s_swap_count.load()) {
         s_last_vsync_wait_ms.fetch_add(0.0f, std::memory_order_relaxed);
         return;
     }
@@ -657,9 +661,83 @@ static void GX2CopyColorBufferToScanBuffer(CPUState* cpu) {
 static std::atomic<uint64_t> s_presents_posted{0}, s_presents_done{0};
 #endif
 
+namespace {
+// Plaza at 60 FPS (RBREW_PLAZA_60FPS), the same idea as the Cemu
+// "60FPS In Plaza" graphic pack, in own code for this build: Gambit_fn_02A092A8
+// (called through a vtable every frame) copies an object's 30 FPS request
+// (bit 0 of +0x304) into the framework's 30 FPS mode bit. Clearing the request
+// before it runs keeps the game in its 60 FPS mode throughout; the plaza then
+// steps its logic once per frame like the rest of the game.
+//
+// Default "adaptive" (RBREW_PLAZA_60FPS unset or 2): the logic steps once per
+// iteration, so a frame slower than 1/60 s would slow the game down. A time
+// account (real time minus 1/60 s per iteration) lets the plaza's own 30 FPS
+// request through for one frame (two iterations, two steps, its undrawn
+// iteration included) whenever the logic is half a step or more behind, so
+// the speed stays right on average. RBREW_PLAZA_60FPS=1: always 60 FPS mode;
+// =0: the game's own 30 FPS plaza.
+HostFunc s_plaza_sync_original = nullptr;
+void plaza_mode_sync(CPUState* cpu) {
+    static const bool adaptive = [] { const char* v = std::getenv("RBREW_PLAZA_60FPS"); return !(v && v[0] == '1'); }();
+    using clock = std::chrono::steady_clock;
+    constexpr double kStepMs = 1000.0 * 1001.0 / 60000.0;
+    static clock::time_point last{};
+    static double behind_ms = 0;   // real time not yet covered by logic steps
+    const auto now = clock::now();
+    if (last.time_since_epoch().count())
+        behind_ms = std::clamp(behind_ms + std::chrono::duration<double, std::milli>(now - last).count() - kStepMs, -kStepMs, 2 * kStepMs);
+    last = now;
+    const uint32_t object = cpu->r[3];
+    if (object && rbrew_memory_accessible(cpu->mem, object + 0x304, 4)) {
+        const uint32_t request = rbrew_read32(cpu->mem, object + 0x304);
+        // The plaza sets its request once on entry; after it was cleared the
+        // gate owns the bit for that object while the plaza (scene kind 2) runs.
+        static uint32_t s_requester = 0;
+        if (request & 1u) s_requester = object;
+        const bool owned = adaptive && object == s_requester && rbrew_control_defaults::active_scene_type(cpu->mem) == 2;
+        bool want_30 = false;
+        if (owned) {
+            // Finish a 30 FPS frame once begun: its second (undrawn) iteration
+            // runs with bit 1 of the framework flags set.
+            const uint32_t flags_address = s_pacer_flag_address.load(std::memory_order_relaxed);
+            const uint32_t flags = flags_address && rbrew_memory_accessible(cpu->mem, flags_address, 4) ? rbrew_read32(cpu->mem, flags_address) : 0;
+            want_30 = ((flags & 3u) == 3u) || behind_ms >= kStepMs / 2;
+        }
+        // Only the plaza is changed; other scenes keep their own request.
+        const bool plaza = rbrew_control_defaults::active_scene_type(cpu->mem) == 2;
+        const uint32_t wanted = want_30 ? (request | 1u) : (request & ~1u);
+        if (plaza && wanted != request) rbrew_write32(cpu->mem, object + 0x304, wanted);
+        // RBREW_PLAZA_STATS=<file> (diagnostics): calls, requests and 30 FPS frames per second.
+        static FILE* stats = [] { const char* p = std::getenv("RBREW_PLAZA_STATS"); return p && *p ? std::fopen(p, "w") : nullptr; }();
+        if (stats) {
+            static clock::time_point second = now;
+            static unsigned calls = 0, requests = 0, thirty = 0;
+            ++calls; requests += request & 1u; thirty += want_30;
+            if (now - second >= std::chrono::seconds(1)) {
+                std::fprintf(stats, "calls %u requests %u thirty %u behind %.1f ms\n", calls, requests, thirty, behind_ms);
+                std::fflush(stats);
+                calls = requests = thirty = 0; second = now;
+            }
+        }
+    }
+    s_plaza_sync_original(cpu);
+}
+void install_plaza_60fps(CPUState* cpu) {
+    static const bool enabled = [] { const char* v = std::getenv("RBREW_PLAZA_60FPS"); return !(v && v[0] == '0'); }();
+    static bool installed = false;
+    constexpr uint32_t kSync = 0x02A092A8u;
+    if (!enabled || installed || !cpu || (kSync >> 2) >= cpu->dispatch_size || !cpu->dispatch_table[kSync >> 2]) return;
+    installed = true;
+    s_plaza_sync_original = cpu->dispatch_table[kSync >> 2];
+    cpu->dispatch_table[kSync >> 2] = plaza_mode_sync;
+    std::fprintf(stderr, "[gx2] plaza 60 FPS mode sync installed\n");
+}
+}
+
 // GX2SwapScanBuffers()
 // Called every frame — pump SDL events, blit game FBO to window, swap buffers.
 static void GX2SwapScanBuffers(CPUState* cpu) {
+    install_plaza_60fps(cpu);
     gx2_perf_frame();
     using frame_clock = std::chrono::steady_clock;
     static frame_clock::time_point s_prev_swap_tp{};
@@ -959,7 +1037,10 @@ static bool context_state_sync() {
     return sync;
 }
 static void GX2SetContextStateCall(CPUState* cpu) {
-    if (!context_state_sync() && !gx2_dl_list_open() && gx2_native_async_active()) {
+    // Synchronous until the game has presented 120 frames: posted switches
+    // during boot hung the game before its first frame in rare runs.
+    if (!context_state_sync() && s_swap_count.load(std::memory_order_relaxed) >= 120 && !gx2_dl_list_open() &&
+        gx2_native_async_active()) {
         gx2_dl_record(GX2SetContextState, cpu);
         return;
     }

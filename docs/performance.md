@@ -862,3 +862,30 @@ steps per second, so normal speed means exactly 30 displayed FPS. Tried:
 the game's 60 FPS mode (`RBREW_GAME_60FPS_MODE=1`): correct speed, but no
 NPCs appear; drawing every iteration: black plaza. Forcing write helpers
 inline: no FPS gain, build 43 instead of 23 minutes, reverted.
+
+### Plaza 60 FPS with normal game speed (2026-10-25, late)
+
+Replaces the "plaza fast mode" above.
+
+- `RBREW_PLAZA_60FPS` (default adaptive; `=1` always 60 FPS mode, `=0` the
+  game's 30 FPS plaza). Same idea as Exzap's Cemu pack "60FPS In Plaza", in
+  own code for this build: Gambit_fn_02A092A8 (called through a vtable once
+  per loop iteration) copies an object's 30 FPS request (bit 0 of +0x304)
+  into the framework's mode bit (+0x74). A dispatch-table wrapper clears the
+  request, so the plaza runs in the game's 60 FPS mode with its NPCs (forcing
+  the framework bit itself every frame lost the NPCs). In that mode the logic
+  steps once per frame, so a slow frame would slow the game: a time account
+  (real time minus 1/60 s per iteration) lets one 30 FPS frame through (two
+  logic steps, its undrawn iteration included) whenever the logic is half a
+  step behind; the pacer's two-vblank wait is skipped for those frames.
+  Logic stays at ~60 steps/s (measured with RBREW_PLAZA_STATS).
+- Plaza ~50 FPS in the replayed view (p50 19.4 ms), up to ~59 FPS when the
+  camera looks at the ground; console: 30.
+- `RBREW_QUERY_ASSUME_VISIBLE` now applies only in the plaza (scene kind 2,
+  default; `=1` everywhere, `=0` never): Gambit also tests the ground under
+  the player with occlusion queries, and answering "visible" everywhere made
+  normal ground count as enemy ink in Octo Valley.
+- `RBREW_GAME_30FPS` and `RBREW_VSYNC_WAIT_LATE` are back to console timing by
+  default (outside the plaza a 30 FPS-mode scene must not run fast).
+- GX2SetContextState is posted only after 120 presented frames: posting it
+  during boot hung the game before its first frame in rare runs.

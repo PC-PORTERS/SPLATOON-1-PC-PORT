@@ -4,6 +4,7 @@
 
 #include "../os_common.h"
 #include "../../runtime/benchmark_input.h"
+#include "../../runtime/native_control_defaults.h"
 #include "gx2_attrib.h"
 #include "gx2_blend_state.h"
 #include "gx2_pm4_state.h"
@@ -234,10 +235,16 @@ static void GX2QueryGetOcclusionResult(CPUState* cpu) {
     // visible" (the query's last nonzero count, else 4096 samples) instead of
     // draining the queue. Occlusion culling then draws a hidden object for a
     // frame at worst; the game thread no longer waits for the scene list.
-    // Default on (plaza: the game thread no longer waits ~10 ms per frame for
-    // the scene list); RBREW_QUERY_ASSUME_VISIBLE=0 restores the wait.
-    static const bool assume_visible = [] { const char* v = std::getenv("RBREW_QUERY_ASSUME_VISIBLE"); return !(v && v[0] == '0'); }();
-    if (assume_visible) {
+    // Gambit also tests the ground under the player with occlusion queries:
+    // "visible" made normal ground count as enemy ink in Octo Valley
+    // (2026-10-25). By default it applies only in the plaza (scene kind 2),
+    // which has no ink; there it is what keeps the plaza at 60 FPS.
+    // RBREW_QUERY_ASSUME_VISIBLE=0: never, =1: everywhere (testing).
+    static const int assume_visible = [] {
+        const char* v = std::getenv("RBREW_QUERY_ASSUME_VISIBLE");
+        return v && v[0] == '0' ? 0 : v && v[0] == '1' ? 1 : 2;
+    }();
+    if (assume_visible == 1 || (assume_visible == 2 && rbrew_control_defaults::active_scene_type(MEM) == 2)) {
       std::lock_guard lock(s_query_generation_mutex);
       const auto it = s_query_generations.find(ARG0);
       if (it != s_query_generations.end() && it->second.listed && !gx2_native_queue_idle()) {
