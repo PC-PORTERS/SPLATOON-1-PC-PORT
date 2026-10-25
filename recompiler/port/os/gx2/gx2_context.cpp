@@ -18,6 +18,7 @@
 #include "gx2_native_context.h"
 #include "gx2_surface.h"
 #include "gx2_display_list.h"
+#include "gx2_render_vk_debug.h"
 #include "../vpad/game_controllers.h"
 #include "../../runtime/splatoon_diagnostics.h"
 #include "../../runtime/benchmark_input.h"
@@ -482,6 +483,7 @@ static void GX2Flush(CPUState* cpu) {
 static std::atomic<uint32_t> s_swap_count{0};
 static std::atomic<uint32_t> s_flip_count{0};
 static std::atomic<uint64_t> s_last_flip{0};
+static std::atomic<uint32_t> s_pacer_flag_address{0};   // Gambit pacer object + 0x74 (bit 0: 30 FPS mode)
 static std::atomic<uint64_t> s_last_vsync{0};
 static std::atomic<float>    s_last_vsync_wait_ms{0.0f};
 static std::atomic<float>    s_last_present_wait_ms{0.0f};
@@ -571,7 +573,38 @@ static void GX2WaitForVsync(CPUState* cpu) {
     // (A "skip if present waited > 4 ms" check was removed: the present wait is
     // reset at the end of every swap, so it never applied.)
     const uint64_t target = waiter.target(now, RBREW_TIMER_CLOCK);
-    if (target > now) {
+    // Gambit's frame pacer (02796C4C) waits for the next vblank only after a
+    // frame took longer than one vblank: a 20 ms plaza frame then became a
+    // 33 ms one (30 FPS). When the last flip is already a vblank or more ago
+    // and every swap has flipped, the frame is late anyway: return at once,
+    // as adaptive vsync does (the flip itself stays paced by pace_flip).
+    // The plaza steps its game logic in fixed 2-vblank steps (its pacer's 30
+    // FPS mode), so skipping this wait runs it faster than the console; on by
+    // default with RBREW_GAME_30FPS (user's choice). RBREW_VSYNC_WAIT_LATE=1
+    // waits as the console does.
+    static const bool wait_late = [] { const char* v = std::getenv("RBREW_VSYNC_WAIT_LATE"); return v && v[0] == '1'; }();
+    const uint64_t vblank_ticks = uint64_t(RBREW_TIMER_CLOCK) * 1001 / 60000;
+    const uint64_t last_flip = s_last_flip.load(std::memory_order_relaxed);
+    const bool late = !wait_late && last_flip && now > last_flip && now - last_flip >= vblank_ticks &&
+                      s_flip_count.load() == s_swap_count.load();
+    // Gambit's pacer in its 30 FPS mode (the plaza; flag bit 0 at +0x74 of
+    // its frame object) also waits here until two vblanks have passed.
+    // RBREW_GAME_30FPS=0 skips that wait (pace_flip still caps flips at 60).
+    // Default off (the user's choice, 2026-10-25): the plaza runs above 30 FPS
+    // and its fixed-step logic therefore runs faster than on the console
+    // until a time-step fix lands. RBREW_GAME_30FPS=1 keeps the console's 30.
+    static const bool keep_30 = [] { const char* v = std::getenv("RBREW_GAME_30FPS"); return v && v[0] == '1'; }();
+    const bool pacer = cpu && cpu->lr == 0x02796D7Cu;
+    // The pacer's object is in r31 (callee-saved) here: remember where its
+    // 30 FPS-mode flag lives so GX2SwapScanBuffers can switch the game to its
+    // 60 FPS mode (RBREW_GAME_60FPS_MODE).
+    if (pacer && cpu->r[31] && rbrew_memory_accessible(MEM, cpu->r[31] + 0x74, 4))
+        s_pacer_flag_address.store(cpu->r[31] + 0x74, std::memory_order_relaxed);
+    if (!keep_30 && pacer && s_flip_count.load() == s_swap_count.load()) {
+        s_last_vsync_wait_ms.fetch_add(0.0f, std::memory_order_relaxed);
+        return;
+    }
+    if (target > now && !late) {
         rbrew_host_sleep_until(rbrew_boot_time + std::chrono::nanoseconds(
             target / RBREW_TIMER_CLOCK * 1000000000ull + target % RBREW_TIMER_CLOCK * 1000000000ull / RBREW_TIMER_CLOCK + 1u));
     }
@@ -635,6 +668,8 @@ static void GX2SwapScanBuffers(CPUState* cpu) {
     if (s_swap_count.fetch_add(1) == 0)
         RBREW_LOGF(stderr, "[gx2] GX2SwapScanBuffers called for the first time\n");
     rbrew_benchmark::frame.store(s_swap_count.load(), std::memory_order_relaxed);
+    rbrew_benchmark::frame_draws.store(rbrew_benchmark::guest_draws.exchange(0, std::memory_order_relaxed),
+                                       std::memory_order_relaxed);
     rbrew::discord_rpc_poll_game_state(cpu ? cpu->mem : nullptr, s_swap_count.load());
 #if defined(HAVE_SDL2)
     if (s_window) {
@@ -680,6 +715,12 @@ static void GX2SwapScanBuffers(CPUState* cpu) {
                     SplatoonDiagnostics::ManualCapture();
                     update_window_title();
                     controller_log("F9 pressed: Diagnostic snapshot captured\n");
+                } else if (ev.key.keysym.scancode == SDL_SCANCODE_F7) {
+                    // Recording sessions (RBREW_PROFILE_TRIGGER): start the CPU
+                    // profile now, wherever the player is.
+                    if (const char* trigger = std::getenv("RBREW_PROFILE_TRIGGER"); trigger && *trigger)
+                        if (FILE* f = std::fopen(trigger, "ab")) std::fclose(f);
+                    controller_log("F7 pressed: CPU profile requested\n");
                 }
                 break;
 
@@ -758,6 +799,26 @@ static void GX2SwapScanBuffers(CPUState* cpu) {
     }
 #endif
     (void)cpu;
+    // RBREW_GAME_60FPS_MODE=1 (experimental): Gambit runs the plaza in a 30
+    // FPS mode (bit 0 of its pacer object's +0x74) that steps the game twice
+    // per frame and holds two vblanks per frame. Clearing the bit each swap
+    // keeps the game in its 60 FPS mode: one step per frame, paced at 60.
+    // The plaza then shows no NPCs (2026-10-25: none after 80 s): in its 30
+    // FPS mode Gambit's loop (02818E7C) draws every other iteration and the
+    // undrawn ones do the remaining work; drawing every iteration instead
+    // left the plaza black.
+    static const bool force_60 = [] { const char* v = std::getenv("RBREW_GAME_60FPS_MODE"); return v && v[0] == '1'; }();
+    if (force_60 && cpu) {
+        const uint32_t flag = s_pacer_flag_address.load(std::memory_order_relaxed);
+        if (flag && rbrew_memory_accessible(MEM, flag, 4)) {
+            const uint32_t value = rbrew_read32(MEM, flag);
+            if (value & 1u) {
+                static unsigned logged = 0;
+                if (logged++ < 4) std::fprintf(stderr, "[gx2] game 30 FPS mode flag %08X = %08X cleared (frame %u)\n", flag, value, s_swap_count.load());
+                rbrew_write32(MEM, flag, value & ~1u);
+            }
+        }
+    }
     pace_flip();
     s_flip_count.store(s_swap_count.load());
     const uint64_t flip_tick = rbrew_system_ticks();
@@ -787,17 +848,22 @@ static void GX2SwapScanBuffers(CPUState* cpu) {
         FILE* file = path && *path ? std::fopen(path, "w") : nullptr;
         if (file) {
             std::setvbuf(file, nullptr, _IOFBF, 65536);
-            std::fprintf(file, "Frame,Scene,FrameTime_ms,GuestWork_ms,VSyncWait_ms,PresentWait_ms,Capture,Profile\n");
+            std::fprintf(file, "Frame,Scene,FrameTime_ms,GuestWork_ms,VSyncWait_ms,PresentWait_ms,Capture,Profile,Draws,Submits\n");
         }
         return file;
     }();
     const uint32_t benchmark_frame = s_swap_count.load();
     if (benchmark_csv) {
-        std::fprintf(benchmark_csv, "%u,%d,%.6f,%.6f,%.6f,%.6f,%u,%u\n", benchmark_frame,
+        // Vulkan queue submissions since the previous frame (read racily: statistics).
+        static uint64_t s_last_submissions = 0;
+        const uint64_t submissions = gx2_render_vk_submissions();
+        const uint64_t frame_submissions = submissions - std::exchange(s_last_submissions, submissions);
+        std::fprintf(benchmark_csv, "%u,%d,%.6f,%.6f,%.6f,%.6f,%u,%u,%u,%llu\n", benchmark_frame,
             rbrew_control_defaults::active_scene_type(MEM), frame_delta_ms, guest_work_ms,
             vsync_wait_ms, present_wait_ms,
             rbrew_benchmark::captured_frame.load(std::memory_order_relaxed) == benchmark_frame,
-            unsigned(rbrew_benchmark::profiling.load(std::memory_order_relaxed)));
+            unsigned(rbrew_benchmark::profiling.load(std::memory_order_relaxed)),
+            rbrew_benchmark::frame_draws.load(std::memory_order_relaxed), (unsigned long long)frame_submissions);
         if (benchmark_frame % 60 == 0) std::fflush(benchmark_csv);
     }
     static const bool frame_profile = std::getenv("RBREW_FRAME_PROFILE") != nullptr;
@@ -877,6 +943,35 @@ static void GX2TempGetGPUVersion(CPUState* cpu) { RET = 2; }
 // ---------------------------------------------------------------------------
 #include "gx2_addrs.h"
 
+#if defined(HAVE_SDL2)
+// GX2SetContextState runs on the render thread (it saves the renderer's
+// registers into the outgoing context and replays the incoming one). The game
+// thread used to wait for the whole render queue at every switch (31% of the
+// plaza's game thread once the occlusion waits were gone). It is now posted
+// in order with the other commands. Its shadow snapshot list is built in the
+// render thread's private builder slot (gx2_display_list.cpp): built in the
+// game core's slot it captured the game's concurrently posted commands and
+// hung the game. The only CPU reader of the shadow it writes,
+// GX2GetContextStateDisplayList, waits for the queue first.
+// RBREW_CONTEXT_STATE_SYNC=1 restores the synchronous switch.
+static bool context_state_sync() {
+    static const bool sync = [] { const char* v = std::getenv("RBREW_CONTEXT_STATE_SYNC"); return v && v[0] == '1'; }();
+    return sync;
+}
+static void GX2SetContextStateCall(CPUState* cpu) {
+    if (!context_state_sync() && !gx2_dl_list_open() && gx2_native_async_active()) {
+        gx2_dl_record(GX2SetContextState, cpu);
+        return;
+    }
+    GX2_NATIVE_CALL(GX2SetContextState)(cpu);
+}
+static void GX2GetContextStateDisplayListCall(CPUState* cpu) {
+    if (!context_state_sync() && gx2_native_async_active()) gx2_native_run(true, [] {});
+    GX2_NATIVE_CALL(GX2GetContextStateDisplayList)(cpu);
+}
+#endif
+
+
 void gx2_context_register(CPUState* cpu) {
 #if defined(HAVE_SDL2)
 #define REG(name) rbrew_register_func(cpu, ADDR_##name, GX2_NATIVE_CALL(name))
@@ -884,8 +979,13 @@ void gx2_context_register(CPUState* cpu) {
 #define REG(name) rbrew_register_func(cpu, ADDR_##name, gx2_command_call<name, gx2_is_command(#name)>)
 #endif
     REG(GX2Init);
+#if defined(HAVE_SDL2)
+    rbrew_register_func(cpu, ADDR_GX2SetContextState, GX2SetContextStateCall);
+    rbrew_register_func(cpu, ADDR_GX2GetContextStateDisplayList, GX2GetContextStateDisplayListCall);
+#else
     REG(GX2SetContextState);
     REG(GX2GetContextStateDisplayList);
+#endif
     REG(GX2DrawDone);
     REG(GX2Flush);
     REG(GX2WaitForVsync);

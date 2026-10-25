@@ -107,7 +107,8 @@ inline FileResult apply_save_file(const std::filesystem::path& path) noexcept {
 // through *(0x101C0F28) + 0x18. The game's enum names identify kind 6 as
 // Tutorial, kind 5 as TutForShow and kind 3 as Plaza (101C1F48).
 // Return unknown while scene initialization/teardown is in progress.
-inline int active_scene_type(uint8_t* mem) {
+inline int active_scene_type(uint8_t* mem, int* id = nullptr) {
+    if (id) *id = -1;
     if (!mem) return -1;
     const uint32_t scene_manager = rbrew_read32(mem, 0x101C9578u);
     const uint32_t scene_types = rbrew_read32(mem, 0x101C0F28u);
@@ -119,7 +120,9 @@ inline int active_scene_type(uint8_t* mem) {
     const uint32_t scene_id = rbrew_read32(mem, scene_manager + 0x15C);
     if (scene_id >= 0x40) return -1;
     const uint32_t type = rbrew_read32(mem, scene_types + 0x18 + scene_id * 4);
-    return type > 0 && type < 18 ? int(type) : -1;
+    if (!(type > 0 && type < 18)) return -1;
+    if (id) *id = int(scene_id);   // tells scenes of one kind apart (plaza, Octo Valley)
+    return int(type);
 }
 
 inline void apply_live(uint8_t* mem) {

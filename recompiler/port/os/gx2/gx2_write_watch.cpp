@@ -121,8 +121,18 @@ bool collect_pages(const uint8_t* mem,uint64_t first,uint64_t last) {
 // later queries in this epoch answer from it with unchanged results; the next
 // batch asks the OS again. A window outside the watched allocation falls back
 // to the exact range.
-constexpr uint64_t kWindowPages = 16;
+// RBREW_WRITE_WATCH_WINDOW=<pages, power of two> (testing; 256 and 2048 were
+// no faster than 16 in the 2026-10-25 plaza replay).
+uint64_t window_pages() {
+    static const uint64_t pages = [] {
+        const char* v = std::getenv("RBREW_WRITE_WATCH_WINDOW");
+        const uint64_t n = v ? std::strtoull(v, nullptr, 10) : 16;
+        return n && !(n & (n - 1)) ? n : 16;
+    }();
+    return pages;
+}
 bool collect_batch_pages(const uint8_t* mem,uint64_t first,uint64_t last) {
+    const uint64_t kWindowPages = window_pages();
     if(t_epoch_reuse && mem==t_observed_mem) {
         const uint64_t window_first=first&~(kWindowPages-1);
         const uint64_t window_last=std::min<uint64_t>(last|(kWindowPages-1),s_page_epoch.size()-1);

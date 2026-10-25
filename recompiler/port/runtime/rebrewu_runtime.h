@@ -427,6 +427,58 @@ static inline double rbrew_fround(double v) {
     return (double)(float)v;
 }
 
+extern RBREW_HOST_API const bool rbrew_paired_inline_enabled;
+// Generated instruction words are constant: decode once at compile time.
+template<uint32_t w> static inline void rbrew_ps_constant(CPUState* cpu) {
+    if (!rbrew_paired_inline_enabled) return rbrew_ps(cpu, w);
+    constexpr uint32_t op = w >> 26, d = (w >> 21) & 31, a = (w >> 16) & 31;
+    if constexpr (op == 56 || op == 57 || op == 60 || op == 61) {
+        constexpr bool load = op < 60, update = op == 57 || op == 61, single = (w >> 15) & 1;
+        const uint32_t gqr = cpu->gqr[(w >> 12) & 7];
+        if (((gqr >> (load ? 16 : 0)) & 7) != 0) return rbrew_ps(cpu, w);
+        constexpr int32_t disp = int32_t((w & 4095u) << 20) >> 20;
+        const uint32_t ea = (update || a ? cpu->r[a] : 0u) + uint32_t(disp);
+        if constexpr (load) {
+            const double p0 = rbrew_read_f32(cpu->mem, ea);
+            const double p1 = single ? 1.0 : rbrew_read_f32(cpu->mem, ea + 4);
+            cpu->f[d] = p0; cpu->ps1[d] = p1;
+        } else {
+            auto store = [&](uint32_t address, double value) {
+                uint64_t bits; memcpy(&bits, &value, 8);
+                // Console stores flush values below the single exponent range.
+                if (((bits >> 52) & 2047) <= 896)
+                    rbrew_write32(cpu->mem, address, uint32_t(bits >> 32) & 0x80000000u);
+                else rbrew_write_f32(cpu->mem, address, value);
+            };
+            store(ea, cpu->f[d]);
+            if constexpr (!single) store(ea + 4, cpu->ps1[d]);
+        }
+        if constexpr (update) cpu->r[a] = ea;
+        return;
+    } else if constexpr (op == 4) {
+        constexpr uint32_t b = (w >> 11) & 31, c = (w >> 6) & 31, xo = (w >> 1) & 31;
+        const double a0 = cpu->f[a], a1 = cpu->ps1[a], b0 = cpu->f[b], b1 = cpu->ps1[b];
+        const double c0 = cpu->f[c], c1 = cpu->ps1[c];
+        double p0, p1;
+        if constexpr (xo == 10) { p0 = a0 + b1; p1 = c1; }
+        else if constexpr (xo == 11) { p0 = c0; p1 = a0 + b1; }
+        else if constexpr (xo == 12) { p0 = a0 * c0; p1 = a1 * c0; }
+        else if constexpr (xo == 13) { p0 = a0 * c1; p1 = a1 * c1; }
+        else if constexpr (xo == 14) { p0 = fma(a0, c0, b0); p1 = fma(a1, c0, b1); }
+        else if constexpr (xo == 15) { p0 = fma(a0, c1, b0); p1 = fma(a1, c1, b1); }
+        else if constexpr (xo == 20) { p0 = a0 - b0; p1 = a1 - b1; }
+        else if constexpr (xo == 21) { p0 = a0 + b0; p1 = a1 + b1; }
+        else if constexpr (xo == 25) { p0 = a0 * c0; p1 = a1 * c1; }
+        else if constexpr (xo == 28) { p0 = fma(a0, c0, -b0); p1 = fma(a1, c1, -b1); }
+        else if constexpr (xo == 29) { p0 = fma(a0, c0, b0); p1 = fma(a1, c1, b1); }
+        else return rbrew_ps(cpu, w);
+        cpu->f[d] = double(float(p0)); cpu->ps1[d] = double(float(p1));
+        if constexpr (w & 1) cpu->cr[1] = (cpu->fpscr >> 28) & 15;
+        return;
+    }
+    rbrew_ps(cpu, w);
+}
+
 // ---------------------------------------------------------------------------
 // Dispatch — called for indirect jumps/calls (bctr/bctrl)
 // Looks up the host implementation for the guest address in ctr.

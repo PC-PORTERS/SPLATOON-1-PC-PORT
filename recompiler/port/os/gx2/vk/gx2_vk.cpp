@@ -2018,21 +2018,30 @@ static bool draw_overlay_panel(VkCommandBuffer cb, VkImage target, uint32_t inde
         desc.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
         if (!create_image(o.image, desc)) return false;
     }
-    const Span span = upload(VkDeviceSize(width) * height * 4, 16);
-    if (!span.data) return true;
-    panel.draw(s_fps_stats, span.data);
-    // Panel texture: previous frame's sampling -> this upload -> sampling.
-    image_barrier(cb, o.image.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL,
-                  VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-                  VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
-    VkBufferImageCopy region{};
-    region.bufferOffset = span.offset;
-    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-    region.imageExtent = {width, height, 1};
-    vkCmdCopyBufferToImage(cb, span.buffer, o.image.image, VK_IMAGE_LAYOUT_GENERAL, 1, &region);
-    image_barrier(cb, o.image.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL,
-                  VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                  VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+    // The panel is redrawn every 4th present (its numbers change per window
+    // anyway; the graph advances in steps of 4 frames): building it every
+    // frame was ~2% of the plaza's render thread.
+    static uint32_t s_panel_frames = 0;
+    static VkImage s_panel_image = VK_NULL_HANDLE;
+    const bool redraw = s_panel_image != o.image.image || s_panel_frames++ % 4 == 0;
+    if (redraw) {
+        const Span span = upload(VkDeviceSize(width) * height * 4, 16);
+        if (!span.data) return true;
+        panel.draw(s_fps_stats, span.data);
+        s_panel_image = o.image.image;
+        // Panel texture: previous frame's sampling -> this upload -> sampling.
+        image_barrier(cb, o.image.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL,
+                      VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+                      VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
+        VkBufferImageCopy region{};
+        region.bufferOffset = span.offset;
+        region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        region.imageExtent = {width, height, 1};
+        vkCmdCopyBufferToImage(cb, span.buffer, o.image.image, VK_IMAGE_LAYOUT_GENERAL, 1, &region);
+        image_barrier(cb, o.image.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL,
+                      VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                      VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+    }
     image_barrier(cb, target, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                   VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
                   VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);

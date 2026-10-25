@@ -665,7 +665,7 @@ void CppEmitter::emit_instr(const ir::IRInstr& instr, std::ostream& out, int ind
     case Opcode::PairedSingle: {
         char word[16];
         std::snprintf(word, sizeof word, "0x%08Xu", uint32_t(std::get<ImmOp>(instr.operands.at(0)).value));
-        EMIT("rbrew_ps(cpu, " << word << ");"); return;
+        EMIT("rbrew_ps_constant<" << word << ">(cpu);"); return;
     }
     case Opcode::Trap: {
         char text[48];

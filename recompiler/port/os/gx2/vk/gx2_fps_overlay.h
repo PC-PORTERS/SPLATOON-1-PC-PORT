@@ -240,20 +240,25 @@ public:
     // Writes width*height premultiplied RGBA8 texels.
     void draw(const Stats& stats, uint8_t* out) {
         const unsigned w = width_, h = height_;
-        rgba_.assign(size_t(w) * h * 4, 0.0f);
-        // Rounded rectangle with a soft (anti-aliased) edge and a faint rim.
-        const float r = float(radius_);
-        for (unsigned y = 0; y < h; ++y) for (unsigned x = 0; x < w; ++x) {
-            const float cx = std::max(0.0f, std::max(r - (x + 0.5f), (x + 0.5f) - (w - r)));
-            const float cy = std::max(0.0f, std::max(r - (y + 0.5f), (y + 0.5f) - (h - r)));
-            const float dist = std::sqrt(cx * cx + cy * cy) - r;       // < 0 inside
-            const float inside = std::clamp(0.5f - dist, 0.0f, 1.0f);
-            if (inside <= 0) continue;
-            float* d = &rgba_[(size_t(y) * w + x) * 4];
-            Font::over(d, 0.05f, 0.58f * inside);                         // dark glass
-            const float rim = std::clamp(1.0f - std::fabs(dist + 0.5f), 0.0f, 1.0f);
-            if (rim > 0) Font::over(d, 1.0f, 0.10f * rim * inside);      // hairline edge
+        // The background is the same every frame: built once per size (it was
+        // ~3.6% of the render thread when redrawn every frame).
+        if (background_.size() != size_t(w) * h * 4) {
+            background_.assign(size_t(w) * h * 4, 0.0f);
+            // Rounded rectangle with a soft (anti-aliased) edge and a faint rim.
+            const float r = float(radius_);
+            for (unsigned y = 0; y < h; ++y) for (unsigned x = 0; x < w; ++x) {
+                const float cx = std::max(0.0f, std::max(r - (x + 0.5f), (x + 0.5f) - (w - r)));
+                const float cy = std::max(0.0f, std::max(r - (y + 0.5f), (y + 0.5f) - (h - r)));
+                const float dist = std::sqrt(cx * cx + cy * cy) - r;       // < 0 inside
+                const float inside = std::clamp(0.5f - dist, 0.0f, 1.0f);
+                if (inside <= 0) continue;
+                float* d = &background_[(size_t(y) * w + x) * 4];
+                Font::over(d, 0.05f, 0.58f * inside);                         // dark glass
+                const float rim = std::clamp(1.0f - std::fabs(dist + 0.5f), 0.0f, 1.0f);
+                if (rim > 0) Font::over(d, 1.0f, 0.10f * rim * inside);      // hairline edge
+            }
         }
+        rgba_ = background_;
         // Frame-time graph: one column per frame, newest on the right, 33.3 ms full height.
         const int gx0 = pad_, gx1 = int(w) - pad_, gy1 = int(h) - pad_, gy0 = gy1 - graph_height_;
         for (int y = gy0; y < gy1; ++y) for (int x = gx0; x < gx1; ++x) Font::over(&rgba_[(size_t(y) * w + x) * 4], 1.0f, 0.04f);
@@ -281,7 +286,7 @@ public:
     }
 private:
     Font big_, small_;
-    std::vector<float> rgba_;
+    std::vector<float> rgba_, background_;
     int pad_ = 0, gap_ = 0, radius_ = 0, graph_height_ = 0;
     unsigned width_ = 0, height_ = 0;
 };

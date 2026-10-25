@@ -176,7 +176,23 @@ bool texture_content_hash(uint8_t* mem, const uint8_t* data, uint64_t& hash) {
     hash = hasher.finish();
     return true;
 }
+// Textures marked by GX2Invalidate are checked for CPU writes at their next
+// bind. The OS write-watch query behind that check runs once per render batch
+// and was 6% of the plaza's render thread. RBREW_TEXTURE_CHECK_PER_FRAME=1
+// (experimental) answers repeated checks of the same range within one
+// presented frame from the first answer: a CPU write between two batches of a
+// frame then reaches the texture one frame later.
 uint64_t texture_write_generation(uint8_t* mem, const uint8_t* data) {
+    static const bool per_frame = [] { const char* v = std::getenv("RBREW_TEXTURE_CHECK_PER_FRAME"); return v && v[0] == '1'; }();
+    struct Checked { uint64_t frame, generation; };
+    static std::unordered_map<uint64_t, Checked> s_checked;
+    const uint64_t key = uint64_t(descriptor_word(data, GX2SURF_IMAGE)) << 32 ^ descriptor_word(data, GX2SURF_IMAGE_SIZE) ^
+                         uint64_t(descriptor_word(data, GX2SURF_MIPMAP_SIZE + 4)) << 7;
+    const uint64_t frame = gx2vk::present_count();
+    if (per_frame) {
+        const auto it = s_checked.find(key);
+        if (it != s_checked.end() && it->second.frame == frame) return it->second.generation;
+    }
     uint64_t newest = 0;
     for (unsigned offset : {GX2SURF_IMAGE_SIZE, GX2SURF_MIPMAP_SIZE}) {
         const uint32_t bytes = descriptor_word(data, offset), address = descriptor_word(data, offset + 4);
@@ -186,6 +202,7 @@ uint64_t texture_write_generation(uint8_t* mem, const uint8_t* data) {
         if (written == kGx2WriteUntracked) return written;
         newest = std::max(newest, written);
     }
+    if (per_frame) s_checked[key] = {frame, newest};
     return newest;
 }
 

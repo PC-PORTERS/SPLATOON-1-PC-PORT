@@ -57,14 +57,18 @@ public:
         return job;
     }
     template<class T> T get(const Job<T>& job) {
-        // Promote an existing warm-up job rather than compiling it twice.
+        promote(job);
+        return job.result.get();
+    }
+    // Promote an existing warm-up job rather than compiling it twice.
+    template<class T> void promote(const Job<T>& job) {
         {
             std::lock_guard lock(mutex_);
             auto it = std::find(queue_.begin(), queue_.end(), job.work);
-            if (it != queue_.end()) { auto work = *it; queue_.erase(it); queue_.push_front(std::move(work)); }
+            if (it == queue_.end() || it == queue_.begin()) return;
+            auto work = *it; queue_.erase(it); queue_.push_front(std::move(work));
         }
         ready_.notify_one();
-        return job.result.get();
     }
     void drain() {
         { std::lock_guard lock(mutex_); stopping_ = true; }

@@ -18,6 +18,11 @@
 #include <string>
 #include <type_traits>
 
+extern const bool rbrew_paired_inline_enabled = [] {
+    const char* v = std::getenv("RBREW_PAIRED_INLINE");
+    return !(v && v[0] == '0');
+}();
+
 namespace {
 uint32_t bits(uint32_t w, unsigned first, unsigned last) { // IBM bit numbering
     return (w >> (31u - last)) & ((1u << (last - first + 1u)) - 1u);

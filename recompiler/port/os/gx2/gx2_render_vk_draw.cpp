@@ -594,6 +594,25 @@ template<class T> T await_compile(const gx2vk::CompileQueue::Job<T>& job) {
 template<class T> T await_compile(gx2vk::ResolvedCompileJob<T>& job) {
     return job.get([](const auto& pending){return await_compile(pending);});
 }
+// Asynchronous shaders: a draw whose program or pipeline is still compiling
+// is skipped (the object is missing for a frame or two) instead of stopping
+// the render thread, and with it the game thread waiting on its queries, for
+// the whole compile (0.5-1.2 s hitches on new effects). Only draws into a
+// render target already drawn in an earlier frame qualify, so one-time renders
+// (environment cubemaps, captures) still wait; so do stream-out draws and
+// draws inside an occlusion query, whose results the game reads.
+// RBREW_ASYNC_SHADERS=0 restores waiting for every compile.
+bool async_shaders_enabled() {
+    static const bool enabled = [] { const char* v = std::getenv("RBREW_ASYNC_SHADERS"); return !(v && v[0] == '0'); }();
+    return enabled;
+}
+bool s_async_draw = false;      // the current draw may skip work that is still compiling
+uint64_t s_async_skips = 0;
+template<class T> bool still_compiling(gx2vk::ResolvedCompileJob<T>& job) {
+    if (!s_async_draw || job.ready()) return false;
+    if (s_compile_queue) s_compile_queue->promote(job.pending);
+    return true;
+}
 struct VertexFetchPlan {
     struct Attribute { uint32_t location, buffer, offset, divisor, guest_format; VkFormat format; bool per_instance; };
     std::vector<Attribute> attributes;
@@ -1811,7 +1830,7 @@ Program* resolve_active_program_impl(uint8_t* mem) {
         // Programs linked by the boot warm-up or earlier draws seed the
         // canonical map as soon as their inputs are seen.
         if (fresh_key && canon && it->second) s_canonical.try_emplace(canon, CanonicalEntry{it->second});
-        if (it->second && !await_compile(it->second->compiled)) return nullptr;
+        if (it->second && !still_compiling(it->second->compiled) && !await_compile(it->second->compiled)) return nullptr;
         if (shader_key_verify() && it->second && (exact || dynamic_key_registers_excluded())) {
             // A hit the original full key would have missed: translate as
             // the miss path would, and require the program it would reuse.
@@ -1857,7 +1876,7 @@ Program* resolve_active_program_impl(uint8_t* mem) {
         Program* prog = known->second.program;
         s_prog_cache[key] = prog;
         ++s_canonical_reuses;
-        if (!await_compile(prog->compiled)) return nullptr;
+        if (!still_compiling(prog->compiled) && !await_compile(prog->compiled)) return nullptr;
         if (known->second.reads_valid && s_exact_reads.try_emplace(exact_base, known->second.reads).second)
             warm_record_masks(exact_base, known->second.reads);
         static const bool solid_ps = std::getenv("RBREW_DEBUG_SOLID_PS") != nullptr;
@@ -2057,7 +2076,7 @@ Program* link_program(const char* vs_glsl, const char* ps_glsl, const std::array
                 return p.valid;
             }, background);
         }
-        prog = background || await_compile(linked->compiled) ? linked.get() : nullptr;
+        prog = background || still_compiling(linked->compiled) || await_compile(linked->compiled) ? linked.get() : nullptr;
         if (count) ++(reused ? C.programs_reused : C.programs_linked);
     }
     return prog;
@@ -2188,6 +2207,7 @@ VkPipeline get_pipeline(const PipelineRequest& r) {
         }
         s_last_pipeline_lookup.remember(key.view(),entry);
     }
+    if (still_compiling(*entry)) return VK_NULL_HANDLE;
     return await_compile(*entry);
 }
 
@@ -3826,9 +3846,47 @@ bool issue_draw_program(Program* prog, uint8_t* mem, uint32_t prim, uint32_t cou
     return any;
 }
 
+// A render target counts as recurring once it was drawn before the last present.
+bool recurring_target(const Framebuffer& fb) {
+    const void* target = fb.colors[0] ? static_cast<const void*>(fb.colors[0]) : static_cast<const void*>(fb.depth);
+    if (!target) return false;
+    static std::unordered_map<const void*, uint64_t> s_first_frame;
+    const uint64_t frame = gx2vk::present_count();   // render-thread frames
+    const auto [it, added] = s_first_frame.try_emplace(target, frame);
+    return !added && it->second < frame;
+}
+
 bool issue_draw(uint8_t* mem, uint32_t prim, uint32_t count, uint32_t first_vertex, const IndexStream& indices, bool xfb,
                 void (*hook)(bool, VkCommandBuffer)) {
-    return issue_draw_program(resolve_active_program(mem), mem, prim, count, first_vertex, indices, xfb, hook);
+    s_async_draw = async_shaders_enabled() && !xfb && !hook && !s_query_segment && !(S.regs[0xA2AC] & 1) &&
+                   recurring_target(S.framebuffer);
+    Program* prog = resolve_active_program(mem);
+    bool drawn = false;
+    if (prog && s_async_draw && !prog->compiled.ready()) {
+        if (s_compile_queue) s_compile_queue->promote(prog->compiled.pending);
+        ++s_async_skips;
+    } else {
+        const uint64_t before = C.draws;
+        drawn = issue_draw_program(prog, mem, prim, count, first_vertex, indices, xfb, hook);
+        if (s_async_draw && prog && C.draws == before && !drawn) ++s_async_skips;
+    }
+    s_async_draw = false;
+    // Long scene lists (the plaza: ~4800 draws in one display list) were
+    // submitted only at their end, so the GPU started when the render thread
+    // was done and GX2DrawDone then waited for all of it (22% of the render
+    // thread). Submitting every N draws lets the GPU work alongside.
+    // RBREW_SUBMIT_EVERY_DRAWS=<n> sets N (0 disables; default 300).
+    static const unsigned submit_every = [] {
+        const char* v = std::getenv("RBREW_SUBMIT_EVERY_DRAWS");
+        return v ? unsigned(std::strtoul(v, nullptr, 10)) : 300u;
+    }();
+    static unsigned since_submit = 0;
+    if (drawn && submit_every && ++since_submit >= submit_every && !s_query_segment && s_open_queries.empty() &&
+        !(S.regs[0xA2AC] & 1)) {
+        since_submit = 0;
+        gx2vk::submit(false);
+    }
+    return drawn;
 }
 
 void (*s_xfb_hook)(bool, VkCommandBuffer) = nullptr;
@@ -4155,8 +4213,21 @@ void gx2_render_query_end(uint32_t type, uint32_t address, uint8_t* mem) {
     close_query_segment(); s_open_queries.erase(q); q->open = false; q->ended = true;
     open_query_segment();
     uint64_t serial = 0;
-    if (s_open_queries.empty()) {
+    // Submitting at every query end was ~61 submissions per frame in a story
+    // level (each one ends the rendering instance). Ends are batched: the
+    // N-th pending one submits, as do GX2Flush, swaps and a read that needs
+    // the result (query_samples). RBREW_QUERY_SUBMIT_BATCH=1 submits each.
+    static const unsigned batch = [] {
+        const char* v = std::getenv("RBREW_QUERY_SUBMIT_BATCH");
+        const unsigned n = v ? unsigned(std::strtoul(v, nullptr, 10)) : 16u;
+        return n ? n : 1u;
+    }();
+    static unsigned pending = 0;
+    static uint64_t pending_serial = 0;
+    if (pending_serial != gx2vk::recording_serial()) { pending = 0; pending_serial = gx2vk::recording_serial(); }
+    if (s_open_queries.empty() && ++pending >= batch) {
         serial = gx2vk::submit(false);
+        pending = 0;
     } else {
         serial = gx2vk::recording_serial();
     }
@@ -4186,14 +4257,29 @@ void gx2_render_query_poll() {
     for (auto& [key, q] : s_native_queries) if (q.ended && !q.published) { uint64_t count = 0; query_samples(q, false, count); }
     recycle_deferred_queries();
 }
+void gx2_render_query_poll_completed() {
+    if (!gx2vk::ready()) return;
+    const uint64_t completed = gx2vk::completed_serial(), recording = gx2vk::recording_serial();
+    for (auto& [key, q] : s_native_queries) {
+        if (!q.ended || q.published) continue;
+        bool done = true;
+        for (const auto& segment : q.segments)
+            if (!segment->ready && (segment->serial >= recording || segment->serial > completed)) { done = false; break; }
+        if (done) { uint64_t count = 0; query_samples(q, false, count); }
+    }
+}
 void gx2_render_conditional_begin(uint32_t type, uint32_t address, bool no_wait, bool pixels_pass, uint8_t* mem) {
     auto* q = find_query(mem, address); uint64_t samples = 0;
     if ((type != 0 && type != 2) || !q || q->type != type) {
         RBREW_LOGF(stderr, "[gx2] Conditional render has no matching occlusion query %08X\n", address); S.conditional_draw = true; return;
     }
     // NO_WAIT renders when the GPU cannot decide yet; a wait predicate waits
-    // only for the contributing segments.
-    const bool ready = query_samples(*q, !no_wait, samples);
+    // only for the contributing segments. Waiting stalled the render thread on
+    // the GPU for every conditional draw (the plaza, 30 FPS); an undecided
+    // predicate now renders as with NO_WAIT (occlusion culling only skips
+    // hidden objects, so drawing them is safe). RBREW_CONDITIONAL_WAIT=1 waits.
+    static const bool wait_predicate = [] { const char* v = std::getenv("RBREW_CONDITIONAL_WAIT"); return v && v[0] == '1'; }();
+    const bool ready = query_samples(*q, wait_predicate && !no_wait, samples);
     S.conditional_draw = !ready || ((samples != 0) == pixels_pass);
     TXDIAG(if(txdiag::sample("conditional",address,uint64_t(S.conditional_draw)))
         txdiag::event("conditional","\"query\":%u,\"ready\":%s,\"samples\":%llu,\"draw\":%s,\"pixels_pass\":%s,\"no_wait\":%s",address,ready?"true":"false",samples,S.conditional_draw?"true":"false",pixels_pass?"true":"false",no_wait?"true":"false"));

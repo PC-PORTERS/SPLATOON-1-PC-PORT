@@ -322,6 +322,13 @@ int main(int argc, char** argv) {
     try {
         if (argc != 2) throw std::runtime_error("expected one regression test name");
         const std::string_view mode(argv[1]);
+        // These checks cover the waiting query path; the default
+        // "assume visible" answer for busy listed reads is a separate choice.
+#if defined(_WIN32)
+        _putenv_s("RBREW_QUERY_ASSUME_VISIBLE", "0");
+#else
+        setenv("RBREW_QUERY_ASSUME_VISIBLE", "0", 1);
+#endif
         if (mode == "timing") timing();
         else if (mode == "queue") queue();
         else if (mode == "detile") detile();

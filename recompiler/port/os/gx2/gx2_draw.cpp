@@ -3,6 +3,7 @@
 // GX2 draw, state, shader, texture, and surface stubs
 
 #include "../os_common.h"
+#include "../../runtime/benchmark_input.h"
 #include "gx2_attrib.h"
 #include "gx2_blend_state.h"
 #include "gx2_pm4_state.h"
@@ -51,23 +52,26 @@ static void descriptor_registers(CPUState* cpu,const uint8_t* descriptor,uint32_
 
 // GX2DrawEx(primitiveType, count, firstVertex, numInstances)
 // r3=primType, r4=count, r5=firstVertex, r6=numInstances
-static void GX2DrawEx(CPUState *cpu) { gx2_render_draw(ARG0, ARG1, ARG2, MEM,ARG3); }
+static void GX2DrawEx(CPUState *cpu) { rbrew_benchmark::guest_draws.fetch_add(1, std::memory_order_relaxed); gx2_render_draw(ARG0, ARG1, ARG2, MEM,ARG3); }
 
 // GX2DrawIndexedEx(primitiveType, count, indexType, indices, firstVertex,
 // numInstances) r3=primType, r4=count, r5=indexType, r6=indices(guest),
 // r7=firstVertex, r8=numInstances
 static void GX2DrawIndexedEx(CPUState *cpu) {
+  rbrew_benchmark::guest_draws.fetch_add(1, std::memory_order_relaxed);
   gx2_render_draw_indexed(ARG0, ARG1, ARG2, ARG3, ARG4, MEM,ARG5);
 }
 
 // GX2DrawEx2 — same layout as GX2DrawEx but with additional params; treat as
 // DrawEx
 void GX2DrawEx2(CPUState *cpu) {
+  rbrew_benchmark::guest_draws.fetch_add(1, std::memory_order_relaxed);
   gx2_render_draw(ARG0, ARG1, ARG2, MEM,ARG3,ARG4);
 }
 
 // GX2DrawIndexedEx2 — same as DrawIndexedEx with extra params
 static void GX2DrawIndexedEx2(CPUState *cpu) {
+  rbrew_benchmark::guest_draws.fetch_add(1, std::memory_order_relaxed);
   gx2_render_draw_indexed(ARG0, ARG1, ARG2, ARG3, ARG4, MEM,ARG5,ARG6);
 }
 
@@ -113,7 +117,8 @@ static void GX2SetPrimitiveRestartIndex(CPUState *cpu) { const Gx2RegisterWrite 
 // the renderer path computes. Listed queries also qualify when no queued or
 // executing command can precede this read with another begin.
 namespace {
-struct QueryGeneration { uint64_t issued = 0, executed = 0, published = 0; bool listed = false; bool ended = false; uint64_t serial = UINT64_MAX; };
+struct QueryGeneration { uint64_t issued = 0, executed = 0, published = 0; bool listed = false; bool ended = false; uint64_t serial = UINT64_MAX;
+                         uint32_t pending_reads = 0; uint64_t last_visible = 0; };
 std::mutex s_query_generation_mutex;
 std::unordered_map<uint32_t, QueryGeneration> s_query_generations;
 }
@@ -143,9 +148,11 @@ static bool read_published_query(uint32_t address, uint8_t* mem, uint64_t& sampl
   std::lock_guard lock(s_query_generation_mutex);
   const auto it = s_query_generations.find(address);
   if (it == s_query_generations.end()) return false;
-  const auto& g = it->second;
+  auto& g = it->second;
+  if (g.listed && !gx2_query_list_counting() && !gx2_native_queue_idle()) return false;
   if (!g.executed || g.published != g.executed) return false;
   if (g.issued > g.executed) return false;
+  g.pending_reads = 0;
   samples = 0;
   for (unsigned rb = 0; rb < 4; ++rb) {
     const uint64_t start = rbrew_bswap64(rbrew_read64(mem, address + rb * 16));
@@ -153,12 +160,31 @@ static bool read_published_query(uint32_t address, uint8_t* mem, uint64_t& sampl
     if (!(start & (1ull << 63)) || !(end & (1ull << 63))) return false;
     samples += end - start;
   }
+  if (samples) g.last_visible = samples;
 #ifdef RBREW_ADVANCED_TESTS
   ++s_query_fast_reads;
 #endif
   return true;
 }
 static void apply_query_begin(CPUState* cpu) { gx2_render_query_begin(ARG0,ARG1,MEM); }
+Gx2CommandFn gx2_query_begin_command() { return apply_query_begin; }
+// Listed begins are counted as issued when a list holding them is posted
+// (gx2_display_list.cpp). In the plaza Gambit posts the frame's scene list
+// (~11.6 ms to replay) and at once polls a query begun in it; that read
+// drained the whole list and then answered "not ready" anyway (425 of 425).
+// Keep the immediate "not ready" prototype opt-in: without the drain the
+// game's later progress queries can miss the HUD for individual frames.
+// 1: both shortcuts below, 2: only the cleared-counter one, 3: only the
+// queued-begin one (testing).
+static int query_list_mode() {
+  static const int mode = [] { const char* v = std::getenv("RBREW_QUERY_LIST_COUNT"); return v && v[0] >= '1' && v[0] <= '3' ? v[0] - '0' : 0; }();
+  return mode;
+}
+bool gx2_query_list_counting() { return query_list_mode() != 0; }
+void gx2_query_list_issued(uint32_t address) {
+  std::lock_guard lock(s_query_generation_mutex);
+  ++s_query_generations[address].issued;
+}
 static void GX2QueryBegin(CPUState* cpu) {
   const bool recording = gx2_dl_recording(), listed = gx2_dl_list_open();
   {
@@ -203,12 +229,41 @@ static void GX2QueryGetOcclusionResult(CPUState* cpu) {
       rbrew_write64(MEM, ARG1, samples); RET = 1; return;
     }
     bool not_ready = false;
+    // RBREW_QUERY_ASSUME_VISIBLE=1 (experimental): a listed read whose result
+    // is not published while the render queue is busy answers "ready,
+    // visible" (the query's last nonzero count, else 4096 samples) instead of
+    // draining the queue. Occlusion culling then draws a hidden object for a
+    // frame at worst; the game thread no longer waits for the scene list.
+    // Default on (plaza: the game thread no longer waits ~10 ms per frame for
+    // the scene list); RBREW_QUERY_ASSUME_VISIBLE=0 restores the wait.
+    static const bool assume_visible = [] { const char* v = std::getenv("RBREW_QUERY_ASSUME_VISIBLE"); return !(v && v[0] == '0'); }();
+    if (assume_visible) {
+      std::lock_guard lock(s_query_generation_mutex);
+      const auto it = s_query_generations.find(ARG0);
+      if (it != s_query_generations.end() && it->second.listed && !gx2_native_queue_idle()) {
+        const uint64_t visible = it->second.last_visible ? it->second.last_visible : 4096;
+        rbrew_write64(MEM, ARG1, visible); RET = 1; return;
+      }
+    }
     {
       std::lock_guard lock(s_query_generation_mutex);
       const auto it = s_query_generations.find(ARG0);
       if (it != s_query_generations.end()) {
-        const auto& g = it->second;
-        if (g.issued > g.executed || (g.listed && !gx2_native_queue_idle())) {
+        auto& g = it->second;
+        if (g.listed && (query_list_mode() == 1 || query_list_mode() == 3) && g.issued > g.executed && !gx2_native_queue_idle() &&
+            ++g.pending_reads < 240) {
+          // Its begin is still queued: the GPU cannot have the result. A
+          // begin queued this long was miscounted: wait once (below).
+          not_ready = true;
+        } else if (g.listed && (query_list_mode() == 1 || query_list_mode() == 2) && g.ended && g.published == g.executed &&
+                   g.issued == g.executed && !gx2_native_queue_idle() && ++g.pending_reads < 240) {
+          // Every counted begin of it is executed and published, yet the
+          // counters are incomplete: a list recorded since then cleared them
+          // (GX2QueryBegin clears at record time, as on the console) and has
+          // not been called. Draining the queue cannot complete it: the read
+          // waited ~10 ms per plaza frame for that and then said "not ready".
+          not_ready = true;
+        } else if (g.issued > g.executed || (g.listed && !gx2_native_queue_idle())) {
           // The begin (or the list containing it) is still queued for the
           // render thread, so the GPU cannot have produced this result yet.
           // Waiting drains the whole render queue and serializes the game
@@ -224,14 +279,37 @@ static void GX2QueryGetOcclusionResult(CPUState* cpu) {
         } else if (!g.ended || g.serial > gx2_render_completed_serial()) {
           not_ready = true;
         }
+        // RBREW_SYNC_TRACE=<file>: state of each read that drains the queue.
+        static FILE* trace = [] { const char* p = std::getenv("RBREW_SYNC_TRACE"); return p && *p ? std::fopen(p, "w") : nullptr; }();
+        if (trace && !not_ready) {
+          std::fprintf(trace, "%u %08X issued %llu executed %llu published %llu ended %d listed %d serial %llu completed %llu queue %zu\n",
+                       rbrew_benchmark::frame.load(std::memory_order_relaxed), ARG0, (unsigned long long)g.issued,
+                       (unsigned long long)g.executed, (unsigned long long)g.published, int(g.ended), int(g.listed),
+                       (unsigned long long)g.serial, (unsigned long long)gx2_render_completed_serial(), size_t(gx2_native_queue_idle() ? 0 : 1));
+          std::fflush(trace);
+        }
+      } else {
+        static FILE* trace = [] { const char* p = std::getenv("RBREW_SYNC_TRACE"); return p && *p ? std::fopen((std::string(p) + ".unknown").c_str(), "w") : nullptr; }();
+        if (trace) { std::fprintf(trace, "%u %08X lr %08X\n", rbrew_benchmark::frame.load(std::memory_order_relaxed), ARG0, cpu->lr); std::fflush(trace); }
       }
     }
     if (not_ready) {
+      rbrew_write64(MEM, ARG1, 0);
       RET = 0; return;
     }
   }
   uint32_t result = 0;
   gx2_native_run(true, [&] { result = gx2_render_query_result(ARG0,ARG1,MEM) ? 1 : 0; });
+  {
+    // Drained up to this read: every begin issued so far has executed, so a
+    // remaining difference is a counting error.
+    std::lock_guard lock(s_query_generation_mutex);
+    if (const auto it = s_query_generations.find(ARG0); it != s_query_generations.end()) {
+      if (it->second.issued > it->second.executed) it->second.issued = it->second.executed;
+      it->second.pending_reads = 0;
+      if (result && rbrew_read64(MEM, ARG1)) it->second.last_visible = rbrew_read64(MEM, ARG1);
+    }
+  }
   RET = result;
 }
 static void GX2QueryBeginConditionalRender(CPUState* cpu) { gx2_render_conditional_begin(ARG0,ARG1,ARG2!=0,ARG3!=0,MEM); }
@@ -444,8 +522,13 @@ static void GX2Invalidate(CPUState *cpu) {
     Invalidate(uint32_t a, uint32_t s) : addr(a), size(s) {}
     void run() override { gx2_render_invalidate_textures(addr, size); }
   };
-  // Ordered with the posted commands, like the console command buffer.
-  if (!gx2_dl_list_open() && gx2_native_async_active())
+  // Ordered with the posted commands, like the console command buffer. With
+  // a display list open (game worker threads build lists) it used to wait
+  // for the whole render queue (~10% of the game threads in a 2026-10-25
+  // level profile); posted, it still runs before any later call of that
+  // list. RBREW_INVALIDATE_LIST_WAIT=1 restores the wait.
+  static const bool list_wait = [] { const char* v = std::getenv("RBREW_INVALIDATE_LIST_WAIT"); return v && v[0] == '1'; }();
+  if ((!list_wait || !gx2_dl_list_open()) && gx2_native_async_active())
     gx2_native_post(new Invalidate(ARG1, ARG2));
   else {
     const uint32_t addr = ARG1, size = ARG2;

@@ -37,6 +37,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include "../../runtime/benchmark_input.h"
 
 namespace {
 struct Command {
@@ -66,8 +67,13 @@ struct RegistryLock {
         s_registry_waiters.fetch_sub(1, std::memory_order_relaxed);
     }
 };
-std::array<OpenList, 3> s_open;  // one command writer per Espresso core
-std::array<std::mutex, 3> s_open_mutex;
+// One command writer per Espresso core, plus slot 3: the render thread's
+// private builder for context-state snapshots (gx2_dl_create_snapshot), so a
+// snapshot built while the game keeps posting never captures its commands.
+std::array<OpenList, 4> s_open;
+std::array<std::mutex, 4> s_open_mutex;
+thread_local bool t_private_builder = false;
+unsigned builder_slot() { return t_private_builder ? 3u : unsigned(rbrew_current_core() % 3u); }
 // Every GX2EndDisplayList gets a fresh id: the game records meshes one after
 // another into one scratch buffer and copies the bytes out, and each copy
 // must replay what was recorded then. Recordings not used (recorded/called)
@@ -687,8 +693,8 @@ void maybe_sweep() {
 // Mirrors the core's builder state so the per-call recording check needs no lock.
 // Only the core that owns a list (or the render thread while that core waits
 // on it) opens or closes it.
-std::array<std::atomic<bool>, 3> s_open_active{};
-std::atomic<bool>& open_active() { return s_open_active[rbrew_current_core() % s_open_active.size()]; }
+std::array<std::atomic<bool>, 4> s_open_active{};
+std::atomic<bool>& open_active() { return s_open_active[builder_slot()]; }
 
 // Size reported by GX2EndDisplayList: the game only hands it back to
 // GX2CallDisplayList, so it stands for the recorded commands (32 bytes each,
@@ -702,7 +708,15 @@ void replay(CPUState* cpu, const std::vector<Command>& commands, unsigned depth)
     if (depth > 16) return;  // the console has no recursion limit, but lists never nest deeply
     CPUState call = *cpu;
     const bool perf = gx2_perf_enabled();
+    // The plaza's scene list replays for ~11.6 ms in one piece while the game
+    // polls occlusion results of the previous frame: the GPU had them, but
+    // they were published only between render items, so the read drained the
+    // whole list (10 ms of the game thread per frame). Publish finished
+    // results while a long list replays. RBREW_LIST_QUERY_POLL=0 disables it.
+    static const bool poll = [] { const char* v = std::getenv("RBREW_LIST_QUERY_POLL"); return !(v && v[0] == '0'); }();
+    unsigned since_poll = 0;
     for (const Command& c : commands) {
+        if (poll && ++since_poll >= 128) { since_poll = 0; gx2_render_query_poll_completed(); }
         for (unsigned i = 0; i < 8; ++i) { call.r[3 + i] = c.r[i]; call.f[1 + i] = c.f[i]; }
         const uint64_t start = perf ? gx2_perf_now() : 0;
         if (c.descriptor_fn) c.descriptor_fn(&call, c.descriptor.data());
@@ -765,7 +779,7 @@ Gx2CommandFn s_list_call_fns[2] = {};
 
 // Append to this core's open display list, or post to the render thread.
 void push_command(Command&& c, uint8_t* mem, uint32_t lr) {
-    const auto core = rbrew_current_core() % s_open.size();
+    const auto core = builder_slot();
     // A core's private builder has no dependency on published recordings or
     // their archive. Renderer lookups and eviction must not block each append.
     if (s_open_active[core].load(std::memory_order_acquire) || !gx2_native_async_active()) {
@@ -869,6 +883,49 @@ bool gx2_dl_test_recording_alive(uint32_t id) {
 }
 #endif
 
+// Query begins per recording: the addresses its query-begin commands use and
+// the lists it calls. Posting a call to such a list counts those begins as
+// issued, so GX2QueryGetOcclusionResult knows a begin is still queued.
+// Ids are never reused, so entries of freed recordings are just unused.
+struct ListQueries {
+    std::vector<uint32_t> begins;
+    std::vector<std::pair<uint32_t, uint32_t>> calls;   // list, size
+};
+std::mutex s_list_queries_mutex;
+std::unordered_map<uint32_t, std::shared_ptr<const ListQueries>> s_list_queries;
+std::atomic<bool> s_any_list_queries{false};
+static bool is_list_call(Gx2CommandFn fn) { return fn == s_list_call_fns[0] || fn == s_list_call_fns[1]; }
+static std::shared_ptr<const ListQueries> scan_list_queries(const std::vector<Command>& commands) {
+    const Gx2CommandFn begin = gx2_query_begin_command();
+    ListQueries found;
+    for (const Command& c : commands) {
+        if (!c.fn) continue;
+        if (c.fn == begin) found.begins.push_back(c.r[1]);
+        else if (is_list_call(c.fn)) found.calls.emplace_back(c.r[0], c.r[1]);
+    }
+    if (found.begins.empty() && found.calls.empty()) return nullptr;
+    return std::make_shared<const ListQueries>(std::move(found));
+}
+static void count_list_queries(uint8_t* mem, uint32_t list, uint32_t size, unsigned depth) {
+    if (depth > 8 || !list) return;
+    uint32_t id = UINT32_MAX;
+    if (size >= 12 && rbrew_memory_accessible(mem, list, 12) &&
+        rbrew_read32(mem, list) == kTagNop && rbrew_read32(mem, list + 4) == kTagMagic)
+        id = rbrew_read32(mem, list + 8);
+    else {
+        RegistryLock lock;
+        if (auto it = s_lists.find(list); it != s_lists.end()) id = it->second;
+    }
+    std::shared_ptr<const ListQueries> queries;
+    {
+        std::lock_guard lock(s_list_queries_mutex);
+        if (auto it = s_list_queries.find(id); it != s_list_queries.end()) queries = it->second;
+    }
+    if (!queries) return;
+    for (uint32_t address : queries->begins) gx2_query_list_issued(address);
+    for (const auto& [inner, inner_size] : queries->calls) count_list_queries(mem, inner, inner_size, depth + 1);
+}
+
 bool gx2_dl_recording() {
     // Posted commands run on the render thread: never record them again.
     if (t_stream_replay) return false;
@@ -893,6 +950,10 @@ uint64_t gx2_dl_archive_seek_count() {
 }
 
 void gx2_dl_record(Gx2CommandFn fn, const CPUState* cpu) {
+    // A list call posted to the render stream (not into another list).
+    if (is_list_call(fn) && s_any_list_queries.load(std::memory_order_relaxed) && gx2_query_list_counting() &&
+        !gx2_dl_list_open())
+        count_list_queries(cpu->mem, cpu->r[3], cpu->r[4], 0);
     Command c{fn, {}, {}, {}};
     for (unsigned i = 0; i < 8; ++i) { c.r[i] = cpu->r[3 + i]; c.f[i] = cpu->f[1 + i]; }
     push_command(std::move(c), cpu->mem, cpu->lr);
@@ -922,7 +983,7 @@ void gx2_dl_record_snapshot(Gx2DescriptorFn fn,const CPUState* cpu,std::span<con
 
 // GX2BeginDisplayListEx(void* buffer, u32 bytes, BOOL profiling) - gx2.rpl 02003d6c
 static void GX2BeginDisplayListEx(CPUState* cpu) {
-    const auto core = rbrew_current_core() % s_open.size();
+    const auto core = builder_slot();
     std::lock_guard lock(s_open_mutex[core]);
     OpenList& list = s_open[core];
     // The builder's command vector is reused (cleared, capacity kept).
@@ -933,7 +994,7 @@ static void GX2BeginDisplayListEx(CPUState* cpu) {
 
 // u32 GX2EndDisplayList(void* buffer) - gx2.rpl 02003e1c: bytes written.
 static void GX2EndDisplayList(CPUState* cpu) {
-    const auto core = rbrew_current_core() % s_open.size();
+    const auto core = builder_slot();
     std::lock_guard builder_lock(s_open_mutex[core]);
     OpenList& list = s_open[core];
     if (!list.active) { RET = 0; return; }
@@ -942,9 +1003,14 @@ static void GX2EndDisplayList(CPUState* cpu) {
     // compare outside the registry lock: the candidate's commands are held
     // by reference and immutable, and republishing a recording evicted in
     // the meantime is still correct (it is restored from the archive).
-    const uint64_t hash = commands_hash(list.commands);
+    // Large lists are rebuilt every frame (the plaza: 94% of ~13,300 commands
+    // per frame are new) and were never reused; hashing them for reuse cost
+    // ~2% of the game thread. RBREW_DL_HASH_ALL=1 hashes every list again.
+    static const bool hash_all = [] { const char* v = std::getenv("RBREW_DL_HASH_ALL"); return v && v[0] == '1'; }();
+    const bool hashable = hash_all || list.commands.size() <= 512;
+    const uint64_t hash = hashable ? commands_hash(list.commands) : 0;
     Commands candidate; uint32_t candidate_id = 0;
-    {
+    if (hashable) {
         RegistryLock lock;
         const auto& slot = s_content[hash & (kContentSlots - 1)];
         if (slot.used && slot.hash == hash)
@@ -959,6 +1025,7 @@ static void GX2EndDisplayList(CPUState* cpu) {
     // stays resident (up to kMaxRecordings of them). One allocation replaces
     // the growth reallocations; the builder keeps its capacity.
     std::shared_ptr<std::vector<Command>> commands;
+    auto queries = reuse ? nullptr : scan_list_queries(list.commands);
     if (!reuse) {
         commands = std::make_shared<std::vector<Command>>();
         commands->reserve(list.commands.size());
@@ -991,9 +1058,33 @@ static void GX2EndDisplayList(CPUState* cpu) {
         s_recordings.insert(id, std::move(recording));
         s_tracked.push_back(id);
         ++s_resident_recordings;
-        s_content[hash & (kContentSlots - 1)] = {hash, id, true};
+        if (hashable) s_content[hash & (kContentSlots - 1)] = {hash, id, true};
+        if (queries) {
+            std::lock_guard queries_lock(s_list_queries_mutex);
+            s_list_queries[id] = std::move(queries);
+            s_any_list_queries.store(true, std::memory_order_relaxed);
+        }
     }
     s_lists[buffer] = id;
+    // RBREW_DL_STATS=1 (diagnostics): new versus reused recordings and their
+    // commands, every 300 frames.
+    static const bool stats = [] { const char* v = std::getenv("RBREW_DL_STATS"); return v && v[0] == '1'; }();
+    if (stats) {
+        static uint64_t ended = 0, reused_lists = 0, new_commands = 0, reused_commands = 0, largest = 0;
+        static uint32_t last_frame = 0;
+        const Recording* r = s_recordings.find(id);
+        const uint64_t n = r && r->commands ? r->commands->size() : 0;
+        ++ended; largest = std::max(largest, n);
+        if (reused && id == candidate_id) { ++reused_lists; reused_commands += n; } else new_commands += n;
+        const uint32_t frame = rbrew_benchmark::frame.load(std::memory_order_relaxed);
+        if (frame / 300 != last_frame / 300) {
+            std::fprintf(stderr, "[dlstats] frame %u lists %llu reused %llu new_cmds %llu reused_cmds %llu largest %llu\n", frame,
+                         (unsigned long long)ended, (unsigned long long)reused_lists, (unsigned long long)new_commands,
+                         (unsigned long long)reused_commands, (unsigned long long)largest);
+            ended = reused_lists = new_commands = reused_commands = largest = 0;
+        }
+        last_frame = frame;
+    }
     maybe_sweep();
     evict_old_recordings();
     if (tagged) {
@@ -1104,10 +1195,12 @@ uint32_t gx2_dl_create_snapshot(CPUState* cpu, uint32_t buffer, uint32_t capacit
     const uint32_t saved_r3 = cpu->r[3], saved_r4 = cpu->r[4];
     cpu->r[3] = buffer;
     cpu->r[4] = capacity;
+    const bool private_builder = std::exchange(t_private_builder, true);
     GX2BeginDisplayListEx(cpu);
     gx2_dl_record_snapshot(fn, cpu, snapshot);
     cpu->r[3] = buffer;
     GX2EndDisplayList(cpu);
+    t_private_builder = private_builder;
     const uint32_t size = cpu->r[3];
     cpu->r[3] = saved_r3;
     cpu->r[4] = saved_r4;
@@ -1120,7 +1213,7 @@ uint32_t gx2_dl_create_snapshot(CPUState* cpu, uint32_t buffer, uint32_t capacit
 
 // BOOL GX2GetCurrentDisplayList(void** buffer, u32* bytes) - gx2.rpl 02004160
 static void GX2GetCurrentDisplayList(CPUState* cpu) {
-    const auto core = rbrew_current_core() % s_open.size();
+    const auto core = builder_slot();
     bool active; uint32_t buffer, capacity;  // not the recorded commands
     { std::lock_guard lock(s_open_mutex[core]); const OpenList& list = s_open[core]; active = list.active; buffer = list.buffer; capacity = list.capacity; }
     if (!active) { RET = 0; return; }
@@ -1147,8 +1240,8 @@ static void GX2PatchDisplayList(CPUState* cpu) {
     rbrew_write32(MEM, list + offset + 8, program >> 8);
 }
 
-static void GX2CallDisplayList(CPUState* cpu) { call_display_list(cpu, "GX2CallDisplayList"); }
-static void GX2DirectCallDisplayList(CPUState* cpu) { call_display_list(cpu, "GX2DirectCallDisplayList"); }
+static void GX2CallDisplayList(CPUState* cpu) { rbrew_benchmark::guest_draws.fetch_add(1, std::memory_order_relaxed); call_display_list(cpu, "GX2CallDisplayList"); }
+static void GX2DirectCallDisplayList(CPUState* cpu) { rbrew_benchmark::guest_draws.fetch_add(1, std::memory_order_relaxed); call_display_list(cpu, "GX2DirectCallDisplayList"); }
 
 void gx2_display_list_register(CPUState* cpu) {
 #if defined(HAVE_SDL2)

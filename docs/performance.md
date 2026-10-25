@@ -717,3 +717,148 @@ P50 26.1 ms, P95 40.8 ms. Occlusion-query waits fell to 28% of the game thread.
   (biquad drops itself if it turns unstable). `RBREW_AX_FILTERS=0` ignores them.
 - The playtest CPU profile is now taken in the plaza (scene 2) after a minute,
   else in scenes 3/5/6 after three minutes.
+
+### Story level: input replay, asynchronous shaders (2026-10-25)
+
+Measured with an input recording of the user's own run (title, plaza, Octo
+Valley, mission 2 "Lair of the Octoballs") replayed by `RBREW_INPUT_REPLAY`.
+
+- Input recording/replay: `RBREW_INPUT_RECORD=<file>` stores every frame's
+  pad (buttons, sticks, touch, controller gyro, motion step) plus marks for
+  scene changes and for the end of each loading screen (the frame's guest draw
+  count rises from 8-36 to thousands). The replay waits at each mark until the
+  game catches up, so load times do not shift inputs. `RBREW_SAVE_DIR` keeps
+  the replay on a copy of the recorded save. In a level the run diverges after
+  a while (enemy behaviour), which is fine for profiling.
+- Asynchronous shaders (`RBREW_ASYNC_SHADERS=0` restores waiting): a draw whose
+  program or pipeline is still compiling is skipped instead of stalling the
+  render thread, and the game thread behind it, for the whole compile. Only
+  draws into a render target already drawn before the last present qualify, so
+  one-time renders (cubemaps, captures) still wait; stream-out draws and draws
+  inside an occlusion query also wait. Level with this level's shaders removed
+  from the cache (same replay, 48 s): hitch time 4.84 s -> 2.48 s, frames over
+  50 ms 46 -> 27, longest 1287 -> 545 ms, average 49.8 -> 52.4 FPS. With a
+  warm cache there is no difference (56.7 vs 56.5 FPS, 7 frames over 50 ms in
+  27 s).
+- Tried and dropped: counting occlusion-query begins inside display lists so
+  listed reads need not drain the render queue. Gambit reads one listed query
+  per frame in the frame that began it; answering "not ready" or the previous
+  result removed the whole 2D layer (HUD, text box) for single frames
+  (18 of 146 sampled frames), and even without any query wait the level ran at
+  the same ~55-56 FPS: the wait only moved. The per-frame read acts as the
+  game's fence against reusing buffers the renderer has not read yet.
+- Remaining limit in the level: game thread ~7 ms and render thread ~8 ms of
+  work per frame, serialized at that fence; average 56-57 FPS, median 16.7 ms,
+  ~40% of frames between 17 and 26 ms. The FPS overlay no longer rebuilds its
+  background every frame (it was 3.6% of the render thread).
+
+### Plaza CPU decoding and query safety (2026-10-25)
+
+The profiled executable (`11420A84...`) averaged 31.98 FPS over 1,532 loaded
+plaza frames (scene 2, frame > 1400, draws >= 1000), with 0% <= 17.5 ms and
+p99 47.18 ms. This is actual replayed plaza gameplay, not a menu measurement.
+The CPU profile includes 11.3% of the main thread in paired-single helpers.
+
+- Generated constant instruction words now use `rbrew_ps_constant<word>` for
+  float loads/stores and common paired arithmetic. Quantized and other forms
+  retain the interpreter; memory checks, write observers, ordered stores,
+  register aliases and single-precision rounding are preserved.
+  `RBREW_PAIRED_INLINE=0` restores the interpreter for the same executable.
+  The authored 25-character animation benchmark improved from 4.7956 to
+  3.3623 ms with identical palette and state checksums. This is a CPU kernel
+  benchmark, **not a game FPS result**. The new differential test compares
+  11,008 instruction cases bit-for-bit against the interpreter.
+- The listed-query counting prototype really is off by default now
+  (`RBREW_QUERY_LIST_COUNT=1` opts into the earlier experimental behaviour).
+  Published listed queries cannot bypass queued rendering without that count.
+  A non-ready query clears its output instead of leaving an old sample count.
+  The existing CPU-clear and queued-query regression tests pass.
+- Rejected: bypassing a null `GX2SetContextState` call. The matched replay
+  went from 31.35 to 29.53 FPS (1,480/1,420 loaded frames; p99 40.64/45.44 ms).
+  The implementation and its switch were removed; real queue fences remain.
+- `tools/perf/prof.ps1` refuses reused run labels and keeps replay saves in
+  the run directory. It unlinks only junction nodes, never their targets.
+  `ab.ps1` delegates to this same implementation. `check_replay.py` checks
+  sampled HUD brightness, writes contact sheets and optionally replaces BMPs
+  with pixel-verified PNGs. Dense screenshot runs do not produce FPS results.
+
+Final validation is limited to the plaza at the user's request. The canceled
+level graphics capture ran alongside compilation and is not a performance
+comparison. FPS measurements must run after the compiler has stopped and
+with `RBREW_FRAME_DUMP_EVERY=100000`; graphics comparisons use every sixth
+frame. The installed game remains unchanged until those checks complete.
+
+### Plaza and level, matched replays (2026-10-25, evening)
+
+Matched replays of the user's recording (`inputs-plaza.txt` stands in the
+plaza; `inputs.txt` plays mission 2), all new switches off ("base") versus the
+current defaults ("final"):
+
+| | base | final |
+|---|---|---|
+| Plaza average | 30.2 FPS (p50 32.8 ms) | 35.0 FPS (p50 28.1 ms) |
+| Level average | 55.4 FPS, 61% of frames <= 17.5 ms, p99 29.3 ms | 58.1 FPS, 95% <= 17.5 ms, p99 23.3 ms |
+
+Level graphics check (every sixth frame, 350 shots): no single-frame HUD loss;
+the only HUD-less shots are the iris wipe of a fall.
+
+Kept (defaults, each with a switch back):
+- Query-end submit batching, async shaders, conditional render without GPU
+  wait, posted GX2Invalidate inside lists (see above).
+- `RBREW_LIST_QUERY_POLL=0`: long display-list replays publish finished
+  occlusion results every 128 commands instead of only between render items.
+- `RBREW_VSYNC_WAIT_LATE=1`: GX2WaitForVsync waited for the next vblank even
+  when the last flip was already a vblank or more ago. Gambit's pacer
+  (02796C4C) reads the frame timestamps it stores at 0x101C91B8/C0 in many
+  places (frame deltas), so a late frame now continues at once.
+- Paired-single inlining by Codex (`RBREW_PAIRED_INLINE=0`).
+
+Measured and dropped or left off:
+- `RBREW_QUERY_LIST_COUNT=1..3` (off): the plaza main thread waits ~10-12 ms
+  per frame for the scene list (`ListCall`, ~11.6 ms to replay ~4800 draws).
+  Answering the occlusion reads behind it without that wait (queued begin,
+  or counters cleared by a newer recording) gave 37.5 FPS in the plaza, but
+  produced single-frame HUD losses in the level (3 isolated drops in 350
+  shots). Each half alone gave no plaza gain. Waiting only until the read's
+  own result is published (no full drain) was not faster either.
+- Posting GX2SetContextState instead of waiting: the game hung after ~20 s.
+- `RBREW_GAME_30FPS=0` (skip the pacer's 30 FPS-mode vblank wait): no gain;
+  the time moved into game work.
+- Larger write-watch windows (`RBREW_WRITE_WATCH_WINDOW`, 256/2048 pages):
+  no gain.
+
+Why the plaza is not at 60 yet: the game thread does ~14-15 ms of its own work
+per frame (recompiled code, no single hot function above 2%; display-list
+recording ~7%), then waits ~12 ms for the render thread to replay the frame's
+scene list. The render thread's time in that replay: write-watch queries 13%,
+texture checks 16%, shader-key resolution 13%, per-call decoding of
+unrecorded lists 5%. On the console the plaza runs at 30 FPS. Reaching 60
+needs the scene-list replay to become several times faster (e.g. caching the
+Vulkan work of unchanged display lists) or a safe way to answer that fence
+query without waiting.
+
+### Plaza fast mode (2026-10-25, night, user's choice)
+
+The plaza now runs at ~55 FPS (was 30) with these defaults:
+- `RBREW_QUERY_ASSUME_VISIBLE` (on; `=0` waits): a busy listed occlusion
+  read answers "visible" (the query's last nonzero count, else 4096) instead
+  of draining the render queue for the ~11.6 ms scene list.
+- GX2SetContextState is posted instead of waited for
+  (`RBREW_CONTEXT_STATE_SYNC=1` waits). Its shadow snapshot list is built in
+  a private builder slot of the render thread; built in the game core's slot,
+  it captured the game's concurrent commands and hung the game.
+- Long scene lists are submitted every 300 draws so the GPU works alongside
+  (`RBREW_SUBMIT_EVERY_DRAWS=<n>`, `0` disables).
+- The pacer's 30 FPS-mode vblank wait and the late-frame vblank wait are
+  skipped (`RBREW_GAME_30FPS=1`, `RBREW_VSYNC_WAIT_LATE=1` restore them).
+- Large display lists (> 512 commands) are no longer hashed for reuse
+  (`RBREW_DL_HASH_ALL=1`).
+
+Known consequence: the plaza's game logic runs too fast. Gambit's loop
+(02818E7C) steps the logic once per iteration; in the plaza's 30 FPS mode
+(bit 0 at +0x74 of the framework object) it draws every other iteration and
+the undrawn iteration does the rest of the frame. Displayed FPS x 2 = logic
+steps per second, so normal speed means exactly 30 displayed FPS. Tried:
+the game's 60 FPS mode (`RBREW_GAME_60FPS_MODE=1`): correct speed, but no
+NPCs appear; drawing every iteration: black plaza. Forcing write helpers
+inline: no FPS gain, build 43 instead of 23 minutes, reverted.

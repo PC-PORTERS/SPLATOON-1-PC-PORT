@@ -225,6 +225,9 @@ void gx2_query_render_end(uint32_t address, uint64_t serial);
 void gx2_query_render_published(uint32_t address);
 uint64_t gx2_render_completed_serial();
 void gx2_render_query_poll();
+// Publishes ended queries the GPU has finished, without submitting (safe
+// in the middle of a display-list replay).
+void gx2_render_query_poll_completed();
 void gx2_render_conditional_begin(uint32_t type,uint32_t address,bool no_wait,bool pixels_pass,uint8_t* mem);
 void gx2_render_conditional_end();
 // GPU state queries (glIsEnabled/glGet*) issued by the renderer; each one

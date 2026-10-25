@@ -30,6 +30,12 @@ void gx2_dl_record_snapshot(Gx2DescriptorFn fn,const CPUState* cpu,std::span<con
 // the values into the list, so record a snapshot (native-order words).
 void gx2_dl_record_uniform_words(bool is_pixel, uint32_t index, std::vector<uint32_t> words);
 void gx2_dl_call(CPUState* cpu, uint32_t list, uint32_t size);
+// Occlusion queries begun inside display lists (gx2_draw.cpp): the recorded
+// query-begin command, and the hook that counts one begin as issued when a
+// list holding it is posted.
+Gx2CommandFn gx2_query_begin_command();
+void gx2_query_list_issued(uint32_t address);
+bool gx2_query_list_counting();
 uint32_t gx2_dl_create_snapshot(CPUState* cpu, uint32_t buffer, uint32_t capacity,
                                 Gx2DescriptorFn fn, std::span<const uint8_t> snapshot);
 

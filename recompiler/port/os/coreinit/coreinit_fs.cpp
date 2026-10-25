@@ -356,11 +356,21 @@ static void FSReadDir(CPUState* cpu) {
     RET = (uint32_t)FS_STATUS_OK;
 }
 
+// RBREW_SAVE_DIR=<dir> keeps the save elsewhere (the input replay plays on a
+// copy of its recorded save); unset uses ./save.
+static std::filesystem::path save_dir() {
+    static const std::filesystem::path dir = [] {
+        const char* v = std::getenv("RBREW_SAVE_DIR");
+        return std::filesystem::path(v && *v ? v : "save");
+    }();
+    return dir;
+}
+
 // The native profile currently exposes account slot 1. Keep its existing
 // ./save files in place; the common account has its own namespace.
 static bool save_root(uint32_t slot, std::filesystem::path& root) {
     if (slot != 1 && slot != 0xFF) return false;
-    root = std::filesystem::path("save");
+    root = save_dir();
     if (slot == 0xFF) root /= "common";
     return true;
 }
@@ -389,7 +399,7 @@ static bool save_path(CPUState* cpu, uint32_t slot, uint32_t address,
 void coreinit_save_init(CPUState* cpu) {
     std::lock_guard lock(s_fs_mutex);
     std::error_code error;
-    std::filesystem::create_directories("save", error);
+    std::filesystem::create_directories(save_dir(), error);
     RET = error ? uint32_t(FS_STATUS_ACCESS_ERROR) : uint32_t(FS_STATUS_OK);
 }
 

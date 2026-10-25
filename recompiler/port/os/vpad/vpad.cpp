@@ -288,6 +288,8 @@ static void VPADRead(CPUState* cpu) {
 
     float phys_gyro[3] = {};
     float phys_accel[3] = {};
+    float motion_dt = -1.0f;   // < 0: measure it here
+    bool player_input = false; // a controller button/stick or key (ends a replay)
     bool has_phys_gyro = false, has_phys_accel = false;
 
 #if defined(HAVE_SDL2)
@@ -336,6 +338,8 @@ static void VPADRead(CPUState* cpu) {
         ry = -SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_RIGHTY) / 32767.0f;
         shape_stick(lx, ly);
         shape_stick(rx, ry);
+        player_input = buttons != 0 || std::fabs(lx) > 0.5f || std::fabs(ly) > 0.5f ||
+                       std::fabs(rx) > 0.5f || std::fabs(ry) > 0.5f;
     }
 
     // -----------------------------------------------------------------------
@@ -381,6 +385,10 @@ static void VPADRead(CPUState* cpu) {
         if (keys[SDL_SCANCODE_F])      buttons |= VPAD_BUTTON_PLUS;  // map / pause
         if (keys[SDL_SCANCODE_G])      buttons |= VPAD_BUTTON_MINUS; // options
         if (keys[SDL_SCANCODE_ESCAPE]) buttons |= VPAD_BUTTON_HOME;  // home menu
+        for (SDL_Scancode key : {SDL_SCANCODE_W, SDL_SCANCODE_A, SDL_SCANCODE_S, SDL_SCANCODE_D, SDL_SCANCODE_RETURN,
+                                 SDL_SCANCODE_SPACE, SDL_SCANCODE_Q, SDL_SCANCODE_E, SDL_SCANCODE_R,
+                                 SDL_SCANCODE_F, SDL_SCANCODE_G, SDL_SCANCODE_ESCAPE})
+            player_input = player_input || keys[key];
     }
 
     static const bool s_auto_input = (std::getenv("RBREW_AUTO_INPUT") != nullptr);
@@ -460,9 +468,40 @@ static void VPADRead(CPUState* cpu) {
         }
     }
 
+    // Session recording/replay (RBREW_INPUT_RECORD / RBREW_INPUT_REPLAY):
+    // the frame's whole pad, gyro and motion time step included.
+    bool live_touch = true;
+    if (rbrew_benchmark::recording() || rbrew_benchmark::replaying()) {
+        rbrew_benchmark::Pad pad;
+        pad.buttons = buttons;
+        pad.lx = lx; pad.ly = ly; pad.rx = rx; pad.ry = ry;
+        pad.touched = g_touch_state.touched ? 1 : 0;
+        pad.x = g_touch_state.touched ? g_touch_state.x : 0;
+        pad.y = g_touch_state.touched ? g_touch_state.y : 0;
+        if (has_phys_gyro) std::copy_n(phys_gyro, 3, pad.gyro);
+        pad.dt = motion_seconds();
+        int scene_id = -1;
+        const int scene = rbrew_control_defaults::active_scene_type(MEM, &scene_id);
+        // Mouse movement and clicks do not end a replay; controller and keys do.
+        const bool replayed = rbrew_benchmark::replay_input(pad, scene, scene_id, player_input);
+        if (!replayed) rbrew_benchmark::record_input(pad, scene, scene_id);
+        motion_dt = pad.dt;
+        if (replayed || rbrew_benchmark::recording()) {
+            buttons = pad.buttons;
+            lx = pad.lx; ly = pad.ly; rx = pad.rx; ry = pad.ry;
+            std::copy_n(pad.gyro, 3, phys_gyro);
+            has_phys_gyro = has_phys_gyro || replayed;
+            has_phys_accel = false;
+            live_touch = false;
+            auto_touched = pad.touched != 0;
+            auto_tx = vpad_touch_raw_x(uint16_t(pad.x));
+            auto_ty = vpad_touch_raw_y(uint16_t(pad.y));
+        }
+    }
+
     // --- Simulated touch from mouse in Gamepad View ---
     {
-        const bool touched = g_touch_state.touched || auto_touched;
+        const bool touched = (live_touch && g_touch_state.touched) || auto_touched;
         const uint16_t tx = touched ? (auto_touched ? auto_tx : vpad_touch_raw_x(g_touch_state.x)) : 0;
         const uint16_t ty = touched ? (auto_touched ? auto_ty : vpad_touch_raw_y(g_touch_state.y)) : 0;
         const uint16_t validity = touched ? VPAD_TP_VALID : VPAD_TP_INVALID_XY;
@@ -485,7 +524,7 @@ static void VPADRead(CPUState* cpu) {
     write_float(MEM, buf + 0x14, rx);
     write_float(MEM, buf + 0x18, ry);
 
-    vpad_update_motion(MEM, buf, rx, ry, motion_seconds(), has_phys_gyro ? phys_gyro : nullptr, has_phys_accel ? phys_accel : nullptr);
+    vpad_update_motion(MEM, buf, rx, ry, motion_dt >= 0 ? motion_dt : motion_seconds(), has_phys_gyro ? phys_gyro : nullptr, has_phys_accel ? phys_accel : nullptr);
     rbrew_write8(MEM, buf + kVpadSlideVolume, 0xFF);
     rbrew_write8(MEM, buf + kVpadSlideVolumeEx, 0xFF);
     rbrew_write8(MEM, buf + kVpadBattery, 0xC0); // full

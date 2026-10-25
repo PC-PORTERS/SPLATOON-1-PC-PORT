@@ -326,7 +326,7 @@ if(RBREW_BUILD_TESTS)
     if(MSVC)
         target_compile_options(gambit_guest_bench PRIVATE /Zc:tlsGuards-) # as the Gambit target
     endif()
-    foreach(case npc_1 npc_10 npc_25 npc_50 npc_100)
+    foreach(case npc_1 npc_10 npc_25 npc_50 npc_100 paired_equivalence)
         add_test(NAME guest_${case} COMMAND gambit_guest_bench ${case})
         set_tests_properties(guest_${case} PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
     endforeach()

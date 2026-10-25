@@ -10,6 +10,7 @@
 #include "runtime/rebrewu_memory_observer.h"
 #include <algorithm>
 #include <atomic>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -33,7 +34,7 @@ void* operator new(size_t size) { ++g_allocations; if (void* p = std::malloc(siz
 void operator delete(void* p) noexcept { std::free(p); }
 void operator delete(void* p, size_t) noexcept { std::free(p); }
 
-#define GUEST_PS(word) rbrew_ps(cpu, std::integral_constant<uint32_t, (word)>::value)
+#define GUEST_PS(word) rbrew_ps_constant<(word)>(cpu)
 #define GUEST_SKELETON_NAMESPACE guest_inline
 #include "../tests/guest_skeleton_kernels.inl"
 #undef GUEST_PS
@@ -241,6 +242,67 @@ void instruction_costs() {
     }
 }
 
+template<uint32_t word> void compare_paired() {
+    uint32_t seed = word | 1u;
+    auto random = [&] { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; return seed; };
+    for (unsigned n = 0; n < 256; ++n) {
+        std::vector<uint8_t> memory(8192), expected(8192);
+        for (auto& byte : memory) byte = uint8_t(random());
+        expected = memory;
+        CPUState fast{}, reference{};
+        fast.mem = memory.data();
+        for (unsigned i = 0; i < 32; ++i) {
+            fast.r[i] = 128 + (random() & 255);
+            const uint64_t high0 = random(), low0 = random(), high1 = random(), low1 = random();
+            fast.f[i] = std::bit_cast<double>((high0 << 32) | low0);
+            fast.ps1[i] = std::bit_cast<double>((high1 << 32) | low1);
+            constexpr uint64_t edges[] = {0, 0x8000000000000000ull,
+                0x7ff0000000000000ull, 0xfff0000000000000ull,
+                0x7ff8000000000001ull, 0x7ff0000000000001ull,
+                1, 0x0010000000000000ull, 0x7fefffffffffffffull,
+                0x3ff0000000000000ull, 0xbff0000000000000ull, 0xfff8000000000001ull};
+            if (n < 12) {
+                fast.f[i] = std::bit_cast<double>(edges[(n+i) % 12]);
+                fast.ps1[i] = std::bit_cast<double>(edges[(n+i+5) % 12]);
+            }
+            fast.cr[i % 8] = random();
+        }
+        fast.fpscr = random();
+        for (auto& gqr : fast.gqr) {
+            const unsigned type = n % 8 < 4 ? 0 : 4 + n % 4;
+            gqr = type | (type << 16) | ((n % 64) << 8) | ((n % 64) << 24);
+        }
+        reference = fast; reference.mem = expected.data();
+        rbrew_ps(&reference, word);
+        rbrew_ps_constant<word>(&fast);
+        const bool same = !std::memcmp(fast.f, reference.f, sizeof fast.f) &&
+                !std::memcmp(fast.ps1, reference.ps1, sizeof fast.ps1) &&
+                !std::memcmp(fast.r, reference.r, sizeof fast.r) &&
+                !std::memcmp(fast.cr, reference.cr, sizeof fast.cr) &&
+                fast.fpscr == reference.fpscr && memory == expected;
+        if (!same) std::fprintf(stderr, "paired mismatch word=%08X case=%u\n", word, n);
+        require(same, "constant paired instruction differs from interpreter");
+    }
+}
+template<unsigned xo> void compare_paired_math() {
+    constexpr uint32_t base = (4u << 26) | (xo << 1);
+    compare_paired<base | (3u << 21) | (3u << 16) | (4u << 11) | (5u << 6)>();
+    compare_paired<base | (4u << 21) | (3u << 16) | (4u << 11) | (5u << 6) | 1u>();
+    compare_paired<base | (5u << 21) | (3u << 16) | (4u << 11) | (5u << 6)>();
+}
+void paired_equivalence() {
+    compare_paired_math<10>(); compare_paired_math<11>(); compare_paired_math<12>();
+    compare_paired_math<13>(); compare_paired_math<14>(); compare_paired_math<15>();
+    compare_paired_math<20>(); compare_paired_math<21>(); compare_paired_math<25>();
+    compare_paired_math<28>(); compare_paired_math<29>();
+    compare_paired<0xE0050000u>(); compare_paired<0xE1048008u>();
+    compare_paired<0xE4640000u>(); compare_paired<0xE4648FF0u>();
+    compare_paired<0xF1440000u>(); compare_paired<0xF5448FF0u>();
+    compare_paired<0xF5408000u>(); compare_paired<0xE4600000u>();
+    compare_paired<0xF1408000u>(); compare_paired<0xE0608000u>();
+    std::puts("paired constant/interpreter: 11008 bit-exact cases, register aliases, quantization fallback and update addressing");
+}
+
 }
 
 int main(int argc, char** argv) {
@@ -249,6 +311,7 @@ int main(int argc, char** argv) {
         const unsigned frames = [] { const char* v = std::getenv("RBREW_BENCH_FRAMES"); const int n = v ? std::atoi(v) : 0; return n > 0 ? unsigned(n) : 120u; }();
         if (mode == "breakdown") { breakdown(); return 0; }
         if (mode == "instructions") { instruction_costs(); return 0; }
+        if (mode == "paired_equivalence") { paired_equivalence(); return 0; }
         if (mode == "scaling") { for (unsigned n : {1u, 10u, 25u, 50u, 100u}) report(n, frames); return 0; }
         if (mode.rfind("npc_", 0) == 0) {
             const unsigned n = unsigned(std::stoul(mode.substr(4)));
