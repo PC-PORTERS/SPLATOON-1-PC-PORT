@@ -38,6 +38,7 @@ add_library(gambit_runtime STATIC
     os/sysapp/sysapp_title.cpp
     os/coreinit/coreinit_fs.cpp
     os/gx2/gx2_context.cpp
+    os/gx2/gx2_settings_menu.cpp
     os/gx2/gx2_draw.cpp
     os/gx2/gx2_surface_layout.cpp
     os/gx2/r700_to_glsl.cpp
@@ -58,6 +59,7 @@ add_library(gambit_runtime STATIC
     loader/native_console_profile.cpp
     runtime/splatoon_diagnostics.cpp
     runtime/discord_rpc.cpp
+    runtime/port_settings.cpp
 )
 
 target_include_directories(gambit_runtime PUBLIC

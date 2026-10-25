@@ -41,13 +41,15 @@ Setup.bat -GameDump "D:\My Wii U games\Splatoon [AGMP01]"
 
 ## Controls
 
+**Esc** (or the touchpad button of a PlayStation controller) opens the port's settings menu: render resolution (applies at the next start), plaza 60 FPS on/off, fullscreen, FPS overlay, controller gyro on/off, gyro sensitivity, inverted gyro up/down, mouse sensitivity, volume and quit. Two pages show and rebind every GamePad input for keyboard & mouse and for the controller: select a row, press Enter/Cross, then the new key or button (a key already in use swaps with the old one; Delete/Square clears; "Reset to defaults" restores the layout below). The game keeps running but gets no input while the menu is open. Choices are saved in `settings.ini` next to `Splatoon.exe`; an environment variable that is set (for example `RBREW_PLAZA_60FPS`, `RBREW_GYRO`, `RBREW_RENDER_RESOLUTION`) still wins over the file.
+
 The game starts in borderless fullscreen; **F11** switches to a 1280×720 window and back. The TV scene renders internally at the console's **1280×720** (light on the GPU) and is scaled to the window. For a sharper image set `RBREW_RENDER_RESOLUTION` before starting: `native` (your desktop resolution), `1080p`, `1440p` or any `WIDTHxHEIGHT`. The game's camera and UI keep their original layout.
 
 Controllers (Xbox, PlayStation or any SDL2 controller): buttons are mapped by position, like on the Wii U GamePad. The right stick controls the camera.
 
 The tutorial keeps its original camera behavior, controlled with the **right stick or mouse**. Outside the tutorial, including the plaza, the port applies **neutral camera sensitivity (0)** automatically and uses the motion-control setting stored in your save (change it in the game options). It saves only the sensitivity and the updated checksum; progress, character data, camera inversion and other settings are preserved. The first edited save is backed up as `save.dat.before-control-defaults`. A new save is still created by the game normally.
 
-Keyboard and mouse:
+Keyboard and mouse (default layout, rebindable in the menu):
 
 | Input | Action |
 |---|---|
@@ -60,7 +62,8 @@ Keyboard and mouse:
 | E | Special |
 | F | Map (+) |
 | G | Options (−) |
-| Esc | Home |
+| Esc | Settings menu |
+| H | Home |
 | Tab | GamePad view (the mouse becomes the touch screen) NOT WORKING YET|
 | F3 | Show/hide the FPS overlay (translucent panel: FPS, frame time, 1% low, slowest frame, frame-time graph) and frame stats in the window title |
 | F4 | Detailed frame stats in the window title (1% low, P95/P99, RAM) |
@@ -68,7 +71,7 @@ Keyboard and mouse:
 
 Standing still with your weapon for about 5 seconds plays the inkling's look-around idle animation (`WaitHold_Nrml_LookAround`). It ships in the game's files but the original game never uses it. Set `RBREW_IDLE_LOOKAROUND=0` to turn it off.
 
-With a DualShock 4 / DualSense, the controller's gyro adds to the right stick wherever the game uses motion aiming (set `RBREW_GYRO=0` to ignore it).
+With a DualShock 4 / DualSense, the controller's gyro aims wherever the game uses motion aiming (set `RBREW_GYRO=0` or turn the gyro off in the menu to ignore it). As on the GamePad, aiming up and down is then done by tilting the controller only: the right stick turns left/right but no longer tilts the camera (`RBREW_STICK_GYRO_PITCH=1` restores stick tilt). Without a gyro the right stick or mouse still tilts the virtual GamePad.
 
 ## Runtime switches
 

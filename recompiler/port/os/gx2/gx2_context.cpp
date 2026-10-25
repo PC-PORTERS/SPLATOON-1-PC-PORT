@@ -18,6 +18,8 @@
 #include "gx2_native_context.h"
 #include "gx2_surface.h"
 #include "gx2_display_list.h"
+#include "gx2_settings_menu.h"
+#include "../../runtime/port_settings.h"
 #include "gx2_render_vk_debug.h"
 #include "../vpad/game_controllers.h"
 #include "../../runtime/splatoon_diagnostics.h"
@@ -99,6 +101,28 @@ static void toggle_screen_mode() {
         SDL_SetRelativeMouseMode(SDL_TRUE);  // capture cursor for camera
         g_touch_state = { false, 0, 0 };
     }
+    update_window_title();
+}
+
+static bool window_fullscreen() {
+    return s_window && (SDL_GetWindowFlags(s_window) & SDL_WINDOW_FULLSCREEN_DESKTOP) != 0;
+}
+static void set_window_fullscreen(bool full) {
+    if (!s_window || window_fullscreen() == full) return;
+    if (!full) {
+        SDL_SetWindowFullscreen(s_window, 0);
+        SDL_SetWindowSize(s_window, 1280, 720);
+        SDL_SetWindowPosition(s_window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+    } else {
+        SDL_SetWindowFullscreen(s_window, SDL_WINDOW_FULLSCREEN_DESKTOP);
+    }
+    update_window_title();
+}
+// One switch for both FPS displays: the in-game overlay (documented in
+// README) and the compact title stats.
+static void set_fps_display(bool show) {
+    gx2vk::set_fps_overlay(show);
+    if (SplatoonDiagnostics::IsOverlayVisible() != show) SplatoonDiagnostics::ToggleOverlay();
     update_window_title();
 }
 
@@ -221,6 +245,18 @@ static bool gx2_platform_open_window() {
     g_screen_mode = ScreenMode::TV;
     s_fps_sample_tick = 0; s_fps_frames = 0; s_window_fps = 0;
     update_window_title();
+    {
+        // ESC menu: saved window and overlay choices, then its hooks.
+        const auto settings = rbrew_settings::get();
+        if (!settings.fullscreen) set_window_fullscreen(false);
+        gx2vk::set_fps_overlay(settings.fps_overlay);
+        Gx2MenuActions actions;
+        actions.set_fullscreen = set_window_fullscreen;
+        actions.fullscreen = window_fullscreen;
+        actions.set_fps_overlay = set_fps_display;
+        actions.quit = [] { gx2_close_requested(); };
+        gx2_settings_menu_init(actions);
+    }
 
     // Initialize the selected native renderer for the window.
     gx2_render_init();
@@ -602,7 +638,8 @@ static void GX2WaitForVsync(CPUState* cpu) {
     // In the plaza the 60 FPS fix (RBREW_PLAZA_60FPS) inserts 30 FPS-mode
     // frames only to catch up with real time; they must not wait for two
     // vblanks, so the pacer's wait is skipped there.
-    const bool plaza_catch_up = pacer && rbrew_control_defaults::active_scene_type(MEM) == 2 && [] {
+    const bool plaza_catch_up = pacer && rbrew_control_defaults::active_scene_type(MEM) == 2 &&
+        rbrew_settings::g_plaza_60fps.load(std::memory_order_relaxed) && [] {
         const char* v = std::getenv("RBREW_PLAZA_60FPS"); return !(v && (v[0] == '0' || v[0] == '1')); }();
     if ((!keep_30 || plaza_catch_up) && pacer && s_flip_count.load() == s_swap_count.load()) {
         s_last_vsync_wait_ms.fetch_add(0.0f, std::memory_order_relaxed);
@@ -695,8 +732,10 @@ void plaza_mode_sync(CPUState* cpu) {
         static uint32_t s_requester = 0;
         if (request & 1u) s_requester = object;
         const bool owned = adaptive && object == s_requester && rbrew_control_defaults::active_scene_type(cpu->mem) == 2;
-        bool want_30 = false;
-        if (owned) {
+        // ESC menu "Plaza 60 FPS" off: the plaza's own 30 FPS request again.
+        const bool menu_on = rbrew_settings::g_plaza_60fps.load(std::memory_order_relaxed);
+        bool want_30 = owned && !menu_on;
+        if (owned && menu_on) {
             // Finish a 30 FPS frame once begun: its second (undrawn) iteration
             // runs with bit 1 of the framework flags set.
             const uint32_t flags_address = s_pacer_flag_address.load(std::memory_order_relaxed);
@@ -754,6 +793,7 @@ static void GX2SwapScanBuffers(CPUState* cpu) {
         // Pump SDL events first
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
+            if (gx2_settings_menu_event(ev)) continue;   // ESC menu (gx2_settings_menu.h)
             switch (ev.type) {
             case SDL_QUIT:
                 gx2_close_requested();
@@ -764,22 +804,15 @@ static void GX2SwapScanBuffers(CPUState* cpu) {
                 if (ev.key.keysym.scancode == SDL_SCANCODE_TAB) {
                     toggle_screen_mode();
                 } else if (ev.key.keysym.scancode == SDL_SCANCODE_F11) {
-                    bool is_full = (SDL_GetWindowFlags(s_window) & SDL_WINDOW_FULLSCREEN_DESKTOP) != 0;
-                    if (is_full) {
-                        SDL_SetWindowFullscreen(s_window, 0);
-                        SDL_SetWindowSize(s_window, 1280, 720);
-                        SDL_SetWindowPosition(s_window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
-                    } else {
-                        SDL_SetWindowFullscreen(s_window, SDL_WINDOW_FULLSCREEN_DESKTOP);
-                    }
-                    update_window_title();
+                    auto settings = rbrew_settings::get();
+                    settings.fullscreen = !window_fullscreen();
+                    set_window_fullscreen(settings.fullscreen);
+                    rbrew_settings::set(settings);
                 } else if (ev.key.keysym.scancode == SDL_SCANCODE_F3) {
-                    // One key for both FPS displays: the in-game overlay
-                    // (documented in README) and the compact title stats.
-                    const bool show = !gx2vk::fps_overlay();
-                    gx2vk::set_fps_overlay(show);
-                    if (SplatoonDiagnostics::IsOverlayVisible() != show) SplatoonDiagnostics::ToggleOverlay();
-                    update_window_title();
+                    auto settings = rbrew_settings::get();
+                    settings.fps_overlay = !gx2vk::fps_overlay();
+                    set_fps_display(settings.fps_overlay);
+                    rbrew_settings::set(settings);
                     controller_log("F3 pressed: Compact overlay visible=%d\n", SplatoonDiagnostics::IsOverlayVisible());
                 } else if (ev.key.keysym.scancode == SDL_SCANCODE_F4) {
                     SplatoonDiagnostics::ToggleDetailedOverlay();

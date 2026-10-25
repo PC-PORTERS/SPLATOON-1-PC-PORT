@@ -3,6 +3,7 @@
 #include "gx2_vk.h"
 #include "gx2_vk_memory.h"
 #include "gx2_fps_overlay.h"
+#include "../gx2_settings_menu.h"
 #include "gx2_vk_shader.h"
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
@@ -1908,6 +1909,7 @@ struct OverlayPass {
     VkSampler sampler = VK_NULL_HANDLE;
     std::map<VkFormat, VkPipeline> pipelines;
     Image image;
+    Image menu;   // ESC settings menu (gx2_settings_menu.h)
 };
 OverlayPass s_overlay_pass;
 const char* kOverlayVs = "#version 450\nlayout(location=0) out vec2 uv;"
@@ -1924,6 +1926,7 @@ static void destroy_overlay_pass() {
     if (o.sampler) vkDestroySampler(s_device, o.sampler, nullptr);
     o.layout = VK_NULL_HANDLE; o.set = VK_NULL_HANDLE; o.sampler = VK_NULL_HANDLE;
     destroy_image(o.image);
+    destroy_image(o.menu);
 }
 static VkPipeline overlay_pipeline(VkFormat format) {
     auto& o = s_overlay_pass;
@@ -2000,6 +2003,35 @@ static void image_barrier(VkCommandBuffer cb, VkImage image, VkImageLayout from,
     dependency.imageMemoryBarrierCount = 1; dependency.pImageMemoryBarriers = &b;
     vkCmdPipelineBarrier2(cb, &dependency);
 }
+// Blends `image` (premultiplied RGBA8, GENERAL) over `target`
+// (TRANSFER_DST_OPTIMAL) at (x, y); the target is left TRANSFER_DST_OPTIMAL.
+static void blend_overlay_image(VkCommandBuffer cb, VkImage target, VkImageView target_view, VkPipeline pipeline,
+                                Image& image, unsigned x, unsigned y) {
+    auto& o = s_overlay_pass;
+    image_barrier(cb, target, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                  VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+    VkRenderingAttachmentInfo color{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+    color.imageView = target_view; color.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    color.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD; color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    VkRenderingInfo info{VK_STRUCTURE_TYPE_RENDERING_INFO};
+    info.renderArea = {{int32_t(x), int32_t(y)}, {image.desc.width, image.desc.height}};
+    info.layerCount = 1; info.colorAttachmentCount = 1; info.pColorAttachments = &color;
+    vkCmdBeginRendering(cb, &info);
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+    const VkViewport vp{float(x), float(y), float(image.desc.width), float(image.desc.height), 0, 1};
+    vkCmdSetViewport(cb, 0, 1, &vp); vkCmdSetScissor(cb, 0, 1, &info.renderArea);
+    ViewDesc view; view.type = VK_IMAGE_VIEW_TYPE_2D;
+    VkDescriptorImageInfo sampled{o.sampler, image_view(image, view), VK_IMAGE_LAYOUT_GENERAL};
+    VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    write.dstBinding = 0; write.descriptorCount = 1; write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; write.pImageInfo = &sampled;
+    vkCmdPushDescriptorSetKHR(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, o.layout, 0, 1, &write);
+    vkCmdDraw(cb, 3, 1, 0, 0);
+    vkCmdEndRendering(cb);
+    image_barrier(cb, target, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                  VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT);
+}
 // Blends the panel over `target` (TRANSFER_DST_OPTIMAL, just written by the
 // frame's blit) at its top-left corner; the image is left TRANSFER_DST_OPTIMAL.
 static bool draw_overlay_panel(VkCommandBuffer cb, VkImage target, uint32_t index, VkExtent2D extent) {
@@ -2042,29 +2074,7 @@ static bool draw_overlay_panel(VkCommandBuffer cb, VkImage target, uint32_t inde
                       VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
                       VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
     }
-    image_barrier(cb, target, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                  VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                  VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
-    VkRenderingAttachmentInfo color{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
-    color.imageView = target_view; color.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    color.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD; color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    VkRenderingInfo info{VK_STRUCTURE_TYPE_RENDERING_INFO};
-    info.renderArea = {{int32_t(margin), int32_t(margin)}, {width, height}};
-    info.layerCount = 1; info.colorAttachmentCount = 1; info.pColorAttachments = &color;
-    vkCmdBeginRendering(cb, &info);
-    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-    const VkViewport vp{float(margin), float(margin), float(width), float(height), 0, 1};
-    vkCmdSetViewport(cb, 0, 1, &vp); vkCmdSetScissor(cb, 0, 1, &info.renderArea);
-    ViewDesc view; view.type = VK_IMAGE_VIEW_TYPE_2D;
-    VkDescriptorImageInfo image{o.sampler, image_view(o.image, view), VK_IMAGE_LAYOUT_GENERAL};
-    VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-    write.dstBinding = 0; write.descriptorCount = 1; write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; write.pImageInfo = &image;
-    vkCmdPushDescriptorSetKHR(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, o.layout, 0, 1, &write);
-    vkCmdDraw(cb, 3, 1, 0, 0);
-    vkCmdEndRendering(cb);
-    image_barrier(cb, target, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                  VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-                  VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT);
+    blend_overlay_image(cb, target, target_view, pipeline, o.image, margin, margin);
     return true;
 }
 // Draws the overlay into `target` (TRANSFER_DST_OPTIMAL after the frame's
@@ -2091,6 +2101,55 @@ static void draw_fps_overlay(VkCommandBuffer cb, VkImage target, uint32_t index,
     region.imageOffset = {int32_t(margin), int32_t(margin), 0};
     region.imageExtent = {width, height, 1};
     vkCmdCopyBufferToImage(cb, span.buffer, target, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+}
+
+// ESC settings menu, centred over the frame. Its texture is rebuilt only when
+// the menu's view changes.
+static void draw_settings_menu(VkCommandBuffer cb, VkImage target, uint32_t index, VkExtent2D extent) {
+    static Gx2MenuView s_view;
+    static uint64_t s_revision = 0;
+    static uint64_t s_drawn_revision = ~0ull;
+    if (!gx2_settings_menu_view(s_view, s_revision)) return;
+    static overlay::MenuPanel panel;
+    static bool fonts_ok = true;
+    static double s_ui = 0;
+    const double ui = std::clamp(extent.height / 1080.0, 0.6, 3.0);
+    if (!fonts_ok) return;
+    if (ui != s_ui) {
+        if (!(fonts_ok = panel.layout(ui))) return;
+        s_ui = ui; s_drawn_revision = ~0ull;
+    }
+    const unsigned width = panel.width(), height = panel.height(s_view.lines.size());
+    if (width > extent.width || height > extent.height) return;
+    const VkPipeline pipeline = overlay_pipeline(s_swapchain.format);
+    const VkImageView target_view = pipeline ? swapchain_view(index) : VK_NULL_HANDLE;
+    if (!pipeline || !target_view) return;
+    auto& o = s_overlay_pass;
+    if (!o.menu.image || o.menu.desc.width != width || o.menu.desc.height != height) {
+        destroy_image(o.menu);
+        ImageDesc desc; desc.width = width; desc.height = height; desc.format = VK_FORMAT_R8G8B8A8_UNORM;
+        desc.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        if (!create_image(o.menu, desc)) return;
+        s_drawn_revision = ~0ull;
+    }
+    if (s_drawn_revision != s_revision) {
+        const Span span = upload(VkDeviceSize(width) * height * 4, 16);
+        if (!span.data) return;
+        panel.draw(s_view, span.data, width, height);
+        s_drawn_revision = s_revision;
+        image_barrier(cb, o.menu.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL,
+                      VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+                      VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
+        VkBufferImageCopy region{};
+        region.bufferOffset = span.offset;
+        region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        region.imageExtent = {width, height, 1};
+        vkCmdCopyBufferToImage(cb, span.buffer, o.menu.image, VK_IMAGE_LAYOUT_GENERAL, 1, &region);
+        image_barrier(cb, o.menu.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL,
+                      VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                      VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+    }
+    blend_overlay_image(cb, target, target_view, pipeline, o.menu, (extent.width - width) / 2, (extent.height - height) / 2);
 }
 
 bool present(Image& source, uint32_t width, uint32_t height) {
@@ -2151,6 +2210,7 @@ bool present(Image& source, uint32_t width, uint32_t height) {
     s_fps_stats.presented(overlay::Stats::Clock::now());
     // Captured presents feed exact image tests: they never carry the overlay.
     if ((!s_capture_presents || s_capture_overlay) && fps_overlay()) draw_fps_overlay(cb, target, index, s_swapchain.extent);
+    if (!s_capture_presents) draw_settings_menu(cb, target, index, s_swapchain.extent);
     VkImageLayout last_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     Buffer readback;
     const VkExtent2D extent = s_swapchain.extent;

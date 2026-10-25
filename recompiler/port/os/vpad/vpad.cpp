@@ -28,6 +28,8 @@
 #include "../../runtime/native_control_defaults.h"
 #include "../../runtime/benchmark_input.h"
 #include "game_controllers.h"
+#include "../gx2/gx2_settings_menu.h"
+#include "../../runtime/port_settings.h"
 #include <atomic>
 #include <cstdlib>
 #include <chrono>
@@ -77,6 +79,11 @@ static constexpr uint32_t kVpadBattery = 0xA1, kVpadSlideVolume = 0xA0, kVpadSli
 #define VPAD_BUTTON_HOME   0x00000002u
 #define VPAD_BUTTON_STICK_R 0x00020000u
 #define VPAD_BUTTON_STICK_L 0x00040000u
+// GamePad bit per bindable action (rbrew_settings::Action order).
+static constexpr uint32_t kActionButtons[rbrew_settings::kFirstMoveAction] = {
+    VPAD_BUTTON_A, VPAD_BUTTON_B, VPAD_BUTTON_X, VPAD_BUTTON_Y, VPAD_BUTTON_L, VPAD_BUTTON_R,
+    VPAD_BUTTON_ZL, VPAD_BUTTON_ZR, VPAD_BUTTON_PLUS, VPAD_BUTTON_MINUS, VPAD_BUTTON_HOME,
+    VPAD_BUTTON_UP, VPAD_BUTTON_DOWN, VPAD_BUTTON_LEFT, VPAD_BUTTON_RIGHT, VPAD_BUTTON_STICK_L, VPAD_BUTTON_STICK_R};
 // Stick direction emulation bits (hold/trigger/release like buttons).
 #define VPAD_STICK_R_EMULATION_DOWN  0x00800000u
 #define VPAD_STICK_R_EMULATION_UP    0x01000000u
@@ -173,10 +180,10 @@ static VirtualMotion s_motion;
 static constexpr float kPi = 3.14159265358979f;
 static constexpr float kYawRate = 240.0f, kPitchRate = 150.0f, kPitchLimit = 80.0f;  // degrees(/s)
 
-// RBREW_GYRO=0 ignores a controller's gyro sensor (stick/mouse only).
+// RBREW_GYRO=0 (or "Controller gyro: Off" in the ESC menu) ignores a
+// controller's gyro sensor (stick/mouse only).
 static bool physical_gyro_enabled() {
-    static const bool enabled = [] { const char* v = std::getenv("RBREW_GYRO"); return !(v && v[0] == '0'); }();
-    return enabled;
+    return rbrew_settings::g_gyro.load(std::memory_order_relaxed);
 }
 
 // Advances the virtual GamePad by dt seconds and writes acc/gyro/angle/
@@ -195,14 +202,25 @@ void vpad_update_motion(uint8_t* mem, uint32_t buf, float rx, float ry, float dt
     // controls the game ignores stick Y and pitches only by the pad.
     // RBREW_STICK_GYRO_YAW=1 restores the stick-driven yaw.
     static const bool stick_yaw = [] { const char* v = std::getenv("RBREW_STICK_GYRO_YAW"); return v && v[0] == '1'; }();
-    float yaw_rate = stick_yaw ? -rx * std::fabs(rx) * kYawRate : 0.0f, pitch_rate = -ry * std::fabs(ry) * kPitchRate;
-    if (phys_gyro && physical_gyro_enabled()) {
+    // With a real gyro the stick no longer tilts the pad either: on the
+    // console, motion controls aim vertically only by moving the GamePad, but
+    // stick Y pitched the virtual pad here, so the camera went up and down
+    // by stick with motion controls on. Without a gyro (keyboard/mouse, pads
+    // without sensors) stick Y still tilts it, or the tutorial's forced
+    // motion aiming could not look up. RBREW_STICK_GYRO_PITCH=1 keeps stick
+    // pitch with a gyro.
+    static const bool stick_pitch_with_gyro = [] { const char* v = std::getenv("RBREW_STICK_GYRO_PITCH"); return v && v[0] == '1'; }();
+    const bool use_gyro = phys_gyro && physical_gyro_enabled();
+    float yaw_rate = stick_yaw ? -rx * std::fabs(rx) * kYawRate : 0.0f;
+    float pitch_rate = use_gyro && !stick_pitch_with_gyro ? 0.0f : -ry * std::fabs(ry) * kPitchRate;
+    if (use_gyro) {
         constexpr float kGyroDeadzone = 0.02f;   // rad/s: resting sensor noise/drift
-        auto rate = [&](float radians) { return std::fabs(radians) < kGyroDeadzone ? 0.0f : radians * (180.0f / kPi); };
+        const float scale = rbrew_settings::g_gyro_scale.load(std::memory_order_relaxed);   // ESC menu sensitivity
+        auto rate = [&](float radians) { return std::fabs(radians) < kGyroDeadzone ? 0.0f : radians * (180.0f / kPi) * scale; };
         // SDL: +x tilts the far edge up (aim up), which is negative pitch
         // here; +y turns left, which is positive yaw. Adding +x inverted
         // vertical aiming. RBREW_GYRO_INVERT_PITCH=1 / _YAW=1 flip an axis.
-        static const bool invert_pitch = [] { const char* v = std::getenv("RBREW_GYRO_INVERT_PITCH"); return v && v[0] == '1'; }();
+        const bool invert_pitch = rbrew_settings::g_gyro_invert_pitch.load(std::memory_order_relaxed);
         static const bool invert_yaw = [] { const char* v = std::getenv("RBREW_GYRO_INVERT_YAW"); return v && v[0] == '1'; }();
         pitch_rate += invert_pitch ? rate(phys_gyro[0]) : -rate(phys_gyro[0]);
         yaw_rate += invert_yaw ? -rate(phys_gyro[1]) : rate(phys_gyro[1]);
@@ -306,30 +324,17 @@ static void VPADRead(CPUState* cpu) {
                 has_phys_accel = true;
             }
         }
-        auto btn = [&](SDL_GameControllerButton b) {
-            return SDL_GameControllerGetButton(gc, b) != 0;
+        // Bindings from the ESC menu's controller page (port_settings.h). The
+        // defaults map SDL's A/B/X/Y positions (south/east/west/north) like
+        // the GamePad: B south, A east, Y west, X north; triggers are ZL/ZR
+        // (digital triggers report 32767).
+        auto pressed = [&](int binding) {
+            if (binding == rbrew_settings::kPadTriggerLeft) return SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_TRIGGERLEFT) > 8000;
+            if (binding == rbrew_settings::kPadTriggerRight) return SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) > 8000;
+            return binding >= 0 && SDL_GameControllerGetButton(gc, SDL_GameControllerButton(binding)) != 0;
         };
-        // SDL's A/B/X/Y are positions (south/east/west/north); the GamePad
-        // has B south, A east, Y west, X north.
-        if (btn(SDL_CONTROLLER_BUTTON_A))             buttons |= VPAD_BUTTON_B;
-        if (btn(SDL_CONTROLLER_BUTTON_B))             buttons |= VPAD_BUTTON_A;
-        if (btn(SDL_CONTROLLER_BUTTON_X))             buttons |= VPAD_BUTTON_Y;
-        if (btn(SDL_CONTROLLER_BUTTON_Y))             buttons |= VPAD_BUTTON_X;
-        if (btn(SDL_CONTROLLER_BUTTON_DPAD_LEFT))     buttons |= VPAD_BUTTON_LEFT;
-        if (btn(SDL_CONTROLLER_BUTTON_DPAD_RIGHT))    buttons |= VPAD_BUTTON_RIGHT;
-        if (btn(SDL_CONTROLLER_BUTTON_DPAD_UP))       buttons |= VPAD_BUTTON_UP;
-        if (btn(SDL_CONTROLLER_BUTTON_DPAD_DOWN))     buttons |= VPAD_BUTTON_DOWN;
-        if (btn(SDL_CONTROLLER_BUTTON_LEFTSHOULDER))  buttons |= VPAD_BUTTON_L;
-        if (btn(SDL_CONTROLLER_BUTTON_RIGHTSHOULDER)) buttons |= VPAD_BUTTON_R;
-        if (btn(SDL_CONTROLLER_BUTTON_START))         buttons |= VPAD_BUTTON_PLUS;
-        if (btn(SDL_CONTROLLER_BUTTON_BACK))          buttons |= VPAD_BUTTON_MINUS;
-        if (btn(SDL_CONTROLLER_BUTTON_GUIDE))         buttons |= VPAD_BUTTON_HOME;
-        if (btn(SDL_CONTROLLER_BUTTON_LEFTSTICK))     buttons |= VPAD_BUTTON_STICK_L;
-        if (btn(SDL_CONTROLLER_BUTTON_RIGHTSTICK))    buttons |= VPAD_BUTTON_STICK_R;
-
-        // Left trigger → ZL, right trigger → ZR (digital triggers report 32767)
-        if (SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_TRIGGERLEFT)  > 8000) buttons |= VPAD_BUTTON_ZL;
-        if (SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) > 8000) buttons |= VPAD_BUTTON_ZR;
+        for (int action = 0; action < rbrew_settings::kFirstMoveAction; ++action)
+            if (pressed(rbrew_settings::g_pad[action].load(std::memory_order_relaxed))) buttons |= kActionButtons[action];
 
         // SDL axes: [-32768, 32767] with y > 0 = down; the GamePad reports y > 0 = up.
         lx =  SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_LEFTX)  / 32767.0f;
@@ -349,12 +354,25 @@ static void VPADRead(CPUState* cpu) {
     if (g_screen_mode == ScreenMode::TV) {
         const uint8_t* keys = SDL_GetKeyboardState(nullptr);
 
+        // Bindings from the ESC menu's keyboard page (port_settings.h):
+        // scancodes, or kMouseBase + an SDL mouse button.
+        int mx_dummy, my_dummy;
+        const uint32_t mstate = (uint32_t)SDL_GetMouseState(&mx_dummy, &my_dummy);
+        bool key_held = false;   // keys (not mouse buttons) end a replay
+        auto bound = [&](int action) {
+            const int binding = rbrew_settings::g_keys[action].load(std::memory_order_relaxed);
+            if (binding >= rbrew_settings::kMouseBase) return (mstate & SDL_BUTTON(binding - rbrew_settings::kMouseBase)) != 0;
+            const bool down = binding >= 0 && binding < SDL_NUM_SCANCODES && keys[binding];
+            key_held = key_held || down;
+            return down;
+        };
+
         // WASD → left stick movement
         float kb_lx = 0.0f, kb_ly = 0.0f;
-        if (keys[SDL_SCANCODE_D]) kb_lx += 1.0f;
-        if (keys[SDL_SCANCODE_A]) kb_lx -= 1.0f;
-        if (keys[SDL_SCANCODE_W]) kb_ly += 1.0f; // +Y = up on the GamePad stick
-        if (keys[SDL_SCANCODE_S]) kb_ly -= 1.0f;
+        if (bound(rbrew_settings::kActMoveRight)) kb_lx += 1.0f;
+        if (bound(rbrew_settings::kActMoveLeft)) kb_lx -= 1.0f;
+        if (bound(rbrew_settings::kActMoveUp)) kb_ly += 1.0f; // +Y = up on the GamePad stick
+        if (bound(rbrew_settings::kActMoveDown)) kb_ly -= 1.0f;
         if (kb_lx != 0.0f && kb_ly != 0.0f) { kb_lx *= 0.7071f; kb_ly *= 0.7071f; } // diag norm
         if (kb_lx != 0.0f || kb_ly != 0.0f) { lx = kb_lx; ly = kb_ly; } // override controller
 
@@ -362,33 +380,21 @@ static void VPADRead(CPUState* cpu) {
         // mouse up looks up.
         int mdx = 0, mdy = 0;
         SDL_GetRelativeMouseState(&mdx, &mdy);
-        float mrx = (float)mdx * KBM_MOUSE_SENSITIVITY;
-        float mry = -(float)mdy * KBM_MOUSE_SENSITIVITY;
+        const float mouse_scale = rbrew_settings::g_mouse_scale.load(std::memory_order_relaxed);   // ESC menu
+        float mrx = (float)mdx * KBM_MOUSE_SENSITIVITY * mouse_scale;
+        float mry = -(float)mdy * KBM_MOUSE_SENSITIVITY * mouse_scale;
         if (mrx < -1.0f) mrx = -1.0f; if (mrx > 1.0f) mrx = 1.0f;
         if (mry < -1.0f) mry = -1.0f; if (mry > 1.0f) mry = 1.0f;
         // Blend: mouse delta is added to controller stick, clamped
         rx += mrx; if (rx < -1.0f) rx = -1.0f; if (rx > 1.0f) rx = 1.0f;
         ry += mry; if (ry < -1.0f) ry = -1.0f; if (ry > 1.0f) ry = 1.0f;
 
-        // Mouse buttons — ZR = fire, ZL = squid / aim
-        int mx_dummy, my_dummy;
-        uint32_t mstate = (uint32_t)SDL_GetMouseState(&mx_dummy, &my_dummy);
-        if (mstate & SDL_BUTTON(SDL_BUTTON_LEFT))  buttons |= VPAD_BUTTON_ZR;
-        if (mstate & SDL_BUTTON(SDL_BUTTON_RIGHT)) buttons |= VPAD_BUTTON_ZL;
-
-        // Keyboard buttons
-        if (keys[SDL_SCANCODE_RETURN]) buttons |= VPAD_BUTTON_A;
-        if (keys[SDL_SCANCODE_SPACE])  buttons |= VPAD_BUTTON_B;   // jump
-        if (keys[SDL_SCANCODE_Q])      buttons |= VPAD_BUTTON_X;   // sub weapon
-        if (keys[SDL_SCANCODE_E])      buttons |= VPAD_BUTTON_Y;   // special weapon
-        if (keys[SDL_SCANCODE_R])      buttons |= VPAD_BUTTON_R;   // R (centre cam / unused)
-        if (keys[SDL_SCANCODE_F])      buttons |= VPAD_BUTTON_PLUS;  // map / pause
-        if (keys[SDL_SCANCODE_G])      buttons |= VPAD_BUTTON_MINUS; // options
-        if (keys[SDL_SCANCODE_ESCAPE]) buttons |= VPAD_BUTTON_HOME;  // home menu
-        for (SDL_Scancode key : {SDL_SCANCODE_W, SDL_SCANCODE_A, SDL_SCANCODE_S, SDL_SCANCODE_D, SDL_SCANCODE_RETURN,
-                                 SDL_SCANCODE_SPACE, SDL_SCANCODE_Q, SDL_SCANCODE_E, SDL_SCANCODE_R,
-                                 SDL_SCANCODE_F, SDL_SCANCODE_G, SDL_SCANCODE_ESCAPE})
-            player_input = player_input || keys[key];
+        // Buttons (defaults: left click ZR = fire, right click ZL = squid,
+        // Return A, Space B = jump, Q X, E Y, R, F + = map, G - = options,
+        // H HOME; Esc opens the port's settings).
+        for (int action = 0; action < rbrew_settings::kFirstMoveAction; ++action)
+            if (bound(action)) buttons |= kActionButtons[action];
+        player_input = player_input || key_held;
     }
 
     static const bool s_auto_input = (std::getenv("RBREW_AUTO_INPUT") != nullptr);
@@ -445,6 +451,18 @@ static void VPADRead(CPUState* cpu) {
             } else {
                 buttons |= VPAD_BUTTON_R;  // Throw sub-weapon
             }
+        }
+    }
+
+    // ESC menu open (or its closing press still held): the game sees a
+    // neutral pad. Mouse motion accumulated meanwhile is dropped too.
+    {
+        const bool held = buttons != 0 || std::fabs(lx) > 0.2f || std::fabs(ly) > 0.2f ||
+                          std::fabs(rx) > 0.2f || std::fabs(ry) > 0.2f;
+        if (gx2_settings_menu_blocks_input(held)) {
+            buttons = 0; lx = ly = rx = ry = 0.0f;
+            has_phys_gyro = has_phys_accel = false;
+            player_input = false;
         }
     }
 

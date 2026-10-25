@@ -13,6 +13,7 @@
 #include "runtime/rebrewu_runtime.h"
 #include "runtime/host_process.h"
 #include "runtime/discord_rpc.h"
+#include "runtime/port_settings.h"
 #include "os/erreula/erreula.h"
 #include "os/coreinit/coreinit_overlay.h"
 #include "os/coreinit/coreinit_system_settings.h"
@@ -385,6 +386,8 @@ int main(int argc, char** argv) {
     std::filesystem::current_path(std::filesystem::path(executable).parent_path(), directory_error);
     if (directory_error) return 1;
 #endif
+    // ESC-menu options (settings.ini); start-only values reach the environment here.
+    rbrew_settings::load();
     rbrew::discord_rpc_init();
     RBREW_LOGF(stderr, "[BOOT] Splatoon launch runtime; RPX header entry=0x%08X\n", rebrewu_generated::Gambit_entry_point);
     RBREW_LOGF(stderr, "[FS] RBREW_CONTENT_DIR=%s\n",

@@ -8,6 +8,7 @@
 #pragma once
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -289,6 +290,67 @@ private:
     std::vector<float> rgba_, background_;
     int pad_ = 0, gap_ = 0, radius_ = 0, graph_height_ = 0;
     unsigned width_ = 0, height_ = 0;
+};
+
+// Settings menu (ESC): a centred panel in the same monochrome glass style.
+// One row per entry: label left, value right; the selected row is lit and its
+// adjustable value carries arrows. Rebuilt only when the view changes.
+class MenuPanel {
+public:
+    bool layout(double ui) {
+        const int title_px = std::max(16, int(30 * ui + 0.5)), row_px = std::max(12, int(19 * ui + 0.5)), hint_px = std::max(9, int(12.5 * ui + 0.5));
+        if (!title_.load(L"Segoe UI Semibold", title_px, 600) || !row_.load(L"Segoe UI", row_px, 400) ||
+            !hint_.load(L"Segoe UI", hint_px, 400)) return false;
+        pad_ = std::max(10, int(26 * ui + 0.5));
+        row_height_ = std::max(18, int(34 * ui + 0.5));
+        radius_ = std::max(4, int(12 * ui + 0.5));
+        width_ = unsigned(std::max(360, int(620 * ui + 0.5)));
+        return true;
+    }
+    unsigned width() const { return width_; }
+    unsigned height(size_t rows) const {
+        return unsigned(pad_ * 2 + title_.ascent() + title_.descent() + pad_ / 2 + int(rows) * row_height_ + pad_ / 2 +
+                        hint_.ascent() + hint_.descent());
+    }
+    template <class View>
+    void draw(const View& view, uint8_t* out, unsigned w, unsigned h) {
+        rgba_.assign(size_t(w) * h * 4, 0.0f);
+        const float r = float(radius_);
+        for (unsigned y = 0; y < h; ++y) for (unsigned x = 0; x < w; ++x) {
+            const float cx = std::max(0.0f, std::max(r - (x + 0.5f), (x + 0.5f) - (w - r)));
+            const float cy = std::max(0.0f, std::max(r - (y + 0.5f), (y + 0.5f) - (h - r)));
+            const float dist = std::sqrt(cx * cx + cy * cy) - r;
+            const float inside = std::clamp(0.5f - dist, 0.0f, 1.0f);
+            if (inside <= 0) continue;
+            float* d = &rgba_[(size_t(y) * w + x) * 4];
+            Font::over(d, 0.04f, 0.82f * inside);
+            const float rim = std::clamp(1.0f - std::fabs(dist + 0.5f), 0.0f, 1.0f);
+            if (rim > 0) Font::over(d, 1.0f, 0.14f * rim * inside);
+        }
+        int y = pad_ + title_.ascent();
+        title_.draw(view.title, pad_, y, 1.0f, 0.97f, rgba_.data(), w, h);
+        y += title_.descent() + pad_ / 2;
+        for (const auto& line : view.lines) {
+            const int top = y, base = top + (row_height_ + row_.ascent() - row_.descent()) / 2;
+            if (line.selected)
+                for (int py = top + 1; py < top + row_height_ - 1 && py < int(h); ++py)
+                    for (int px = pad_ / 2; px < int(w) - pad_ / 2; ++px) Font::over(&rgba_[(size_t(py) * w + px) * 4], 1.0f, 0.13f);
+            row_.draw(line.label, pad_, base, 1.0f, line.selected ? 1.0f : 0.72f, rgba_.data(), w, h);
+            if (!line.value.empty()) {
+                const std::string value = line.selected && line.adjustable ? "<  " + line.value + "  >" : line.value;
+                row_.draw(value, int(w) - pad_ - row_.width(value), base, 1.0f, line.selected ? 1.0f : 0.62f, rgba_.data(), w, h);
+            }
+            y += row_height_;
+        }
+        y += pad_ / 2 + hint_.ascent();
+        hint_.draw(view.hint, pad_, y, 1.0f, 0.5f, rgba_.data(), w, h);
+        for (size_t i = 0; i < rgba_.size(); ++i) out[i] = uint8_t(std::clamp(rgba_[i], 0.0f, 1.0f) * 255.0f + 0.5f);
+    }
+private:
+    Font title_, row_, hint_;
+    std::vector<float> rgba_;
+    int pad_ = 0, row_height_ = 0, radius_ = 0;
+    unsigned width_ = 0;
 };
 
 }  // namespace gx2vk::overlay

@@ -18,6 +18,7 @@
 
 #include "../os_common.h"
 #include "../gx2/gx2_perf.h"
+#include "../../runtime/port_settings.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -420,6 +421,12 @@ static void ax_audio_callback(ma_device*,void* output,const void*,ma_uint32 fram
     const auto* samples=static_cast<const float*>(output);
     for(uint32_t n=0;n<frames;++n) if(samples[n*2]!=0 || samples[n*2+1]!=0)
         s_device_signal_frames.fetch_add(1,std::memory_order_relaxed);
+    // ESC menu volume (output only; the guest mix is unchanged).
+    const float volume=rbrew_settings::g_volume.load(std::memory_order_relaxed);
+    if(volume!=1.0f) {
+        float* out=static_cast<float*>(output);
+        for(uint32_t n=0;n<frames*2;++n) out[n]*=volume;
+    }
 }
 #endif // HAVE_MINIAUDIO
 
