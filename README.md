@@ -6,6 +6,23 @@ An unofficial native Windows port of **Splatoon (Wii U)**, made by statically re
 
 > ⚠️ **Work in progress.** Expect graphical glitches, missing effects, stutter and crashes. You need **strong hardware** (see below). If something goes wrong, please [open an issue](https://github.com/NEVESYA/SPLATOON-1-PC-PORT/issues). Include your PC specs and the text from the setup window or a screenshot. AMD GPUs are not supported, only NVIDIA
 
+## What's new
+
+**Settings menu (Esc / controller touchpad)**
+- Render resolution, Plaza 60 FPS on/off, fullscreen, FPS overlay
+- Gyro on/off, gyro and mouse sensitivity, invert gyro, volume
+- Rebind every button for keyboard/mouse and controller
+- Saved in `settings.ini` next to `Splatoon.exe`
+- HOME moved from Esc to H
+
+**Performance**
+- Plaza runs at 60 FPS with normal game speed (keeps NPCs)
+- Fewer shader stutters, faster rendering in levels
+
+**Fixes**
+- Normal ground no longer counts as enemy ink in Octo Valley
+- With gyro, the right stick no longer moves the camera up/down
+
 ---
 
 ## Requirements
