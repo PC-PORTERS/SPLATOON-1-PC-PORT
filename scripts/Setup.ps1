@@ -437,11 +437,21 @@ if (Test-Path -LiteralPath $vsNinja) {
 if ($ninja -and $vs) {
     $vcvars = Join-Path $vs.installationPath 'VC\Auxiliary\Build\vcvars64.bat'
     if (Test-Path -LiteralPath $vcvars) {
+        # A broken PATH entry (a stray quote, or a leftover ' /M' from a bad
+        # setx call by some installer) makes vcvars64.bat abort with
+        # "... was unexpected at this time", and the compiler is never set up.
+        # Clean this process's PATH copy first; the system PATH is not changed.
+        $cleanPath = ($env:PATH -split ';' | ForEach-Object { ($_ -replace '"', '' -replace '\s+/[Mm]\s*$', '').Trim() } |
+            Where-Object { $_ } | Select-Object -Unique) -join ';'
+        $env:PATH = $cleanPath
         $envLines = cmd.exe /c "call `"$vcvars`" >nul & set"
         foreach ($line in $envLines) {
             if ($line -match '^([^=]+)=(.*)$') {
                 [Environment]::SetEnvironmentVariable($matches[1], $matches[2], 'Process')
             }
+        }
+        if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) {
+            Fail "Visual Studio's C++ environment could not be loaded (cl.exe not found). Open 'x64 Native Tools Command Prompt for VS 2022': if it shows an error, check your PATH environment variable for broken entries (stray quotes), or repair the 'Desktop development with C++' workload in the Visual Studio Installer."
         }
     }
 }
@@ -508,6 +518,14 @@ $script:StageTimings['2. Game Validation & Resources'] = [math]::Round($script:S
 Step 'Installing open-source libraries (vcpkg: zlib, curl, volk, Vulkan headers)'
 $script:StepSw = [System.Diagnostics.Stopwatch]::StartNew()
 $vcpkgRoot = Join-Path $Work 'vcpkg'
+# vcpkg's own PowerShell bootstrap breaks when its path contains [ or ]
+# (for example a download folder named "Splatoon [AGMP01]"): PowerShell reads
+# them as wildcards ("A parameter cannot be found that matches parameter name
+# 'Raw'"). Use a bracket-free folder then.
+if ($vcpkgRoot -match '[\[\]]') {
+    $vcpkgRoot = Join-Path $env:LOCALAPPDATA 'SplatoonPort\vcpkg'
+    Info "The project folder contains [ or ]; vcpkg goes to $vcpkgRoot"
+}
 $vcpkg = Join-Path $vcpkgRoot 'vcpkg.exe'
 if (-not (Test-Path -LiteralPath $vcpkg)) {
     if (-not (Test-Path -LiteralPath (Join-Path $vcpkgRoot '.git'))) {
