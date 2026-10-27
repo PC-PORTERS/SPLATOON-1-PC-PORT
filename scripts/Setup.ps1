@@ -521,10 +521,16 @@ $vcpkgRoot = Join-Path $Work 'vcpkg'
 # vcpkg's own PowerShell bootstrap breaks when its path contains [ or ]
 # (for example a download folder named "Splatoon [AGMP01]"): PowerShell reads
 # them as wildcards ("A parameter cannot be found that matches parameter name
-# 'Raw'"). Use a bracket-free folder then.
-if ($vcpkgRoot -match '[\[\]]') {
-    $vcpkgRoot = Join-Path $env:LOCALAPPDATA 'SplatoonPort\vcpkg'
-    Info "The project folder contains [ or ]; vcpkg goes to $vcpkgRoot"
+# 'Raw'"). vcpkg also cannot start itself from a path with non-ASCII letters
+# (a user name with an accent): "Abnormal exit with child return code: no
+# such file or directory" while detecting the compiler (issue #10). Use a
+# plain folder then; LOCALAPPDATA contains the user name too.
+if ($vcpkgRoot -match '[\[\]]|[^\x00-\x7F]') {
+    $vcpkgRoot = @((Join-Path $env:LOCALAPPDATA 'SplatoonPort\vcpkg'), (Join-Path $env:ProgramData 'SplatoonPort\vcpkg'),
+                   (Join-Path "$env:SystemDrive\" 'SplatoonPort\vcpkg')) |
+        Where-Object { $_ -notmatch '[\[\]]|[^\x00-\x7F]' } | Select-Object -First 1
+    if (-not $vcpkgRoot) { Fail 'No folder without special characters was found for vcpkg. Move the project to a folder like C:\SplatoonPort and run Setup.bat again.' }
+    Info "The project folder contains special characters; vcpkg goes to $vcpkgRoot"
 }
 $vcpkg = Join-Path $vcpkgRoot 'vcpkg.exe'
 if (-not (Test-Path -LiteralPath $vcpkg)) {
