@@ -77,6 +77,7 @@ function Fail([string]$Text) {
     Write-Host ''
     Write-Host "SETUP FAILED: $Text" -ForegroundColor Red
     Write-Host 'If you cannot fix this, open an issue on GitHub and paste this window''s text.' -ForegroundColor Red
+    if (Get-Command Remove-BuildDrive -ErrorAction SilentlyContinue) { Remove-BuildDrive }
     exit 1
 }
 function Check-Exit([string]$What) {
@@ -277,6 +278,55 @@ Write-Host '   Uses only YOUR OWN game files. Keep this window open.' -Foregroun
 Write-Host '============================================================' -ForegroundColor Magenta
 
 if (-not [Environment]::Is64BitOperatingSystem) { Fail 'A 64-bit Windows 10 or 11 is required.' }
+
+# A folder path with non-ASCII letters (a user name with an accent) reaches
+# the compiler mangled: Ninja starts cl.exe with an ANSI command line, so
+# every include path points nowhere ("Cannot open include file", the accent
+# turned into two other characters), issue #10. A junction does not help
+# (CMake resolves it back). Build through a drive letter mapped to this same
+# folder (subst) instead: nothing is moved or copied, and the letter is
+# removed again when setup ends. The game folder keeps the real path.
+$ProjectRoot = $Root
+$script:BuildDrive = $null
+function Remove-BuildDrive {
+    if ($script:BuildDrive) { subst "$($script:BuildDrive)" /D 2>$null | Out-Null; $script:BuildDrive = $null }
+}
+if ($Root -match '[^\x00-\x7F]') {
+    # The letter this folder already has from an earlier run, else a free one.
+    $mapped = subst | Where-Object { $_ -match '^([A-Z]):\\: => (.*)$' -and $matches[2].TrimEnd('\') -ieq $Root.TrimEnd('\') } |
+        ForEach-Object { $_.Substring(0, 2) } | Select-Object -First 1
+    if (-not $mapped) {
+        $free = @('S','T','U','V','W','X','Y','Z','R','Q','P') | Where-Object { -not (Test-Path "${_}:\") } | Select-Object -First 1
+        if ($free) { subst "${free}:" "$Root" 2>$null | Out-Null; if (Test-Path -LiteralPath "${free}:\scripts\Setup.ps1") { $mapped = "${free}:"; $script:BuildDrive = $mapped } }
+    }
+    if (-not $mapped) {
+        Fail "Your folder path contains special characters ($Root), which the C++ compiler cannot handle, and no free drive letter was found to work around it. Move the project to a folder like C:\SplatoonPort and run Setup.bat again."
+    }
+    Info "Your folder path contains special characters; the build runs through drive $mapped (the same folder)."
+    $Root = "$mapped\"
+    $Recompiler = Join-Path $Root 'recompiler'
+    $Work = Join-Path $Root 'build'
+    $Downloads = Join-Path $Work 'downloads'
+    $BoundaryProfile = Join-Path $Root 'profiles\agmp-v16.entries'
+    $HookProfile = Join-Path $Root 'profiles\agmp-v16.hooks'
+}
+# A build folder configured under another path (the folder was moved or
+# renamed, or the drive above is new): CMake refuses the old cache. Reset that
+# configuration (only inside this project's build folder).
+function Reset-StaleCMakeCache([string]$BuildDir) {
+    $cache = Join-Path $BuildDir 'CMakeCache.txt'
+    if (-not (Test-Path -LiteralPath $cache)) { return }
+    $line = Select-String -LiteralPath $cache -Pattern '^CMAKE_CACHEFILE_DIR:INTERNAL=(.*)$' | Select-Object -First 1
+    $want = ($BuildDir -replace '\\', '/').TrimEnd('/')
+    if ($line -and $line.Matches[0].Groups[1].Value.TrimEnd('/') -ne $want) {
+        $files = [IO.Path]::GetFullPath((Join-Path $BuildDir 'CMakeFiles'))
+        $inside = [IO.Path]::GetFullPath($Work).TrimEnd('\') + '\'
+        if (-not $files.StartsWith($inside, [StringComparison]::OrdinalIgnoreCase)) { return }
+        Info "Resetting the build configuration in $BuildDir (it was made for another folder path) ..."
+        Remove-Item -LiteralPath $cache -Force
+        if (Test-Path -LiteralPath $files) { Remove-Item -LiteralPath $files -Recurse -Force }
+    }
+}
 if ($Clean -and (Test-Path -LiteralPath $Work)) {
     Info 'Removing previous build outputs (-Clean) ...'
     Remove-Item -LiteralPath $Work -Recurse -Force
@@ -506,7 +556,7 @@ if ($rpxHash -ne $SupportedRpxSha256) {
 }
 Good 'Supported game: Splatoon (EUR, AGMP01, v16).'
 
-if (-not $Output) { $Output = Join-Path $Root 'Game' }
+if (-not $Output) { $Output = Join-Path $ProjectRoot 'Game' }
 $Output = Full-FolderPath $Output
 if (-not $Output) { Fail 'No output folder was specified.' }
 if (Test-Path -LiteralPath $Output -PathType Leaf) { Fail "The output path is a file, not a folder: $Output" }
@@ -525,7 +575,7 @@ $vcpkgRoot = Join-Path $Work 'vcpkg'
 # (a user name with an accent): "Abnormal exit with child return code: no
 # such file or directory" while detecting the compiler (issue #10). Use a
 # plain folder then; LOCALAPPDATA contains the user name too.
-if ($vcpkgRoot -match '[\[\]]|[^\x00-\x7F]') {
+if ($vcpkgRoot -match '[\[\]]|[^\x00-\x7F]' -or $ProjectRoot -match '[^\x00-\x7F]') {
     $vcpkgRoot = @((Join-Path $env:LOCALAPPDATA 'SplatoonPort\vcpkg'), (Join-Path $env:ProgramData 'SplatoonPort\vcpkg'),
                    (Join-Path "$env:SystemDrive\" 'SplatoonPort\vcpkg')) |
         Where-Object { $_ -notmatch '[\[\]]|[^\x00-\x7F]' } | Select-Object -First 1
@@ -537,7 +587,46 @@ if (-not (Test-Path -LiteralPath $vcpkg)) {
     if (-not (Test-Path -LiteralPath (Join-Path $vcpkgRoot '.git'))) {
         & git clone --depth 1 $VcpkgUrl $vcpkgRoot; Check-Exit 'Downloading vcpkg'
     }
-    & (Join-Path $vcpkgRoot 'bootstrap-vcpkg.bat') -disableMetrics; Check-Exit 'Preparing vcpkg'
+    # vcpkg's bootstrap downloads vcpkg.exe with its own small tool; a failed
+    # name lookup ("The server name or address could not be resolved") or a
+    # dropped connection stopped the whole setup. Retry, then download the
+    # same release with Windows' web client (it follows the system proxy), and
+    # accept it only with a valid Microsoft signature.
+    for ($attempt = 1; $attempt -le 3 -and -not (Test-Path -LiteralPath $vcpkg); ++$attempt) {
+        & (Join-Path $vcpkgRoot 'bootstrap-vcpkg.bat') -disableMetrics
+        if (-not (Test-Path -LiteralPath $vcpkg)) { Warn "Downloading vcpkg.exe failed (attempt $attempt of 3)."; Start-Sleep -Seconds (5 * $attempt) }
+    }
+    if (-not (Test-Path -LiteralPath $vcpkg)) {
+        $metadata = Join-Path $vcpkgRoot 'scripts\vcpkg-tool-metadata.txt'
+        $release = if (Test-Path -LiteralPath $metadata) { (ConvertFrom-StringData (Get-Content -LiteralPath $metadata -Raw)).VCPKG_TOOL_RELEASE_TAG } else { $null }
+        if ($release) {
+            $url = "https://github.com/microsoft/vcpkg-tool/releases/download/$release/vcpkg.exe"
+            $partial = "$vcpkg.download"
+            for ($attempt = 1; $attempt -le 3 -and -not (Test-Path -LiteralPath $vcpkg); ++$attempt) {
+                try {
+                    Info "Downloading vcpkg.exe directly (attempt $attempt of 3) ..."
+                    Invoke-WebRequest -Uri $url -OutFile $partial -UseBasicParsing
+                    $signature = Get-AuthenticodeSignature -LiteralPath $partial
+                    if ($signature.Status -eq 'Valid' -and $signature.SignerCertificate.Subject -match 'O=Microsoft Corporation') {
+                        Move-Item -LiteralPath $partial -Destination $vcpkg -Force
+                    } else {
+                        Warn 'The downloaded vcpkg.exe has no valid Microsoft signature; it was discarded.'
+                        Remove-Item -LiteralPath $partial -Force -ErrorAction SilentlyContinue
+                    }
+                } catch {
+                    Warn "Download failed: $($_.Exception.Message)"
+                    Remove-Item -LiteralPath $partial -Force -ErrorAction SilentlyContinue
+                    Start-Sleep -Seconds (5 * $attempt)
+                }
+            }
+        }
+    }
+    if (-not (Test-Path -LiteralPath $vcpkg)) {
+        Fail ("vcpkg.exe could not be downloaded from GitHub. Your PC could not reach github.com (internet, DNS, VPN, firewall or an ad blocker). " +
+              "Check the connection and run Setup.bat again, or download vcpkg.exe with a browser from https://github.com/microsoft/vcpkg-tool/releases " +
+              "and put it here: $vcpkg")
+    }
+    Set-Content -LiteralPath (Join-Path $vcpkgRoot 'vcpkg.disable-metrics') -Value '' -ErrorAction SilentlyContinue
 }
 & $vcpkg install @VcpkgPackages --triplet x64-windows --disable-metrics; Check-Exit 'Installing vcpkg libraries'
 $toolchain = Join-Path $vcpkgRoot 'scripts\buildsystems\vcpkg.cmake'
@@ -572,6 +661,7 @@ $script:StageTimings['4. SDL2 & glslang Compilers'] = [math]::Round($script:Step
 Step 'Building the recompiler (RebrewU)'
 $script:StepSw = [System.Diagnostics.Stopwatch]::StartNew()
 $rebrewuBuild = Join-Path $Work 'rebrewu'
+Reset-StaleCMakeCache $rebrewuBuild
 & $cmake -S $Recompiler -B $rebrewuBuild -G $generator -A x64 "-DCMAKE_TOOLCHAIN_FILE=$toolchain" -DVCPKG_TARGET_TRIPLET=x64-windows -DREBREWU_BUILD_TESTS=OFF
 Check-Exit 'Configuring the recompiler'
 $rebrewuBuildArgs = @('--build', $rebrewuBuild, '--config', 'Release', '--target', 'rebrewu', '--parallel')
@@ -611,6 +701,7 @@ $script:StageTimings['6. RPX Decompilation to C++'] = [math]::Round($script:Step
 Step 'Building the game (this is the long part: 15-60 minutes)'
 $script:StepSw = [System.Diagnostics.Stopwatch]::StartNew()
 $gameBuild = Join-Path $Work 'game'
+Reset-StaleCMakeCache $gameBuild
 $gameCmakeArgs = @(
     '-S', (Join-Path $Recompiler 'port'),
     '-B', $gameBuild,
@@ -696,4 +787,4 @@ foreach ($entry in $script:StageTimings.GetEnumerator()) {
     Write-Host ("   {0,-42} : {1,8} s" -f $entry.Key, $entry.Value) -ForegroundColor Gray
 }
 Write-Host '------------------------------------------------------------' -ForegroundColor DarkCyan
-
+Remove-BuildDrive

@@ -18,7 +18,7 @@ An unofficial native Windows port of **Splatoon (Wii U)**, made by statically re
 - Plaza runs at 60 FPS with normal game speed (keeps NPCs)
 - Fewer shader stutters, faster rendering in levels
 
-**Fix:** Setup now works when the folder path contains accents (vcpkg compiler error, issue #10)
+**Fix:** Setup now works when the folder path contains accents (issue #10) and retries a failed vcpkg download
 
 ---
 
