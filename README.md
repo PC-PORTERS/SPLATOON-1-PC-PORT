@@ -1,7 +1,7 @@
 # Splatoon 1 PC Port
 
 # IF YOU WANT TO HELP US DM sussy_0897 IN DISCORD OR START A FORK (PREFERABLY DM ME ON DISCORD SINCE U MIGHT GET ADDED TO OUR TEAM)
-# IF YOU POST ANYTHING RELATED TO OUR PORT ON TIKTOK TAG @nevesboy67 @77emul AND 
+# IF YOU POST ANYTHING RELATED TO OUR PORT ON TIKTOK TAG @nevesboy67 @77emul AND @splatoon1multiplayer
 
 An unofficial native Windows port of **Splatoon (Wii U)**, made by statically recompiling the game's code into a Windows program, with a Vulkan renderer.
 
