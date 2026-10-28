@@ -1,3 +1,4 @@
+#include <utility>
 #include "../../runtime/rbrew_diagnostics.h"
 #include "../../runtime/texture_diagnostics.h"
 #include "gx2_display_list.h"

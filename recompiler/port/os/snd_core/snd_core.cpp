@@ -1,3 +1,4 @@
+#include <cstring>
 #include "../../runtime/rbrew_diagnostics.h"
 // snd_core / AX audio
 //

@@ -1,3 +1,4 @@
+#include <cstring>
 #include "gx2_texture_diagnostics.h"
 #ifdef RBREW_TEXTURE_DIAGNOSTICS
 #include "vk/gx2_render_vk_state.h"

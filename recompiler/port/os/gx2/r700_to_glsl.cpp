@@ -1,3 +1,4 @@
+#include <cstring>
 #include "../../runtime/rbrew_diagnostics.h"
 #include "r700_to_glsl.h"
 #include "r700_translation_reads.h"

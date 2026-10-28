@@ -13,6 +13,10 @@
 #include <fstream>
 #include <sstream>
 
+#if !defined(_MSC_VER)
+#include <strings.h> // strcasecmp
+#endif
+
 #if defined(_WIN32)
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -192,7 +196,13 @@ void Init() {
 
     // Check environment override
     const char* env_diag = std::getenv("SPLATOON_DIAGNOSTICS");
-    if (env_diag && (strcmp(env_diag, "0") == 0 || _stricmp(env_diag, "off") == 0)) {
+    if (env_diag && (strcmp(env_diag, "0") == 0 ||
+#if defined(_MSC_VER)
+        _stricmp(env_diag, "off") == 0
+#else
+        strcasecmp(env_diag, "off") == 0
+#endif
+        )) {
         s_level.store(DiagnosticLevel::Disabled);
         return;
     }
@@ -251,7 +261,7 @@ void RecordEvent(EventCategory category, EventSeverity severity, int16_t code, c
     ev.category = category;
     ev.severity = severity;
     ev.code = code;
-    strncpy_s(ev.message, sizeof(ev.message), message ? message : "", _TRUNCATE);
+    std::snprintf(ev.message, sizeof(ev.message), "%s", message ? message : "");
 }
 
 void RecordFrame(uint32_t frame_index, float frame_time_ms, float cpu_time_ms,

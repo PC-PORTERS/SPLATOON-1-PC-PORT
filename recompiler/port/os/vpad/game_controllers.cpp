@@ -110,8 +110,9 @@ static void update_controllers_locked() {
                 dev.gc = gc;
                 dev.instance_id = SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(gc));
                 const char* gc_name = SDL_GameControllerName(gc);
-                strncpy_s(dev.name, sizeof(dev.name), gc_name ? gc_name : (joy_name ? joy_name : "Unknown"), _TRUNCATE);
-                strncpy_s(dev.guid_str, sizeof(dev.guid_str), guid_str, _TRUNCATE);
+                std::snprintf(dev.name, sizeof(dev.name), "%s",
+                              gc_name ? gc_name : (joy_name ? joy_name : "Unknown"));
+                std::snprintf(dev.guid_str, sizeof(dev.guid_str), "%s", guid_str);
 
                 // Check and activate sensors (gyro & accelerometer)
                 if (SDL_GameControllerHasSensor(gc, SDL_SENSOR_GYRO)) {

@@ -65,15 +65,26 @@ def prepare(args):
     stamp.write_text(json.dumps(dict(profile=1, compiler_sha512=GLSLANG_SHA512)), encoding='utf-8')
     return sdl, compiler
 
+def profile_marker(name, prefix):
+    """Marker proving the audited profile was built, next to the package config
+    file so one directory can serve as the find_package(<name>_DIR) hint."""
+    if name != 'sdl2-vulkan':
+        return prefix / 'lib/cmake/glslang/GlslangVulkanOnly.cmake'
+    # Windows installs SDL2Config.cmake to <prefix>/cmake, other platforms to
+    # <prefix>/lib/cmake/SDL2. Place the marker beside whichever exists.
+    for directory in (prefix / 'cmake', prefix / 'lib/cmake/SDL2'):
+        if (directory / 'SDL2Config.cmake').exists():
+            return directory / 'SDL2VulkanOnly.cmake'
+    return prefix / 'cmake/SDL2VulkanOnly.cmake'
+
 def build_profile(source, name, options, common, args, parallel_jobs):
     build, prefix = args.build_root.resolve() / (name + '-build'), args.prefix.resolve() / name
-    marker = prefix / ('cmake/SDL2VulkanOnly.cmake' if name == 'sdl2-vulkan' else 'lib/cmake/glslang/GlslangVulkanOnly.cmake')
-    if marker.exists():
+    if profile_marker(name, prefix).exists():
         return
     subprocess.run([args.cmake, '-S', str(source), '-B', str(build), *common, *options,
         '-DCMAKE_INSTALL_PREFIX=' + str(prefix)], check=True)
     subprocess.run([args.cmake, '--build', str(build), '--config', 'Release', '--target', 'install', '--parallel', str(parallel_jobs)], check=True)
-    marker.write_text('# Audited Vulkan dependency profile 1.\n', encoding='utf-8')
+    profile_marker(name, prefix).write_text('# Audited Vulkan dependency profile 1.\n', encoding='utf-8')
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -83,7 +94,8 @@ def main():
     parser.add_argument('--prefix', type=Path, required=True)
     parser.add_argument('--cache-dir', type=Path, default=None)
     parser.add_argument('--prepare-only', action='store_true')
-    parser.add_argument('--generator', default='Visual Studio 18 2026', help='CMake Visual Studio generator')
+    parser.add_argument('--generator', default='Ninja',
+        help='CMake generator (Ninja, "Unix Makefiles", "Visual Studio 17 2022", ...)')
     parser.add_argument('--cmake', default='cmake', help='cmake executable')
     args = parser.parse_args()
 
@@ -92,8 +104,8 @@ def main():
         cache_root = args.cache_dir.resolve()
         sdl_cached = cache_root / 'sdl2-vulkan'
         glslang_cached = cache_root / 'glslang-vulkan'
-        sdl_m = sdl_cached / 'cmake/SDL2VulkanOnly.cmake'
-        glslang_m = glslang_cached / 'lib/cmake/glslang/GlslangVulkanOnly.cmake'
+        sdl_m = profile_marker('sdl2-vulkan', sdl_cached)
+        glslang_m = profile_marker('glslang-vulkan', glslang_cached)
         if sdl_m.exists() and glslang_m.exists():
             prefix_sdl = args.prefix.resolve() / 'sdl2-vulkan'
             prefix_glslang = args.prefix.resolve() / 'glslang-vulkan'
@@ -106,7 +118,9 @@ def main():
     sdl, compiler = prepare(args)
     if args.prepare_only:
         return
-    common = ['-G', args.generator, '-A', 'x64']
+    common = ['-G', args.generator]
+    if 'Visual Studio' in args.generator:
+        common += ['-A', 'x64']  # MSBuild platform; Make/Ninja generators reject -A
     profiles = [
         (sdl, 'sdl2-vulkan', ['-DSDL_SHARED=OFF', '-DSDL_STATIC=ON', '-DSDL_TEST=OFF', '-DSDL_TESTS=OFF',
             '-DSDL_OPENGL=OFF', '-DSDL_OPENGLES=OFF', '-DSDL_VULKAN=ON', '-DSDL_RENDER_D3D=OFF',
