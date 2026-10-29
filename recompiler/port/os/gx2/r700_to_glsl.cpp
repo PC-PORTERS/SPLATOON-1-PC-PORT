@@ -39,7 +39,6 @@ std::vector<OutputDeclaration> vertex_outputs(std::string_view source) {
 }
 }
 
-thread_local ShaderHostState LatteGPUState;
 std::string r700_rect_geometry(const char* vertex_source,bool quad) {
     const std::string_view vs=vertex_source?vertex_source:"";
     const bool point=vs.find("gl_PointSize;")!=std::string::npos;
@@ -61,8 +60,6 @@ std::string r700_rect_geometry(const char* vertex_source,bool quad) {
     else gs+="void main(){float d01=length(gl_in[0].gl_Position.xy-gl_in[1].gl_Position.xy);float d02=length(gl_in[0].gl_Position.xy-gl_in[2].gl_Position.xy);float d12=length(gl_in[1].gl_Position.xy-gl_in[2].gl_Position.xy);int a=0,b=1,c=2;if(d01>d02&&d01>d12){a=2;b=1;c=0;}else if(d02>d01&&d02>d12){a=1;b=2;c=0;}emitCorner(a,b,c,false);emitCorner(b,a,c,false);emitCorner(c,a,b,false);emitCorner(a,b,c,true);EndPrimitive();}\n";
     return gs;
 }
-static thread_local LatteShaderPSInputTable s_ps_inputs;
-LatteShaderPSInputTable* LatteSHRC_GetPSInputTable() { return &s_ps_inputs; }
 LatteFetchShader::~LatteFetchShader() = default;
 
 // GX2InitFetchShaderEx converts GX2 format IDs to Latte fetch formats;
@@ -133,7 +130,7 @@ char* r700_to_glsl(const R700TranslateInput& in) {
         std::array<uint32_t, 0x10000> regs;
         if (in.context_registers) std::copy_n(in.context_registers,regs.size(),regs.data());
         else regs.fill(0);
-        LatteShader_CreatePSInputTable(&s_ps_inputs,regs.data());
+        LatteShader_CreatePSInputTable(LatteSHRC_GetPSInputTable(),regs.data());
         LatteFetchShader fetch;
         std::vector<LatteParsedFetchShaderAttribute> attrs;
         attrs.reserve(in.attributes.size());
