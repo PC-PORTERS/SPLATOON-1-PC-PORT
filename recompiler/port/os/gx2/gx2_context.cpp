@@ -15,6 +15,7 @@
 #include "../../runtime/host_sleep.h"
 #include <cstring>
 #include <mutex>
+#include <utility>
 #include "gx2_native_context.h"
 #include "gx2_surface.h"
 #include "gx2_display_list.h"

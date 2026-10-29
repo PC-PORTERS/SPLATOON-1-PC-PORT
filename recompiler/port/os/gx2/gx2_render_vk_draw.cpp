@@ -1,3 +1,4 @@
+#include <utility>
 #include "../../runtime/rbrew_diagnostics.h"
 #include "gx2_texture_diagnostics.h"
 // gx2_render_vk_draw.cpp - Vulkan draw submission for GX2: translated
@@ -3929,11 +3930,27 @@ void gx2r_draw_report() {
 // renderer converts about 1.7 million indices per busy plaza frame). Same
 // bytes as the scalar conversion, which still handles the tail and CPUs
 // without SSSE3.
+// MSVC compiles intrinsics regardless of the selected ISA; GCC and Clang
+// reject always_inline SSSE3 intrinsics unless the caller is tagged too.
+#if defined(_MSC_VER)
+#define RBREW_TARGET_SSSE3
+#else
+#define RBREW_TARGET_SSSE3 __attribute__((target("ssse3")))
+#endif
+
 static bool has_ssse3() {
-    static const bool ssse3 = [] { int info[4]{}; __cpuid(info, 1); return (info[2] & (1 << 9)) != 0; }();
+    static const bool ssse3 = [] {
+#if defined(_MSC_VER)
+        int info[4]{};
+        __cpuid(info, 1);
+        return (info[2] & (1 << 9)) != 0;
+#else
+        return __builtin_cpu_supports("ssse3") != 0;
+#endif
+    }();
     return ssse3;
 }
-static void copy_swapped_indices(uint8_t* dst, const uint8_t* src, uint32_t count, bool is_u32) {
+static void RBREW_TARGET_SSSE3 copy_swapped_indices(uint8_t* dst, const uint8_t* src, uint32_t count, bool is_u32) {
     const size_t bytes = size_t(count) * (is_u32 ? 4 : 2);
     size_t i = 0;
     if (has_ssse3()) {

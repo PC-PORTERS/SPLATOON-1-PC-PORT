@@ -1,3 +1,4 @@
+#include <cstring>
 #include "../../runtime/rbrew_diagnostics.h"
 #include "../../runtime/texture_diagnostics.h"
 // GX2 draw, state, shader, texture, and surface stubs

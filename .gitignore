@@ -1,5 +1,6 @@
-# Build outputs, downloads and the installed game are created by Setup.bat
-# and must never be committed (they contain or derive from your game files).
+# Build outputs, downloads and the installed game are created by Setup.bat /
+# setup.sh and must never be committed (they contain or derive from your game
+# files).
 /build/
 /Game/
 
@@ -24,6 +25,7 @@ save/
 __pycache__/
 *.pyc
 .vs/
+.vscode/
 
 # Local developer artifacts: screenshots, frame dumps, logs and backups made
 # while testing. They stay on disk but are never committed.

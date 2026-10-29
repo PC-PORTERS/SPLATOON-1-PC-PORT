@@ -1,5 +1,6 @@
 #include "function_discovery.hpp"
 #include "../ppc/decoder/ppc_decode.hpp"
+#include <algorithm>
 #include <unordered_map>
 #include <array>
 #include <tuple>

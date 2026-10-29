@@ -4,7 +4,7 @@
 // Derived from Cemu cc6fea125a5d4f559c662d13c5f4af0b6dd0876f.
 // Standalone integration modifications: Splatoon native port contributors.
 #include "Cafe/HW/Latte/LatteAddrLib/LatteAddrLib.h"
-#ifdef _MSC_VER
+#if defined(_MSC_VER)
 #include <intrin.h> // _BitScanReverse (was via Latte.h)
 #endif
 
@@ -13,15 +13,19 @@ using namespace Latte;
 namespace LatteAddrLib
 {
 
-#if BOOST_OS_LINUX || BOOST_OS_MACOS || BOOST_OS_BSD
-	unsigned char _BitScanReverse(uint32* _Index, uint32 _Mask)
+	// Index of the highest set bit, with MSVC _BitScanReverse semantics.
+	// Portable by design: on LP64 unsigned long is 8 bytes, so the original
+	// (unsigned long*) call casts would overwrite a neighbouring uint32 field.
+	static inline uint32 BitScanReverse32(uint32 mask)
 	{
-		if (!_Mask)
-			return 0;
-		*_Index = 31 - __builtin_clzl(_Mask);
-		return 1;
-	}
+#if defined(_MSC_VER)
+		unsigned long index = 0;
+		_BitScanReverse(&index, mask);
+		return uint32(index);
+#else
+		return mask ? uint32(31u - uint32(__builtin_clz(mask))) : 0u;
 #endif
+	}
 
 	static const uint32 bankSwapOrder[] = { 0, 1, 3, 2 };
 
@@ -291,8 +295,8 @@ namespace LatteAddrLib
 		default:
 			break;
 		}
-		_BitScanReverse((unsigned long*)&info->macroTilePitchBits, info->macroTilePitch);
-		_BitScanReverse((unsigned long*)&info->macroTileHeightBits, info->macroTileHeight);
+		info->macroTilePitchBits = BitScanReverse32(info->macroTilePitch);
+		info->macroTileHeightBits = BitScanReverse32(info->macroTileHeight);
 		info->macroTilesPerRow = info->pitch / info->macroTilePitch;
 		info->macroTileBytes = (info->numSamples * info->microTileThickness * info->bpp * info->macroTileHeight * info->macroTilePitch + 7) >> 3;
 		// slice

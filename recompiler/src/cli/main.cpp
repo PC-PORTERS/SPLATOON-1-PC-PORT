@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <fstream>
 #include "cli_options.hpp"
 #include "../core/rpx/rpx_loader.hpp"
