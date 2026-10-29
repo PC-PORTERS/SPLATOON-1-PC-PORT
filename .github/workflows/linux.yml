@@ -125,7 +125,7 @@ jobs:
 
       - name: Configure & build port runtime and regression tests
         run: |
-          SDL2_CONFIG="$(find build/deps/sdl2-vulkan -name SDL2Config.cmake -print -quit)"
+          SDL2_CONFIG="$(find "$PWD/build/deps/sdl2-vulkan" -name SDL2Config.cmake -print -quit)"
           test -n "$SDL2_CONFIG"
           SDL2_DIR="$(dirname -- "$SDL2_CONFIG")"
           GLSLANG_DIR="$PWD/build/deps/glslang-vulkan/lib/cmake/glslang"

@@ -106,7 +106,9 @@ jobs:
         shell: pwsh
         run: |
           $rebrewu = (Get-ChildItem -Path build/rebrewu -Recurse -Filter rebrewu.exe | Select-Object -First 1).FullName
-          & $rebrewu 2>&1 | Select-String "Usage:"
+          $output = (& $rebrewu 2>&1 | Out-String)
+          $global:LASTEXITCODE = 0
+          if ($output -notmatch "Usage:") { throw "rebrewu CLI did not output usage" }
           if (-not (Test-Path "profiles/agmp-v16.entries")) { throw "Missing entries profile" }
           if (-not (Test-Path "profiles/agmp-v16.hooks")) { throw "Missing hooks profile" }
 
