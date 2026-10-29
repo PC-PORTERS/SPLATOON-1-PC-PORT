@@ -4,6 +4,10 @@
 /build/
 /Game/
 
+# Auto-fetched third-party headers
+recompiler/third_party/nlohmann/
+recompiler/third_party/miniaudio.h
+
 # Never commit game files
 *.rpx
 *.rpl

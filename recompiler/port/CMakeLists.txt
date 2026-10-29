@@ -10,15 +10,28 @@ endif()
 include(${CMAKE_CURRENT_SOURCE_DIR}/gx2_graphics_backend.cmake)
 find_package(CURL REQUIRED)
 find_package(ZLIB REQUIRED)
-add_subdirectory(third_party/cemu_shader)
 
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/miniaudio.h")
-    message(STATUS "miniaudio.h found — audio back-end enabled (HAVE_MINIAUDIO)")
-    set(HAVE_MINIAUDIO ON)
+# miniaudio (public domain / MIT-0)
+set(_miniaudio_header "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/miniaudio.h")
+if(NOT EXISTS "${_miniaudio_header}")
+    message(STATUS "miniaudio: fetching tag 0.11.25")
+    include(FetchContent)
+    FetchContent_Declare(
+        miniaudio_dl
+        GIT_REPOSITORY https://github.com/mackron/miniaudio.git
+        GIT_TAG        0.11.25
+        GIT_SHALLOW    TRUE
+        SOURCE_SUBDIR  "__none__"   # don't call add_subdirectory
+    )
+    FetchContent_MakeAvailable(miniaudio_dl)
+    file(COPY_FILE "${miniaudio_dl_SOURCE_DIR}/miniaudio.h" "${_miniaudio_header}")
+    message(STATUS "miniaudio: header ready at third_party/miniaudio.h")
 else()
-    message(STATUS "miniaudio.h not found — audio output disabled (silent stubs)")
-    set(HAVE_MINIAUDIO OFF)
+    message(STATUS "miniaudio: using cached header (third_party/miniaudio.h)")
 endif()
+set(HAVE_MINIAUDIO ON)
+
+add_subdirectory(third_party/cemu_shader)
 
 add_library(gambit_runtime STATIC
     runtime/rebrewu_runtime.cpp
