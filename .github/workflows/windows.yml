@@ -13,11 +13,14 @@ concurrency:
 jobs:
   build-and-test:
     name: Build & Test (Windows)
-    runs-on: windows-latest
+    runs-on: windows-2022
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Set up MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -50,6 +53,14 @@ jobs:
       - name: Build window and shader compiler libraries (SDL2, glslang)
         shell: pwsh
         run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -format json | ConvertFrom-Json | Select-Object -First 1
+          $vsMajor = [int]($vs.installationVersion.Split('.')[0])
+          switch ($vsMajor) {
+              18 { $generator = 'Visual Studio 18 2026' }
+              default { $generator = 'Visual Studio 17 2022' }
+          }
+          Write-Host "Using generator: $generator"
+
           $downloads = "build/downloads"
           New-Item -ItemType Directory -Force -Path $downloads
           $sdlZip = "$downloads/SDL2.zip"
@@ -70,15 +81,22 @@ jobs:
             --glslang-archive $glslangTar `
             --build-root "build/deps-build" `
             --prefix "build/deps" `
-            --generator "Visual Studio 17 2022" `
+            --generator $generator `
             --cmake cmake `
             --cache-dir "build/cache/deps"
 
       - name: Build RebrewU recompiler
         shell: pwsh
         run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -format json | ConvertFrom-Json | Select-Object -First 1
+          $vsMajor = [int]($vs.installationVersion.Split('.')[0])
+          switch ($vsMajor) {
+              18 { $generator = 'Visual Studio 18 2026' }
+              default { $generator = 'Visual Studio 17 2022' }
+          }
+
           cmake -S recompiler -B build/rebrewu `
-            -G "Visual Studio 17 2022" -A x64 `
+            -G $generator -A x64 `
             "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
             -DVCPKG_TARGET_TRIPLET=x64-windows `
             -DREBREWU_BUILD_TESTS=OFF
@@ -95,13 +113,20 @@ jobs:
       - name: Configure & build port runtime and regression tests
         shell: pwsh
         run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -format json | ConvertFrom-Json | Select-Object -First 1
+          $vsMajor = [int]($vs.installationVersion.Split('.')[0])
+          switch ($vsMajor) {
+              18 { $generator = 'Visual Studio 18 2026' }
+              default { $generator = 'Visual Studio 17 2022' }
+          }
+
           $sdlMarker = (Get-ChildItem -Path "build/deps" -Recurse -Filter "SDL2VulkanOnly.cmake" | Select-Object -First 1).FullName
           $glslangMarker = (Get-ChildItem -Path "build/deps" -Recurse -Filter "GlslangVulkanOnly.cmake" | Select-Object -First 1).FullName
           $sdlDir = Split-Path $sdlMarker
           $glslangDir = Split-Path $glslangMarker
 
           cmake -S recompiler/port -B build/port `
-            -G "Visual Studio 17 2022" -A x64 `
+            -G $generator -A x64 `
             "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
             -DVCPKG_TARGET_TRIPLET=x64-windows `
             -DRBREW_GRAPHICS_BACKEND=Vulkan `

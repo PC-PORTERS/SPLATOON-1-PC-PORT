@@ -35,13 +35,24 @@ jobs:
             cmake \
             ninja-build \
             build-essential \
+            pkg-config \
             libvulkan-dev \
             vulkan-tools \
             mesa-vulkan-drivers \
             libcurl4-openssl-dev \
             zlib1g-dev \
             libx11-dev \
+            libxext-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxrandr-dev \
+            libxfixes-dev \
+            libxss-dev \
+            libxkbcommon-dev \
             libwayland-dev \
+            wayland-protocols \
+            libasound2-dev \
+            libpulse-dev \
             xvfb
 
       - name: Cache dependencies profile
@@ -53,6 +64,17 @@ jobs:
             build/downloads
             build/cache/deps
           key: linux-deps-${{ hashFiles('recompiler/tools/build_vulkan_dependencies.py') }}
+
+      - name: Install Vulkan-Headers
+        run: |
+          if [ ! -f "build/deps/VulkanHeaders/share/cmake/VulkanHeaders/VulkanHeadersConfig.cmake" ]; then
+            mkdir -p build/downloads build/vulkan-headers-src build/vulkan-headers-build
+            curl -fL --retry 3 https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/vulkan-sdk-1.4.304.0.tar.gz -o build/downloads/vulkan-headers.tar.gz
+            tar -xzf build/downloads/vulkan-headers.tar.gz -C build/vulkan-headers-src --strip-components=1
+            cmake -S build/vulkan-headers-src -B build/vulkan-headers-build -G Ninja \
+              -DCMAKE_INSTALL_PREFIX="$PWD/build/deps/VulkanHeaders"
+            cmake --build build/vulkan-headers-build --target install
+          fi
 
       - name: Install Vulkan meta-loader (volk)
         run: |
@@ -108,6 +130,7 @@ jobs:
           SDL2_DIR="$(dirname -- "$SDL2_CONFIG")"
           GLSLANG_DIR="$PWD/build/deps/glslang-vulkan/lib/cmake/glslang"
           VOLK_DIR="$PWD/build/deps/volk"
+          VULKAN_HEADERS_DIR="$PWD/build/deps/VulkanHeaders"
 
           cmake -S recompiler/port -B build/port -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
@@ -116,7 +139,7 @@ jobs:
             -DRBREW_BUILD_TESTS=ON \
             -DSDL2_DIR="$SDL2_DIR" \
             -Dglslang_DIR="$GLSLANG_DIR" \
-            -DCMAKE_PREFIX_PATH="$VOLK_DIR"
+            -DCMAKE_PREFIX_PATH="$VOLK_DIR;$VULKAN_HEADERS_DIR"
 
           cmake --build build/port
 
