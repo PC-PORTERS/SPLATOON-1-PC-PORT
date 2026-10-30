@@ -1,8 +1,8 @@
 // Only the runtime and authored synthetic inputs are linked. No game entry point.
 #include "os/gx2/gx2_render.h"
 #include "os/gx2/vk/gx2_vk.h"
+#include "os/gx2/vk/gx2_imgui_overlay.h"
 #include "runtime/rebrewu_runtime.h"
-#include "os/gx2/vk/gx2_fps_overlay.h"
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
 #include <thread>
@@ -11,6 +11,7 @@
 #include <vector>
 #include <chrono>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <stdexcept>
 #include <optional>
@@ -259,43 +260,35 @@ static void idle_asset_lookup_test(const char* path,uint32_t normal,uint32_t alt
         throw std::runtime_error("owned BFRES lookup returned the wrong animation handle");
     std::printf("{\"metric\":\"idle_asset_lookup\",\"normal\":%u,\"alternate\":%u,\"passed\":true}\n",normal,alternate);
 }
-// The overlay in real presents: a hidden Vulkan window, an authored solid
-// frame, and readback of what reached the swapchain. 77 = no presentable window.
-static int overlay_present_test() {
+// Captured presents in the real swapchain path: the authored frame reaches the
+// readback untouched even with the ImGui overlay up, because captures skip it.
+// 77 = no presentable window.
+static int present_capture_test() {
     auto require=[](bool ok,const char* text){if(!ok)throw std::runtime_error(text);};
     if(SDL_Init(SDL_INIT_VIDEO)!=0)return 77;
-    SDL_Window* window=SDL_CreateWindow("overlay test",SDL_WINDOWPOS_UNDEFINED,SDL_WINDOWPOS_UNDEFINED,640,360,SDL_WINDOW_VULKAN|SDL_WINDOW_HIDDEN);
+    SDL_Window* window=SDL_CreateWindow("present capture",SDL_WINDOWPOS_UNDEFINED,SDL_WINDOWPOS_UNDEFINED,640,360,SDL_WINDOW_VULKAN|SDL_WINDOW_HIDDEN);
     if(!window){SDL_Quit();return 77;}
     if(!gx2vk::init(window)){SDL_DestroyWindow(window);SDL_Quit();return 77;}
     gx2vk::Image frame;gx2vk::ImageDesc d;d.width=640;d.height=360;d.usage=VK_IMAGE_USAGE_TRANSFER_SRC_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    require(gx2vk::create_image(frame,d),"overlay frame allocation failed");
+    require(gx2vk::create_image(frame,d),"present capture frame allocation failed");
     gx2vk::barrier_if_dirty();VkClearColorValue color{};color.float32[0]=0.25f;color.float32[1]=0.5f;color.float32[2]=0.75f;color.float32[3]=1;
     VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};vkCmdClearColorImage(gx2vk::cmd(),frame.image,VK_IMAGE_LAYOUT_GENERAL,&color,1,&range);gx2vk::note_gpu_write(frame);
-    gx2vk::set_fps_overlay(true);gx2vk::capture_presents(true);gx2vk::capture_fps_overlay(true);
+    gx2_imgui::set_visible(true);   // overlay up: captures must still omit it
+    gx2vk::capture_presents(true);
     unsigned presented=0;
     for(unsigned i=0;i<45;++i){presented+=gx2vk::present(frame,640,360);std::this_thread::sleep_for(std::chrono::milliseconds(15));}
     if(!presented){gx2vk::capture_presents(false);gx2vk::destroy_image(frame);gx2vk::shutdown();SDL_DestroyWindow(window);SDL_Quit();return 77;}
-    require(gx2vk::finish(),"overlay presents did not complete");
-    std::vector<uint8_t> rgba;uint32_t w=0,h=0;require(gx2vk::last_present(rgba,w,h) && w && h,"overlay present readback missing");
-    // Translucent panel at the top-left corner (margin >= 8 px): it darkens the
-    // authored frame (64,128,191) but keeps its blue showing through, and has
-    // light anti-aliased text. The classic 5x7 line
-    // (RBREW_FPS_OVERLAY_STYLE=classic) is pure white on black.
-    const unsigned scale=(std::max)(2u,h/360);unsigned white=0,black=0;
-    for(unsigned y=4;y<(std::min)(h,90u);++y)for(unsigned x=4;x<w/2;++x){const uint8_t* p=&rgba[(size_t(y)*w+x)*4];
-        const bool glass=p[2]<150 && p[2]>p[0]+20 && p[0]<60;   // darkened, still bluish
-        const bool classic_black=p[0]==0&&p[1]==0&&p[2]==0;
-        black+=glass||classic_black;white+=p[0]>=180&&p[1]>=180&&p[2]>=180;}
-    const uint8_t* away=&rgba[(size_t(h-4)*w+w-4)*4];
-    require(white>40*scale*scale && black>white,"FPS overlay text did not reach the presented image");
-    if(const char* dump=std::getenv("RBREW_OVERLAY_DUMP"))if(FILE* f=std::fopen(dump,"wb")){std::fwrite(&w,4,1,f);std::fwrite(&h,4,1,f);std::fwrite(rgba.data(),1,rgba.size(),f);std::fclose(f);}
-    require(std::abs(int(away[0])-64)<=2 && std::abs(int(away[1])-128)<=2 && std::abs(int(away[2])-191)<=2,"overlay disturbed the rest of the frame");
-    gx2vk::capture_fps_overlay(false);std::vector<uint8_t> plain;gx2vk::present(frame,640,360);require(gx2vk::finish() && gx2vk::last_present(plain,w,h),"plain capture failed");
-    const uint8_t* corner=&plain[(size_t(2*scale+3*scale)*w+3*scale)*4];
-    require(std::abs(int(corner[0])-64)<=2,"ordinary captured presents must omit the overlay");
-    gx2vk::capture_presents(false);gx2vk::destroy_image(frame);require(gx2vk::validation_error_count()==0,"Vulkan validation error");
-    std::printf("{\"metric\":\"fps_overlay_present\",\"presents\":%u,\"width\":%u,\"height\":%u,\"white\":%u,\"passed\":true}\n",presented,w,h,white);
-    gx2vk::shutdown();SDL_DestroyWindow(window);SDL_Quit();return 0;
+    require(gx2vk::finish(),"captured presents did not complete");
+    std::vector<uint8_t> rgba;uint32_t w=0,h=0;require(gx2vk::last_present(rgba,w,h)&&w&&h,"captured present readback missing");
+    // Authored colour (64,128,191) everywhere: no panel, no text, no dimming.
+    size_t disturbed=0;
+    for(size_t i=0;i+3<rgba.size();i+=4)
+        if(std::abs(int(rgba[i])-64)>2||std::abs(int(rgba[i+1])-128)>2||std::abs(int(rgba[i+2])-191)>2)++disturbed;
+    require(disturbed==0,"the interface leaked into a captured present");
+    gx2vk::capture_presents(false);
+    require(gx2vk::validation_error_count()==0,"Vulkan validation error");
+    std::printf("{\"metric\":\"present_capture\",\"presents\":%u,\"width\":%u,\"height\":%u,\"passed\":true}\n",presented,w,h);
+    gx2vk::destroy_image(frame);gx2vk::shutdown();SDL_DestroyWindow(window);SDL_Quit();return 0;
 }
 // Guest hook registry, driven exactly as a recompiler --hooks wrapper does.
 static void authored_original(CPUState* cpu){cpu->r[3]=cpu->r[3]*2+1;}
@@ -314,26 +307,6 @@ static void guest_hook_test() {
     require(cpu.r[3]==23 && cpu.r[4]==0,"cleared hook still ran");
     std::printf("{\"metric\":\"guest_hooks\",\"passed\":true}\n");
 }
-// FPS overlay text, statistics and font rasterisation (no window required).
-static void overlay_test() {
-    namespace o=gx2vk::overlay;
-    auto require=[](bool ok,const char* text){if(!ok)throw std::runtime_error(text);};
-    o::Stats stats;const auto t0=o::Stats::Clock::time_point(std::chrono::seconds(100));
-    require(!stats.presented(t0) && stats.text()=="FPS --","overlay reported before a window elapsed");
-    bool changed=false;
-    for(unsigned i=1;i<=30;++i)changed=stats.presented(t0+std::chrono::microseconds(i*16667+(i==7?8000:0)));
-    require(changed && std::abs(stats.fps()-60.0)<0.2,"overlay FPS is not the presentation rate");
-    require(stats.text()=="FPS 60.0  16.7ms  max 24.7ms","overlay text/stutter maximum is wrong");
-    const std::string text="FPS 60.0";const unsigned scale=3;unsigned w,h;o::strip_size(text,scale,w,h);
-    std::vector<uint32_t> pixels(size_t(w)*h);o::rasterize(text,scale,0xFFFFFFFFu,0xFF000000u,pixels.data(),w,h);
-    size_t lit=0,expected=0;for(char c:text){const uint8_t* g=o::glyph(c);for(unsigned r=0;r<7;++r)for(unsigned b=0;b<5;++b)expected+=g[r]>>b&1;}
-    for(auto p:pixels){require(p==0xFFFFFFFFu||p==0xFF000000u,"overlay wrote a foreign color");lit+=p==0xFFFFFFFFu;}
-    require(lit==expected*scale*scale,"overlay glyph pixels missing or clipped");
-    // 'F' top row: five lit cells starting after the left padding.
-    for(unsigned x=0;x<5*scale;++x)require(pixels[size_t(o::kPadding-1)*scale*w+o::kPadding*scale+x]==0xFFFFFFFFu,"overlay glyph placement is wrong");
-    require(pixels[0]==0xFF000000u,"overlay background missing");
-    std::printf("{\"metric\":\"fps_overlay\",\"width\":%u,\"height\":%u,\"lit\":%zu,\"passed\":true}\n",w,h,lit);
-}
 int main(int argc, char** argv) {
     try {
 #ifdef _WIN32
@@ -343,17 +316,16 @@ int main(int argc, char** argv) {
         if(argc==5 && std::string_view(argv[1])=="idle_asset_lookup"){
             idle_asset_lookup_test(argv[2],uint32_t(std::stoul(argv[3])),uint32_t(std::stoul(argv[4])));return 0;}
         if(argc!=2)throw std::runtime_error("expected an authored benchmark mode");
-        if(std::string_view(argv[1])=="overlay"){overlay_test();return 0;}
         if(std::string_view(argv[1])=="guest_hooks"){guest_hook_test();return 0;}
+        if(std::string_view(argv[1])=="present_capture")return present_capture_test();
         if(std::string_view(argv[1])=="idle_lookaround"){idle_lookaround_test();return 0;}
-        if(std::string_view(argv[1])=="overlay_present")return overlay_present_test();
         const std::string_view mode=argv[1];
         // npc_<count> / npc_fallback_<count>: skinned characters, 1-100.
         unsigned npc_characters=0;const bool npc_fallback=mode.starts_with("npc_fallback_");
         if(mode.starts_with("npc_")){const auto digits=mode.substr(npc_fallback?13:4);
             if(digits=="1" || digits=="10" || digits=="25" || digits=="50" || digits=="100")npc_characters=unsigned(std::stoul(std::string(digits)));
             else throw std::runtime_error("unknown authored benchmark");}
-        if(!npc_characters && mode!="fallback" && mode!="push" && mode!="churn" && mode!="contracts" && mode!="lifetime" && mode!="heavy" && mode!="heavy_push" && mode!="overdraw" && mode!="watch" && mode!="geometry" && mode!="packets" && mode!="plaza" && mode!="overlay")throw std::runtime_error("unknown authored benchmark");
+        if(!npc_characters && mode!="fallback" && mode!="push" && mode!="churn" && mode!="contracts" && mode!="lifetime" && mode!="heavy" && mode!="heavy_push" && mode!="overdraw" && mode!="watch" && mode!="geometry" && mode!="packets" && mode!="plaza")throw std::runtime_error("unknown authored benchmark");
         if(!gx2vk::init(nullptr))return 77;
         gx2_render_init();
         std::printf("{\"device\":\"%s\",\"workload\":\"%s\",\"synthetic\":true}\n",gx2vk::caps().device_name.c_str(),argv[1]);

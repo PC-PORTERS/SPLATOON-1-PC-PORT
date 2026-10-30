@@ -2,8 +2,7 @@
 #include "../../../runtime/texture_diagnostics.h"
 #include "gx2_vk.h"
 #include "gx2_vk_memory.h"
-#include "gx2_fps_overlay.h"
-#include "../gx2_settings_menu.h"
+#include "gx2_imgui_overlay.h"
 #include "gx2_vk_shader.h"
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
@@ -256,7 +255,7 @@ struct Swapchain {
     VkFormat format = VK_FORMAT_UNDEFINED;
     VkExtent2D extent{};
     std::vector<VkImage> images;
-    std::vector<VkImageView> views;               // overlay pass attachments, per image
+    std::vector<VkImageView> views;               // imgui pass attachments, per image
     std::vector<VkSemaphore> rendered;           // per image
     std::array<VkSemaphore, 3> acquired{};       // per frame slot
     std::array<uint64_t, 3> slot_serial{};
@@ -266,7 +265,6 @@ struct Swapchain {
 Swapchain s_swapchain;
 uint64_t s_presents = 0;
 bool s_capture_presents = false;
-bool s_capture_overlay = false;   // tests: keep the FPS overlay in captured presents
 std::vector<uint8_t> s_last_present;
 uint32_t s_last_present_w = 0, s_last_present_h = 0;
 
@@ -1163,7 +1161,6 @@ bool init(SDL_Window* window, bool native_depth) {
     return true;
 }
 
-static void destroy_overlay_pass();   // FPS overlay pass (below)
 void shutdown() {
     record::stop();
     s_format_properties.clear();
@@ -1175,7 +1172,7 @@ void shutdown() {
 #else
     vkDeviceWaitIdle(s_device);
 #endif
-    destroy_overlay_pass();
+    gx2_imgui::shutdown();
     poll_completed();
     while (!s_deferred.empty()) { s_deferred.front().f(); s_deferred.pop_front(); }
     TXDIAG(s_diagnostic_shutdown_idle=false);
@@ -1884,103 +1881,6 @@ bool has_surface() { return s_surface != VK_NULL_HANDLE; }
 uint64_t present_count() { return s_presents; }
 VkPresentModeKHR present_mode() { return s_swapchain.mode; }
 
-std::atomic<bool> s_fps_overlay{[] { const char* v = std::getenv("RBREW_FPS_OVERLAY"); return !(v && v[0] == '0'); }()};
-overlay::Stats s_fps_stats;
-void set_fps_overlay(bool visible) { s_fps_overlay.store(visible, std::memory_order_relaxed); }
-bool fps_overlay() { return s_fps_overlay.load(std::memory_order_relaxed); }
-// Opaque 32-bit texels of the swapchain format, or false for other formats.
-static bool overlay_colors(VkFormat format, uint32_t& white, uint32_t& black) {
-    switch (format) {
-    case VK_FORMAT_B8G8R8A8_UNORM: case VK_FORMAT_B8G8R8A8_SRGB: case VK_FORMAT_R8G8B8A8_UNORM: case VK_FORMAT_R8G8B8A8_SRGB:
-    case VK_FORMAT_A8B8G8R8_UNORM_PACK32: case VK_FORMAT_A8B8G8R8_SRGB_PACK32:
-        white = 0xFFFFFFFFu; black = 0xFF000000u; return true;
-    case VK_FORMAT_A2B10G10R10_UNORM_PACK32: case VK_FORMAT_A2R10G10B10_UNORM_PACK32:
-        white = 0xFFFFFFFFu; black = 0xC0000000u; return true;
-    default: return false;
-    }
-}
-// Translucent panel: uploaded as premultiplied RGBA8 and alpha-blended over
-// the swapchain image by a tiny internal pass (one triangle clipped to the
-// panel rectangle).
-namespace {
-struct OverlayPass {
-    VkDescriptorSetLayout set = VK_NULL_HANDLE;
-    VkPipelineLayout layout = VK_NULL_HANDLE;
-    VkSampler sampler = VK_NULL_HANDLE;
-    std::map<VkFormat, VkPipeline> pipelines;
-    Image image;
-    Image menu;   // ESC settings menu (gx2_settings_menu.h)
-};
-OverlayPass s_overlay_pass;
-const char* kOverlayVs = "#version 450\nlayout(location=0) out vec2 uv;"
-    "void main(){vec2 p=vec2((gl_VertexIndex<<1)&2,gl_VertexIndex&2);uv=p;gl_Position=vec4(p*2-1,0,1);}\n";
-const char* kOverlayPs = "#version 450\nlayout(set=0,binding=0) uniform sampler2D panel;layout(location=0) in vec2 uv;"
-    "layout(location=0) out vec4 color;void main(){color=texture(panel,uv);}\n";
-}
-static void destroy_overlay_pass() {
-    auto& o = s_overlay_pass;
-    for (auto& [format, pipeline] : o.pipelines) if (pipeline) vkDestroyPipeline(s_device, pipeline, nullptr);
-    o.pipelines.clear();
-    if (o.layout) vkDestroyPipelineLayout(s_device, o.layout, nullptr);
-    if (o.set) vkDestroyDescriptorSetLayout(s_device, o.set, nullptr);
-    if (o.sampler) vkDestroySampler(s_device, o.sampler, nullptr);
-    o.layout = VK_NULL_HANDLE; o.set = VK_NULL_HANDLE; o.sampler = VK_NULL_HANDLE;
-    destroy_image(o.image);
-    destroy_image(o.menu);
-}
-static VkPipeline overlay_pipeline(VkFormat format) {
-    auto& o = s_overlay_pass;
-    if (!o.layout) {
-        VkDescriptorSetLayoutBinding binding{0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
-        VkDescriptorSetLayoutCreateInfo set{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-        set.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
-        set.bindingCount = 1; set.pBindings = &binding;
-        if (vkCreateDescriptorSetLayout(s_device, &set, nullptr, &o.set) != VK_SUCCESS) return VK_NULL_HANDLE;
-        VkPipelineLayoutCreateInfo layout{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
-        layout.setLayoutCount = 1; layout.pSetLayouts = &o.set;
-        if (vkCreatePipelineLayout(s_device, &layout, nullptr, &o.layout) != VK_SUCCESS) return VK_NULL_HANDLE;
-        VkSamplerCreateInfo sampler{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
-        sampler.magFilter = sampler.minFilter = VK_FILTER_NEAREST;
-        sampler.addressModeU = sampler.addressModeV = sampler.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-        if (vkCreateSampler(s_device, &sampler, nullptr, &o.sampler) != VK_SUCCESS) return VK_NULL_HANDLE;
-    }
-    auto& pipeline = o.pipelines[format];
-    if (pipeline) return pipeline;
-    VkPipelineShaderStageCreateInfo stages[2]{{VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO}, {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO}};
-    stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT; stages[0].module = shader_module(VK_SHADER_STAGE_VERTEX_BIT, kOverlayVs); stages[0].pName = "main";
-    stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT; stages[1].module = shader_module(VK_SHADER_STAGE_FRAGMENT_BIT, kOverlayPs); stages[1].pName = "main";
-    if (!stages[0].module || !stages[1].module) return VK_NULL_HANDLE;
-    VkPipelineVertexInputStateCreateInfo vertex{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
-    VkPipelineInputAssemblyStateCreateInfo assembly{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
-    assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    VkPipelineViewportStateCreateInfo viewport{VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
-    viewport.viewportCount = 1; viewport.scissorCount = 1;
-    VkPipelineRasterizationStateCreateInfo raster{VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
-    raster.polygonMode = VK_POLYGON_MODE_FILL; raster.lineWidth = 1.0f; raster.cullMode = VK_CULL_MODE_NONE;
-    VkPipelineMultisampleStateCreateInfo multisample{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
-    multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-    VkPipelineDepthStencilStateCreateInfo depth{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
-    VkPipelineColorBlendAttachmentState attachment{};
-    attachment.blendEnable = VK_TRUE;   // premultiplied "over"
-    attachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE; attachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-    attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO; attachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-    attachment.colorBlendOp = attachment.alphaBlendOp = VK_BLEND_OP_ADD;
-    attachment.colorWriteMask = 0xF;
-    VkPipelineColorBlendStateCreateInfo blend{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
-    blend.attachmentCount = 1; blend.pAttachments = &attachment;
-    const VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
-    VkPipelineDynamicStateCreateInfo dynamic{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
-    dynamic.dynamicStateCount = 2; dynamic.pDynamicStates = dynamic_states;
-    VkPipelineRenderingCreateInfo rendering{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
-    rendering.colorAttachmentCount = 1; rendering.pColorAttachmentFormats = &format;
-    VkGraphicsPipelineCreateInfo info{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
-    info.pNext = &rendering; info.stageCount = 2; info.pStages = stages; info.pVertexInputState = &vertex;
-    info.pInputAssemblyState = &assembly; info.pViewportState = &viewport; info.pRasterizationState = &raster;
-    info.pMultisampleState = &multisample; info.pDepthStencilState = &depth; info.pColorBlendState = &blend;
-    info.pDynamicState = &dynamic; info.layout = o.layout;
-    if (vkCreateGraphicsPipelines(s_device, pipeline_cache(), 1, &info, nullptr, &pipeline) != VK_SUCCESS) pipeline = VK_NULL_HANDLE;
-    return pipeline;
-}
 static VkImageView swapchain_view(uint32_t index) {
     auto& views = s_swapchain.views;
     if (views.size() != s_swapchain.images.size()) views.resize(s_swapchain.images.size(), VK_NULL_HANDLE);
@@ -1992,166 +1892,6 @@ static VkImageView swapchain_view(uint32_t index) {
     }
     return views[index];
 }
-static void image_barrier(VkCommandBuffer cb, VkImage image, VkImageLayout from, VkImageLayout to,
-                          VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access, VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access) {
-    VkImageMemoryBarrier2 b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
-    b.srcStageMask = src_stage; b.srcAccessMask = src_access; b.dstStageMask = dst_stage; b.dstAccessMask = dst_access;
-    b.oldLayout = from; b.newLayout = to;
-    b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    b.image = image; b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    VkDependencyInfo dependency{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
-    dependency.imageMemoryBarrierCount = 1; dependency.pImageMemoryBarriers = &b;
-    vkCmdPipelineBarrier2(cb, &dependency);
-}
-// Blends `image` (premultiplied RGBA8, GENERAL) over `target`
-// (TRANSFER_DST_OPTIMAL) at (x, y); the target is left TRANSFER_DST_OPTIMAL.
-static void blend_overlay_image(VkCommandBuffer cb, VkImage target, VkImageView target_view, VkPipeline pipeline,
-                                Image& image, unsigned x, unsigned y) {
-    auto& o = s_overlay_pass;
-    image_barrier(cb, target, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                  VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                  VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
-    VkRenderingAttachmentInfo color{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
-    color.imageView = target_view; color.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    color.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD; color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    VkRenderingInfo info{VK_STRUCTURE_TYPE_RENDERING_INFO};
-    info.renderArea = {{int32_t(x), int32_t(y)}, {image.desc.width, image.desc.height}};
-    info.layerCount = 1; info.colorAttachmentCount = 1; info.pColorAttachments = &color;
-    vkCmdBeginRendering(cb, &info);
-    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-    const VkViewport vp{float(x), float(y), float(image.desc.width), float(image.desc.height), 0, 1};
-    vkCmdSetViewport(cb, 0, 1, &vp); vkCmdSetScissor(cb, 0, 1, &info.renderArea);
-    ViewDesc view; view.type = VK_IMAGE_VIEW_TYPE_2D;
-    VkDescriptorImageInfo sampled{o.sampler, image_view(image, view), VK_IMAGE_LAYOUT_GENERAL};
-    VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-    write.dstBinding = 0; write.descriptorCount = 1; write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; write.pImageInfo = &sampled;
-    vkCmdPushDescriptorSetKHR(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, o.layout, 0, 1, &write);
-    vkCmdDraw(cb, 3, 1, 0, 0);
-    vkCmdEndRendering(cb);
-    image_barrier(cb, target, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                  VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-                  VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT);
-}
-// Blends the panel over `target` (TRANSFER_DST_OPTIMAL, just written by the
-// frame's blit) at its top-left corner; the image is left TRANSFER_DST_OPTIMAL.
-static bool draw_overlay_panel(VkCommandBuffer cb, VkImage target, uint32_t index, VkExtent2D extent) {
-    static overlay::Panel panel;
-    static bool fonts_ok = true;
-    if (!fonts_ok || !(fonts_ok = panel.layout(std::clamp(extent.height / 1080.0, 0.75, 3.0)))) return false;
-    const unsigned width = panel.width(), height = panel.height(), margin = std::max(8u, extent.height / 90);
-    if (width + margin > extent.width || height + margin > extent.height) return true;
-    const VkPipeline pipeline = overlay_pipeline(s_swapchain.format);
-    const VkImageView target_view = pipeline ? swapchain_view(index) : VK_NULL_HANDLE;
-    if (!pipeline || !target_view) return false;
-    auto& o = s_overlay_pass;
-    if (!o.image.image || o.image.desc.width != width || o.image.desc.height != height) {
-        destroy_image(o.image);
-        ImageDesc desc; desc.width = width; desc.height = height; desc.format = VK_FORMAT_R8G8B8A8_UNORM;
-        desc.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-        if (!create_image(o.image, desc)) return false;
-    }
-    // The panel is redrawn every 4th present (its numbers change per window
-    // anyway; the graph advances in steps of 4 frames): building it every
-    // frame was ~2% of the plaza's render thread.
-    static uint32_t s_panel_frames = 0;
-    static VkImage s_panel_image = VK_NULL_HANDLE;
-    const bool redraw = s_panel_image != o.image.image || s_panel_frames++ % 4 == 0;
-    if (redraw) {
-        const Span span = upload(VkDeviceSize(width) * height * 4, 16);
-        if (!span.data) return true;
-        panel.draw(s_fps_stats, span.data);
-        s_panel_image = o.image.image;
-        // Panel texture: previous frame's sampling -> this upload -> sampling.
-        image_barrier(cb, o.image.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL,
-                      VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-                      VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
-        VkBufferImageCopy region{};
-        region.bufferOffset = span.offset;
-        region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        region.imageExtent = {width, height, 1};
-        vkCmdCopyBufferToImage(cb, span.buffer, o.image.image, VK_IMAGE_LAYOUT_GENERAL, 1, &region);
-        image_barrier(cb, o.image.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL,
-                      VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                      VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
-    }
-    blend_overlay_image(cb, target, target_view, pipeline, o.image, margin, margin);
-    return true;
-}
-// Draws the overlay into `target` (TRANSFER_DST_OPTIMAL after the frame's
-// blit). RBREW_FPS_OVERLAY_STYLE=classic copies the opaque 5x7 text line.
-static void draw_fps_overlay(VkCommandBuffer cb, VkImage target, uint32_t index, VkExtent2D extent) {
-    static const bool classic = [] { const char* v = std::getenv("RBREW_FPS_OVERLAY_STYLE"); return v && !std::strcmp(v, "classic"); }();
-    if (!classic && draw_overlay_panel(cb, target, index, extent)) return;
-    uint32_t white, black;
-    if (!overlay_colors(s_swapchain.format, white, black)) return;
-    const unsigned scale = std::max(2u, extent.height / 360);
-    unsigned width = 0, height = 0;
-    overlay::strip_size(s_fps_stats.text(), scale, width, height);
-    const unsigned margin = 2 * scale;
-    if (width + margin > extent.width || height + margin > extent.height) return;
-    const Span span = upload(VkDeviceSize(width) * height * 4, 16);
-    if (!span.data) return;
-    overlay::rasterize(s_fps_stats.text(), scale, white, black, reinterpret_cast<uint32_t*>(span.data), width, height);
-    image_barrier(cb, target, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                  VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                  VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
-    VkBufferImageCopy region{};
-    region.bufferOffset = span.offset;
-    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-    region.imageOffset = {int32_t(margin), int32_t(margin), 0};
-    region.imageExtent = {width, height, 1};
-    vkCmdCopyBufferToImage(cb, span.buffer, target, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-}
-
-// ESC settings menu, centred over the frame. Its texture is rebuilt only when
-// the menu's view changes.
-static void draw_settings_menu(VkCommandBuffer cb, VkImage target, uint32_t index, VkExtent2D extent) {
-    static Gx2MenuView s_view;
-    static uint64_t s_revision = 0;
-    static uint64_t s_drawn_revision = ~0ull;
-    if (!gx2_settings_menu_view(s_view, s_revision)) return;
-    static overlay::MenuPanel panel;
-    static bool fonts_ok = true;
-    static double s_ui = 0;
-    const double ui = std::clamp(extent.height / 1080.0, 0.6, 3.0);
-    if (!fonts_ok) return;
-    if (ui != s_ui) {
-        if (!(fonts_ok = panel.layout(ui))) return;
-        s_ui = ui; s_drawn_revision = ~0ull;
-    }
-    const unsigned width = panel.width(), height = panel.height(s_view.lines.size());
-    if (width > extent.width || height > extent.height) return;
-    const VkPipeline pipeline = overlay_pipeline(s_swapchain.format);
-    const VkImageView target_view = pipeline ? swapchain_view(index) : VK_NULL_HANDLE;
-    if (!pipeline || !target_view) return;
-    auto& o = s_overlay_pass;
-    if (!o.menu.image || o.menu.desc.width != width || o.menu.desc.height != height) {
-        destroy_image(o.menu);
-        ImageDesc desc; desc.width = width; desc.height = height; desc.format = VK_FORMAT_R8G8B8A8_UNORM;
-        desc.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-        if (!create_image(o.menu, desc)) return;
-        s_drawn_revision = ~0ull;
-    }
-    if (s_drawn_revision != s_revision) {
-        const Span span = upload(VkDeviceSize(width) * height * 4, 16);
-        if (!span.data) return;
-        panel.draw(s_view, span.data, width, height);
-        s_drawn_revision = s_revision;
-        image_barrier(cb, o.menu.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL,
-                      VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-                      VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
-        VkBufferImageCopy region{};
-        region.bufferOffset = span.offset;
-        region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        region.imageExtent = {width, height, 1};
-        vkCmdCopyBufferToImage(cb, span.buffer, o.menu.image, VK_IMAGE_LAYOUT_GENERAL, 1, &region);
-        image_barrier(cb, o.menu.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL,
-                      VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                      VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
-    }
-    blend_overlay_image(cb, target, target_view, pipeline, o.menu, (extent.width - width) / 2, (extent.height - height) / 2);
-}
-
 bool present(Image& source, uint32_t width, uint32_t height) {
     if (s_capture_presents) { s_last_present.clear(); s_last_present_w = s_last_present_h = 0; }
     leave_rendering();
@@ -2207,10 +1947,14 @@ bool present(Image& source, uint32_t width, uint32_t height) {
     } else {
         vkCmdClearColorImage(cb, target, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &black, 1, &range);
     }
-    s_fps_stats.presented(overlay::Stats::Clock::now());
-    // Captured presents feed exact image tests: they never carry the overlay.
-    if ((!s_capture_presents || s_capture_overlay) && fps_overlay()) draw_fps_overlay(cb, target, index, s_swapchain.extent);
-    if (!s_capture_presents) draw_settings_menu(cb, target, index, s_swapchain.extent);
+    // Captured presents feed exact image tests: they never carry an overlay.
+    if (!s_capture_presents) {
+        if (gx2_imgui::ensure_ready(s_window, s_instance, s_physical, s_device, s_queue_family, s_queue,
+                                    s_swapchain.format, uint32_t(s_swapchain.images.size()))) {
+            if (ImDrawData* overlay = gx2_imgui::begin_frame(s_swapchain.extent))
+                gx2_imgui::render_draw_data(overlay, cb, target, swapchain_view(index), s_swapchain.extent);
+        }
+    }
     VkImageLayout last_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     Buffer readback;
     const VkExtent2D extent = s_swapchain.extent;
@@ -2329,7 +2073,6 @@ void set_name(VkObjectType type, uint64_t handle, const char* name) {
 
 namespace gx2vk {
 bool capture_presents(bool enable) { const bool previous = s_capture_presents; s_capture_presents = enable; return previous; }
-void capture_fps_overlay(bool include) { s_capture_overlay = include; }
 bool last_present(std::vector<uint8_t>& rgba, uint32_t& width, uint32_t& height) {
     if (s_last_present.empty()) return false;
     rgba = s_last_present; width = s_last_present_w; height = s_last_present_h;

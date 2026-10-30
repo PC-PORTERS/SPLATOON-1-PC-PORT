@@ -28,7 +28,7 @@
 #include "../../runtime/native_control_defaults.h"
 #include "../../runtime/benchmark_input.h"
 #include "game_controllers.h"
-#include "../gx2/gx2_settings_menu.h"
+#include "../gx2/vk/gx2_imgui_overlay.h"
 #include "../../runtime/port_settings.h"
 #include <atomic>
 #include <cstdlib>
@@ -459,7 +459,7 @@ static void VPADRead(CPUState* cpu) {
     {
         const bool held = buttons != 0 || std::fabs(lx) > 0.2f || std::fabs(ly) > 0.2f ||
                           std::fabs(rx) > 0.2f || std::fabs(ry) > 0.2f;
-        if (gx2_settings_menu_blocks_input(held)) {
+        if (gx2_imgui::menu_blocks_input(held)) {
             buttons = 0; lx = ly = rx = ry = 0.0f;
             has_phys_gyro = has_phys_accel = false;
             player_input = false;

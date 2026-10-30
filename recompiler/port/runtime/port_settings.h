@@ -34,7 +34,8 @@ struct Values {
     int resolution = k720p;        // takes effect at the next start
     bool plaza_60fps = true;       // RBREW_PLAZA_60FPS
     bool fullscreen = true;
-    bool fps_overlay = true;       // RBREW_FPS_OVERLAY
+    bool fps_overlay = false;      // debug overlay (F3), hidden at launch; RBREW_FPS_OVERLAY
+    bool simple_overlay = false;   // FPS / frame time / max FPS readout; RBREW_SIMPLE_OVERLAY
     bool gyro = true;              // RBREW_GYRO
     int gyro_sensitivity = 100;    // percent
     bool gyro_invert_pitch = false;  // RBREW_GYRO_INVERT_PITCH

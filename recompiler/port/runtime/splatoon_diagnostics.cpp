@@ -51,8 +51,7 @@ static std::atomic<uint64_t> s_last_heartbeat_ns{0};
 static std::atomic<bool> s_watchdog_running{false};
 static std::thread s_watchdog_thread;
 
-// Overlay state
-static std::atomic<int> s_overlay_mode{0}; // 0 = off, 1 = compact, 2 = detailed
+// Live metrics for the ImGui performance overlay (gx2_imgui_overlay.cpp).
 static OverlayMetrics s_overlay_metrics{};
 static std::mutex s_overlay_mutex;
 
@@ -634,26 +633,8 @@ void TriggerCapture(const char* reason_tag, const char* detail_description) {
 }
 
 // ---------------------------------------------------------------------------
-// Overlay Management
+// Overlay metrics (read by the ImGui performance overlay)
 // ---------------------------------------------------------------------------
-void ToggleOverlay() {
-    int cur = s_overlay_mode.load();
-    s_overlay_mode.store(cur == 1 ? 0 : 1);
-}
-
-void ToggleDetailedOverlay() {
-    int cur = s_overlay_mode.load();
-    s_overlay_mode.store(cur == 2 ? 0 : 2);
-}
-
-bool IsOverlayVisible() {
-    return s_overlay_mode.load() != 0;
-}
-
-bool IsDetailedOverlay() {
-    return s_overlay_mode.load() == 2;
-}
-
 OverlayMetrics GetOverlayMetrics() {
     std::lock_guard<std::mutex> lock(s_overlay_mutex);
     return s_overlay_metrics;
@@ -663,16 +644,20 @@ void ManualCapture() {
     TriggerCapture("manual_snapshot", "Manual F9 snapshot triggered by user");
 }
 
+namespace { std::atomic<bool> s_manual_recording{false}; }  // flipped from the F8 key or the Debug window
+
 void ToggleManualRecord() {
-    static bool s_recording = false;
-    s_recording = !s_recording;
-    if (s_recording) {
+    const bool was_recording = s_manual_recording.load(std::memory_order_relaxed);
+    s_manual_recording.store(!was_recording, std::memory_order_relaxed);
+    if (!was_recording) {
         RecordEvent(EventCategory::Engine, EventSeverity::Info, 0, "Extended recording started (F8)");
     } else {
         RecordEvent(EventCategory::Engine, EventSeverity::Info, 0, "Extended recording finished (F8)");
         TriggerCapture("manual_extended_record", "Extended recording finished by user (F8)");
     }
 }
+
+bool IsManualRecording() { return s_manual_recording.load(std::memory_order_relaxed); }
 
 // ---------------------------------------------------------------------------
 // Local Offline Analyzer (No Internet / Paid API Needed)

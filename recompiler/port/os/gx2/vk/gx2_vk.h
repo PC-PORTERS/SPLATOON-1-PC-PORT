@@ -220,10 +220,6 @@ bool has_surface();
 // when the window changed. Returns false when nothing could be presented
 // (minimized window, lost surface).
 bool present(Image& source, uint32_t source_width, uint32_t source_height);
-// Real-time FPS overlay in presented images (default on; RBREW_FPS_OVERLAY=0
-// starts it hidden). Thread-safe toggle, e.g. from the window's key handler.
-void set_fps_overlay(bool visible);
-bool fps_overlay();
 uint64_t present_count();
 VkPresentModeKHR present_mode();
 
@@ -240,8 +236,8 @@ void set_name(VkObjectType type, uint64_t handle, const char* name);
 }  // namespace gx2vk
 
 namespace gx2vk {
-// Tests: keep a host copy of each presented swapchain image (RGBA8).
+// Tests and screen captures: keep a host copy of each presented swapchain
+// image (RGBA8). Captured presents omit every overlay.
 bool capture_presents(bool enable); // returns the previous setting
-void capture_fps_overlay(bool include); // captured presents normally omit the FPS overlay
 bool last_present(std::vector<uint8_t>& rgba, uint32_t& width, uint32_t& height);
 }
