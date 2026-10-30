@@ -51,15 +51,21 @@ template<class F> void gx2_native_run(bool gpu, F&& f) {
 struct Gx2AsyncWork {
     virtual ~Gx2AsyncWork() = default;
     virtual void run() = 0;
+    // May run again for the 120 FPS in-between frame (gx2_frame_interp.h).
+    virtual bool replayable() const { return true; }
 };
 #if defined(HAVE_SDL2)
 bool gx2_native_async_active();               // this thread may post
 bool gx2_native_queue_idle();
+// A guest read waits for one occlusion query: the render thread submits and
+// publishes finished queries between items and while idle.
+void gx2_native_query_waiter(bool waiting);
 void gx2_native_post(Gx2AsyncWork* work);     // takes ownership
 #else
 // Builds without a window (front-end unit tests) run everything on the caller.
 inline bool gx2_native_async_active() { return false; }
 inline bool gx2_native_queue_idle() { return true; }
+inline void gx2_native_query_waiter(bool) {}
 inline void gx2_native_post(Gx2AsyncWork* work) { work->run(); delete work; }
 #endif
 

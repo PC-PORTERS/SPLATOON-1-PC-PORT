@@ -103,6 +103,9 @@ void gx2_render_bind_texture(uint32_t tex_addr, uint32_t slot, uint8_t* mem, con
 void gx2_render_copy_to_scan(uint32_t cb_addr, uint32_t scan_target,
                               uint8_t* mem, const uint8_t* descriptor = nullptr);
 void gx2_render_set_scan_format(bool gamepad,uint32_t format);
+// Photo mode (F12): saves the next presented picture, without the FPS
+// overlay and the menu, to Screenshots\ next to the executable.
+void gx2_render_request_photo();
 
 // Blit the current scan FBO to the default framebuffer and swap.
 // Called from GX2SwapScanBuffers.
@@ -222,12 +225,15 @@ bool gx2_render_query_result(uint32_t address,uint32_t output,uint8_t* mem);
 // a query begin executes and when its counters reach guest memory.
 void gx2_query_render_begin(uint32_t address);
 void gx2_query_render_end(uint32_t address, uint64_t serial);
-void gx2_query_render_published(uint32_t address);
+void gx2_query_render_published(uint32_t address, uint64_t samples);
 uint64_t gx2_render_completed_serial();
 void gx2_render_query_poll();
 // Publishes ended queries the GPU has finished, without submitting (safe
 // in the middle of a display-list replay).
 void gx2_render_query_poll_completed();
+// Render thread, while a guest read waits for one query: submit recorded work
+// holding ended queries and publish finished ones.
+void gx2_render_query_service_waiter();
 void gx2_render_conditional_begin(uint32_t type,uint32_t address,bool no_wait,bool pixels_pass,uint8_t* mem);
 void gx2_render_conditional_end();
 // GPU state queries (glIsEnabled/glGet*) issued by the renderer; each one

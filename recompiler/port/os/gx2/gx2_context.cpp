@@ -19,6 +19,9 @@
 #include "gx2_surface.h"
 #include "gx2_display_list.h"
 #include "gx2_settings_menu.h"
+#include "gx2_frame_interp.h"
+#include "gx2_env_light.h"
+#include "vk/gx2_vk_capture.h"
 #include "../../runtime/port_settings.h"
 #include "gx2_render_vk_debug.h"
 #include "../vpad/game_controllers.h"
@@ -545,14 +548,16 @@ static void pace_flip() {
     // Default: adaptive (60 FPS cap, a late frame flips at once, never held at
     // 30). The user wants a steady 60 everywhere; "auto" (hold 30 in heavy
     // scenes) and "vsync" (console-strict) stay available for testing.
-    static const int mode = [] {   // 0 off, 1 vblank-quantized, 2 adaptive, 3 auto
+    static const int configured_mode = [] {   // 0 off, 1 vblank-quantized, 2 adaptive, 3 auto
         const char* v = std::getenv("RBREW_FRAME_PACING");
         if (v && v[0] == '0') return 0;
         if (v && !std::strcmp(v, "auto")) return 3;
         if (v && !std::strcmp(v, "vsync")) return 1;
         return 2;
     }();
-    const uint32_t interval = s_swap_interval.load(std::memory_order_relaxed);
+    const bool shaders = rbrew_settings::g_shader_quality.load(std::memory_order_relaxed) != 0;
+    const int mode = shaders ? 2 : configured_mode;
+    const uint32_t interval = shaders ? 1u : s_swap_interval.load(std::memory_order_relaxed);
     if (!mode || !interval) return;
     const uint64_t cycle = uint64_t(RBREW_TIMER_CLOCK) * 1001;   // 60000 vblanks per cycle
     const auto vblank_index = [cycle](uint64_t ticks) { return (ticks / cycle) * 60000 + (ticks % cycle) * 60000 / cycle; };
@@ -562,6 +567,9 @@ static void pace_flip() {
     const uint64_t now_ticks = rbrew_system_ticks();
     const uint64_t now_index = vblank_index(now_ticks);
     uint32_t effective = interval;
+    // Frame rate 30 (low-end PCs): two vblanks per frame, as the console paces
+    // the game's own 30 FPS mode; each frame runs two logic steps.
+    if (rbrew_settings::g_fps30.load(std::memory_order_relaxed)) effective = std::max(effective, 2u);
     if (mode == 3 && s_last_flip_ticks) {
         // Frame work: last flip to this swap, minus the game's own vsync waits
         // and the present wait (at 30 FPS the game waits longer itself; counting
@@ -727,6 +735,36 @@ void plaza_mode_sync(CPUState* cpu) {
     const uint32_t object = cpu->r[3];
     if (object && rbrew_memory_accessible(cpu->mem, object + 0x304, 4)) {
         const uint32_t request = rbrew_read32(cpu->mem, object + 0x304);
+        // ESC menu "Frame rate: 30" (low-end PCs): the game's own 30 FPS mode
+        // in every scene, as the console's plaza: two logic steps per drawn
+        // frame, so the game speed stays normal. The bit set here is cleared
+        // again when the mode is left.
+        static std::vector<uint32_t> s_forced_30;
+        if (rbrew_settings::g_fps30.load(std::memory_order_relaxed)) {
+            static FILE* stats30 = [] { const char* p = std::getenv("RBREW_PLAZA_STATS"); return p && *p ? std::fopen(p, "w") : nullptr; }();
+            if (stats30) {
+                static clock::time_point second = now;
+                static unsigned calls = 0, objects = 0; static uint32_t last_object = 0;
+                ++calls; objects += object != last_object; last_object = object;
+                if (now - second >= std::chrono::seconds(1)) {
+                    std::fprintf(stats30, "30 FPS mode: calls %u object changes %u flags %08X\n", calls, objects,
+                                 s_pacer_flag_address.load() ? rbrew_read32(cpu->mem, s_pacer_flag_address.load()) : 0u);
+                    std::fflush(stats30); calls = objects = 0; second = now;
+                }
+            }
+            if (!(request & 1u)) {
+                rbrew_write32(cpu->mem, object + 0x304, request | 1u);
+                if (std::find(s_forced_30.begin(), s_forced_30.end(), object) == s_forced_30.end()) s_forced_30.push_back(object);
+            }
+            s_plaza_sync_original(cpu);
+            return;
+        }
+        if (const auto forced = std::find(s_forced_30.begin(), s_forced_30.end(), object); forced != s_forced_30.end()) {
+            s_forced_30.erase(forced);
+            rbrew_write32(cpu->mem, object + 0x304, request & ~1u);
+            s_plaza_sync_original(cpu);
+            return;
+        }
         // The plaza sets its request once on entry; after it was cleared the
         // gate owns the bit for that object while the plaza (scene kind 2) runs.
         static uint32_t s_requester = 0;
@@ -735,7 +773,14 @@ void plaza_mode_sync(CPUState* cpu) {
         // ESC menu "Plaza 60 FPS" off: the plaza's own 30 FPS request again.
         const bool menu_on = rbrew_settings::g_plaza_60fps.load(std::memory_order_relaxed);
         bool want_30 = owned && !menu_on;
-        if (owned && menu_on) {
+        // 120 FPS mode: no 30 FPS frames. After the plaza's loading hitch they
+        // stuck at ~5900 draws per frame (twice the 60 FPS frame) and 46 FPS;
+        // the 120 FPS controller keeps the 60 steps by dropping in-between
+        // frames instead. RBREW_PLAZA_ADAPTIVE_120=1: the time account here too.
+        static const bool adaptive_120 = [] { const char* v = std::getenv("RBREW_PLAZA_ADAPTIVE_120"); return v && v[0] == '1'; }();
+        if (owned && menu_on && gx2interp::mode_enabled() && !adaptive_120) {
+            behind_ms = 0;
+        } else if (owned && menu_on) {
             // Finish a 30 FPS frame once begun: its second (undrawn) iteration
             // runs with bit 1 of the framework flags set.
             const uint32_t flags_address = s_pacer_flag_address.load(std::memory_order_relaxed);
@@ -777,6 +822,15 @@ void install_plaza_60fps(CPUState* cpu) {
 // Called every frame — pump SDL events, blit game FBO to window, swap buffers.
 static void GX2SwapScanBuffers(CPUState* cpu) {
     install_plaza_60fps(cpu);
+    // 120 FPS mode (gx2_frame_interp.h): in-between frames, the plaza
+    // included since 2026-10-27. RBREW_INTERP_PLAZA=0: not in the plaza.
+    static const bool interp_plaza = [] { const char* v = std::getenv("RBREW_INTERP_PLAZA"); return !(v && v[0] == '0'); }();
+    if (cpu) {
+        const bool plaza = rbrew_control_defaults::active_scene_type(cpu->mem) == 2;
+        gx2interp::set_wanted(interp_plaza || !plaza);
+        gx2vk::capture::set_plaza(plaza);
+        gx2env::frame(cpu->mem, s_swap_count.load());
+    }
     gx2_perf_frame();
     using frame_clock = std::chrono::steady_clock;
     static frame_clock::time_point s_prev_swap_tp{};
@@ -791,9 +845,20 @@ static void GX2SwapScanBuffers(CPUState* cpu) {
 #if defined(HAVE_SDL2)
     if (s_window) {
         // Pump SDL events first
+        // The mouse cursor shows while the ESC menu is open (pause), and is
+        // captured again for the camera when it closes.
+        {
+            static bool cursor_free = false;
+            const bool want_free = gx2_settings_menu_open() || g_screen_mode != ScreenMode::TV;
+            if (want_free != cursor_free) {
+                SDL_SetRelativeMouseMode(want_free ? SDL_FALSE : SDL_TRUE);
+                cursor_free = want_free;
+            }
+        }
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
             if (gx2_settings_menu_event(ev)) continue;   // ESC menu (gx2_settings_menu.h)
+            if (ev.type == SDL_MOUSEWHEEL && gx2env::fly_camera()) { gx2env::fly_zoom(float(ev.wheel.y)); continue; }
             switch (ev.type) {
             case SDL_QUIT:
                 gx2_close_requested();
@@ -826,6 +891,8 @@ static void GX2SwapScanBuffers(CPUState* cpu) {
                     SplatoonDiagnostics::ManualCapture();
                     update_window_title();
                     controller_log("F9 pressed: Diagnostic snapshot captured\n");
+                } else if (ev.key.keysym.scancode == SDL_SCANCODE_F12) {
+                    gx2_render_request_photo();   // photo mode: Screenshots\*.png
                 } else if (ev.key.keysym.scancode == SDL_SCANCODE_F7) {
                     // Recording sessions (RBREW_PROFILE_TRIGGER): start the CPU
                     // profile now, wherever the player is.
@@ -883,6 +950,7 @@ static void GX2SwapScanBuffers(CPUState* cpu) {
             struct Present final : Gx2AsyncWork {
                 SDL_Window* window; bool gamepad;
                 Present(SDL_Window* w, bool g) : window(w), gamepad(g) {}
+                bool replayable() const override { return false; }   // the 120 FPS replay presents itself
                 void run() override {
                     struct Done { ~Done() { s_presents_done.fetch_add(1, std::memory_order_release); s_presents_done.notify_all(); } } done;
                     gx2_render_present(window, gamepad);

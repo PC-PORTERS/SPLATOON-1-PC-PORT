@@ -85,6 +85,7 @@ struct TexObject {
     uint32_t swizzle = 0x06880000;       // SQ_TEX_RESOURCE_WORD4: R=0, G=1, B=2, A=3
     TexParams params;
     uint32_t id = 0;                     // stable diagnostic id ("gl tex")
+    uint64_t content_hash = 0;            // original CPU texture bytes, before any HD replacement
     bool complete_storage = true;        // false: GPU would have no level 0
     std::array<float, 2> coordinate_scale{1.0f, 1.0f}; // host texels / guest texels
 };

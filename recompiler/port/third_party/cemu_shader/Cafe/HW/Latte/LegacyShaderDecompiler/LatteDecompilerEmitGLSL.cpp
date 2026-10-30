@@ -3986,10 +3986,8 @@ void LatteDecompiler_emitGLSLShader(LatteDecompilerShaderContext* shaderContext,
 	}
 	for(sint32 i=0; i<LATTE_NUM_MAX_TEX_UNITS; i++)
 	{
-		if(!shaderContext->output->textureUnitMask[i])
-			continue;
-		if( shader->textureUnitDim[i] != Latte::E_DIM::DIM_CUBEMAP )
-			continue;
+		// Port fix: SET_CUBEMAP_INDEX also targets units that are bound as
+		// non-cube textures or unused; the index must always exist.
 		src->addFmt("float cubeMapArrayIndex{} = 0.0;" _CRLF, i);
 	}
 	// init base offset for streamout buffer writes

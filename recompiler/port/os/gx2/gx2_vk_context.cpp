@@ -16,6 +16,7 @@
 #include "gx2_perf.h"
 #include "gx2_render.h"
 #include "gx2_write_watch.h"
+#include "gx2_frame_interp.h"
 #include "../os_common.h"
 #include <atomic>
 #include <chrono>
@@ -56,6 +57,7 @@ size_t s_queue_size = 0;                     // guarded by s_queue_mutex
 bool s_executing = false;                   // guarded by s_queue_mutex
 uint32_t s_next_ticket = 0;                  // guarded by s_queue_mutex
 std::atomic<uint32_t> s_pushed{0}, s_done{0};
+std::atomic<int> s_query_waiters{0};         // guest reads waiting for one query (gx2_draw.cpp)
 std::atomic<bool> s_sleeping{false};
 std::exception_ptr s_task_error, s_async_error;
 std::atomic<bool> s_has_async_error{false};
@@ -140,6 +142,21 @@ void render_thread() {
                 else if (n % 64 == 0 && std::chrono::steady_clock::now() >= until) break;
                 else _mm_pause();
             }
+            // A guest read waits for a query: keep submitting and publishing.
+            if (!queued && s_query_waiters.load(std::memory_order_acquire) > 0) {
+                gx2_render_query_service_waiter();
+                gx2interp::service();
+                _mm_pause();
+                continue;
+            }
+            // A held 120 FPS frame is due at a fixed time: do not sleep past it.
+            if (!queued && gx2interp::deadline_ns()) {
+                while (gx2interp::deadline_ns() && s_pushed.load(std::memory_order_acquire) == seen) {
+                    gx2interp::service();
+                    std::this_thread::yield();
+                }
+                continue;
+            }
             if (!queued) {
                 gx2_render_query_poll();
                 s_sleeping.store(true, std::memory_order_seq_cst);
@@ -153,19 +170,23 @@ void render_thread() {
         for (Item& item : batch) {
             // The caller's core selects its display list, as if it ran there.
             rbrew_thread_core_slot = item.core;
+            gx2interp::before_item();   // 120 FPS mode: a new frame's capture starts here
             if (item.work) {
+                const auto work_start = std::chrono::steady_clock::now();
                 try { item.work->run(); }
                 catch (...) {
                     std::lock_guard error_lock(s_async_error_mutex);
                     if (!s_async_error) s_async_error = std::current_exception();
                     s_has_async_error.store(true, std::memory_order_release);
                 }
-                delete item.work;
-            } else {
+                gx2interp::add_busy(uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - work_start).count()));
+                gx2interp::keep(item.work);   // kept for the 120 FPS replay, else deleted
+                gx2interp::service();            } else {
                 try { item.run(item.context); } catch (...) { s_task_error = std::current_exception(); }
                 s_done.store(item.ticket, std::memory_order_release);
                 s_done.notify_all();
             }
+            if (s_query_waiters.load(std::memory_order_relaxed) > 0) gx2_render_query_service_waiter();
             rbrew_thread_core_slot = nullptr;
         }
         busy.stop();
@@ -242,6 +263,11 @@ void gx2_native_execute(bool gpu, Gx2Task task, void* context) {
 
 bool gx2_native_async_active() {
     return !t_render_thread && s_running.load(std::memory_order_acquire) && async_enabled();
+}
+
+void gx2_native_query_waiter(bool waiting) {
+    if (waiting) { s_query_waiters.fetch_add(1, std::memory_order_seq_cst); wake_render_thread(); }
+    else s_query_waiters.fetch_sub(1, std::memory_order_release);
 }
 
 bool gx2_native_queue_idle() {

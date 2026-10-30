@@ -21,6 +21,7 @@ struct Gx2MenuLine {
 };
 struct Gx2MenuView {
     std::string title, hint;
+    std::string help;           // what the selected row does, in plain words
     std::vector<Gx2MenuLine> lines;
 };
 

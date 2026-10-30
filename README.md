@@ -9,13 +9,14 @@ An unofficial native Windows port of **Splatoon (Wii U)**, made by statically re
 ## What's new
 
 **Settings menu (Esc / controller touchpad)**
-- Render resolution, Plaza 60 FPS on/off, fullscreen, FPS overlay
+- Render resolution, Plaza 60 FPS on/off, frame rate (30 / 60 / 120 / 180), G-Sync / FreeSync, fullscreen, FPS overlay
 - Gyro on/off, gyro and mouse sensitivity, invert gyro, volume
 - Rebind every button for keyboard/mouse and controller
 - HOME moved from Esc to H
 
 **Performance**
 - Plaza runs at 60 FPS with normal game speed (keeps NPCs)
+- New frame rates in the menu (experimental): 120 and 180 FPS with real extra frames between game steps (180 outside the plaza), 30 FPS for weak PCs; game speed stays normal in all
 - Fewer shader stutters, faster rendering in levels
 
 **Fix:** Setup now works when the folder path contains accents (issue #10) and retries a failed vcpkg download
@@ -53,9 +54,13 @@ You can also pass folders directly, with quotes around paths that contain spaces
 Setup.bat -GameDump "D:\My Wii U games\Splatoon [AGMP01]"
 ```
 
+### Optional: HD textures
+
+Double-click `HD-Textures.bat`. The game starts; visit the places you want in HD and close it. The textures it showed are then upscaled (Real-ESRGAN) into `Game\textures` and load at the next start. Everything happens on your PC from your own copy of the game; the HD textures are never uploaded or shared, because they are derived from the game's files. Needs Python 3 (the script offers to install `torch`, `numpy` and `pillow`); an NVIDIA graphics card makes it much faster.
+
 ## Controls
 
-**Esc** (or the touchpad button of a PlayStation controller) opens the port's settings menu: render resolution (applies at the next start), plaza 60 FPS on/off, fullscreen, FPS overlay, controller gyro on/off, gyro sensitivity, inverted gyro up/down, mouse sensitivity, volume and quit. Two pages show and rebind every GamePad input for keyboard & mouse and for the controller: select a row, press Enter/Cross, then the new key or button (a key already in use swaps with the old one; Delete/Square clears; "Reset to defaults" restores the layout below). The game keeps running but gets no input while the menu is open. Choices are saved in `settings.ini` next to `Splatoon.exe`; an environment variable that is set (for example `RBREW_PLAZA_60FPS`, `RBREW_GYRO`, `RBREW_RENDER_RESOLUTION`) still wins over the file.
+**Esc** (or the touchpad button of a PlayStation controller) opens the port's settings menu: render resolution (applies at the next start), plaza 60 FPS on/off, 120 FPS mode on/off (see below), fullscreen, FPS overlay, controller gyro on/off, gyro sensitivity, inverted gyro up/down, mouse sensitivity, volume and quit. Two pages show and rebind every GamePad input for keyboard & mouse and for the controller: select a row, press Enter/Cross, then the new key or button (a key already in use swaps with the old one; Delete/Square clears; "Reset to defaults" restores the layout below). The game keeps running but gets no input while the menu is open. Choices are saved in `settings.ini` next to `Splatoon.exe`; an environment variable that is set (for example `RBREW_PLAZA_60FPS`, `RBREW_GYRO`, `RBREW_RENDER_RESOLUTION`) still wins over the file.
 
 The game starts in borderless fullscreen; **F11** switches to a 1280×720 window and back. The TV scene renders internally at the console's **1280×720** (light on the GPU) and is scaled to the window. For a sharper image set `RBREW_RENDER_RESOLUTION` before starting: `native` (your desktop resolution), `1080p`, `1440p` or any `WIDTHxHEIGHT`. The game's camera and UI keep their original layout.
 
@@ -82,6 +87,10 @@ Keyboard and mouse (default layout, rebindable in the menu):
 | F3 | Show/hide the FPS overlay (translucent panel: FPS, frame time, 1% low, slowest frame, frame-time graph) and frame stats in the window title |
 | F4 | Detailed frame stats in the window title (1% low, P95/P99, RAM) |
 | F8 / F9 | Start/stop an extended diagnostic recording / save a diagnostic snapshot to `Game\Diagnostics` |
+
+**120 FPS mode** (menu, off by default, experimental; `RBREW_FPS120=interp` turns it on): Splatoon advances its game logic by a fixed step per frame, so the port keeps 60 game steps per second and draws one extra real frame between two steps. The extra frame re-renders the scene with camera, object and bone matrices halfway between the two steps. It is not an image-blending "frame generation". When the PC cannot draw both frames in time, extra frames are left out (you see between 60 and 120 FPS), but the game speed never changes. It works in the plaza too. Expect about half a frame more input latency. On a monitor faster than 120 Hz, turn on G-Sync/FreeSync in your driver and "G-Sync / FreeSync" in the menu so every frame is shown for the same time.
+
+**Frame rate** (menu): 60 (default), 120 (above), 180 (two extra frames per step, at a third and two thirds; the plaza stays at 120) and 30 for weak PCs (the game's own 30 FPS mode everywhere: two game steps per drawn frame, so the game speed stays normal). `RBREW_FRAME_RATE=30|60|120|180` sets it from the environment.
 
 Standing still with your weapon for about 5 seconds plays the inkling's look-around idle animation (`WaitHold_Nrml_LookAround`). It ships in the game's files but the original game never uses it. Set `RBREW_IDLE_LOOKAROUND=0` to turn it off.
 

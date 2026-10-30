@@ -309,8 +309,9 @@ public:
     }
     unsigned width() const { return width_; }
     unsigned height(size_t rows) const {
+        // rows, then the help line for the selected row, then the key hint
         return unsigned(pad_ * 2 + title_.ascent() + title_.descent() + pad_ / 2 + int(rows) * row_height_ + pad_ / 2 +
-                        hint_.ascent() + hint_.descent());
+                        2 * (hint_.ascent() + hint_.descent()) + pad_ / 4);
     }
     template <class View>
     void draw(const View& view, uint8_t* out, unsigned w, unsigned h) {
@@ -343,6 +344,8 @@ public:
             y += row_height_;
         }
         y += pad_ / 2 + hint_.ascent();
+        hint_.draw(view.help, pad_, y, 1.0f, 0.85f, rgba_.data(), w, h);
+        y += hint_.descent() + pad_ / 4 + hint_.ascent();
         hint_.draw(view.hint, pad_, y, 1.0f, 0.5f, rgba_.data(), w, h);
         for (size_t i = 0; i < rgba_.size(); ++i) out[i] = uint8_t(std::clamp(rgba_[i], 0.0f, 1.0f) * 255.0f + 0.5f);
     }

@@ -214,6 +214,8 @@ inline bool read_replay(std::istream& stream, Replay& replay) {
 }
 
 inline std::atomic<bool> replay_running{false};
+// Recorded input position, not elapsed live frames; loading pauses invalidate it.
+inline std::atomic<uint32_t> replay_capture_frame{UINT32_MAX};
 inline bool replaying() {
     static const bool on = [] { const char* p = std::getenv("RBREW_INPUT_REPLAY"); return p && *p; }();
     return on;
@@ -241,13 +243,16 @@ inline bool replay_input(Pad& pad, int scene, int scene_id, bool physical_input)
     const auto finish = [&](const char* why) {
         done = true;
         replay_running.store(false);
+        replay_capture_frame.store(UINT32_MAX,std::memory_order_relaxed);
         std::fprintf(stderr, "[replay] %s at frame %u; the controller takes over\n", why, now);
         return false;
     };
     // Input held over several frames: a controller reports one stray full
     // deflection while it initializes, which must not end the replay.
+    // RBREW_REPLAY_TAKEOVER=0 (benchmarks): live input never ends the replay.
+    static const bool takeover = [] { const char* v = std::getenv("RBREW_REPLAY_TAKEOVER"); return !(v && v[0] == '0'); }();
     static uint32_t input_frames = 0, last_input_frame = UINT32_MAX;
-    if (!physical_input) input_frames = 0;
+    if (!physical_input || !takeover) input_frames = 0;
     else if (now != last_input_frame && ++input_frames >= 6) return finish("player input");
     last_input_frame = now;
     static int64_t offset = 0;   // live frame - recorded frame
@@ -296,6 +301,7 @@ inline bool replay_input(Pad& pad, int scene, int scene_id, bool physical_input)
             [](int64_t f, const std::pair<uint32_t, Pad>& p) { return f < int64_t(p.first); });
         if (it != replay.pads.begin()) pad = std::prev(it)->second;
     }
+    replay_capture_frame.store(hold?UINT32_MAX:uint32_t(at),std::memory_order_relaxed);
     held = pad;
     return true;
 }

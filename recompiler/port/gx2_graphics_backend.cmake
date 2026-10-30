@@ -18,7 +18,12 @@ set(RBREW_GX2_BACKEND_SOURCES
     ${RBREW_GX2_DIR}/gx2_render_vk_draw.cpp
     ${RBREW_GX2_DIR}/gx2_render_vk_capture.cpp
     ${RBREW_GX2_DIR}/gx2_vk_context.cpp
+    ${RBREW_GX2_DIR}/gx2_frame_interp.cpp
+    ${RBREW_GX2_DIR}/gx2_weather.cpp
+    ${RBREW_GX2_DIR}/gx2_env_light.cpp
+    ${RBREW_GX2_DIR}/gx2_texture_pack.cpp
     ${RBREW_GX2_DIR}/vk/gx2_vk.cpp
+    ${RBREW_GX2_DIR}/vk/gx2_vk_capture.cpp
     ${RBREW_GX2_DIR}/vk/gx2_vk_shader.cpp)
 function(rbrew_gx2_backend target scope)
     target_sources(${target} PRIVATE ${RBREW_GX2_BACKEND_SOURCES})

@@ -12,6 +12,7 @@
 #include <vector>
 #include "../../runtime/rebrewu_memory_observer.h"
 #include "../../runtime/rbrew_diagnostics.h"
+#include "gx2_frame_interp.h"
 
 namespace {
 constexpr uint64_t kPage = 4096;
@@ -169,6 +170,10 @@ uint64_t gx2_write_generation(const uint8_t* mem,uint32_t addr,uint32_t size) {
     const uint64_t first=addr/kPage,last=(uint64_t(addr)+size-1)/kPage;
     observe_render_writes(mem);
     std::lock_guard lock(s_lock);select_arena(mem);++s_checks;
+    // The 120 FPS in-between frame redraws frame N: answer from the history
+    // collected for N without asking the OS. Writes the game makes for the
+    // next frame meanwhile stay pending for that frame.
+    if(gx2interp::replaying())return newest(first,last);
     uint64_t generation;
     if(memoized(mem,addr,size,generation))return generation;
     generation=(collected_this_epoch(mem,first,last) || collect_batch_pages(mem,first,last))?newest(first,last):kGx2WriteUntracked;
@@ -179,6 +184,14 @@ void gx2_write_generations(const uint8_t* mem,Gx2WriteRange* ranges,uint32_t cou
     if(mem)observe_render_writes(mem);
     std::lock_guard lock(s_lock);
     if(mem)select_arena(mem);
+    if(mem && gx2interp::replaying()) {   // see gx2_write_generation
+        for(uint32_t i=0;i<count;++i) {
+            auto& range=ranges[i];
+            range.generation=!range.size?0:uint64_t(range.address)+range.size>(1ull<<32) || tracking_disabled()?kGx2WriteUntracked:
+                newest(range.address/kPage,(uint64_t(range.address)+range.size-1)/kPage);
+        }
+        return;
+    }
     s_ranges.clear();
     for(uint32_t i=0;i<count;++i) {
         auto& range=ranges[i];range.generation=0;

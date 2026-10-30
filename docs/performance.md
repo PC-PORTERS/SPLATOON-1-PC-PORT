@@ -889,3 +889,412 @@ Replaces the "plaza fast mode" above.
   default (outside the plaza a 30 FPS-mode scene must not run fast).
 - GX2SetContextState is posted only after 120 presented frames: posting it
   during boot hung the game before its first frame in rare runs.
+
+### 120 FPS mode: rendered in-between frames (2026-10-26)
+
+Splatoon has no time step: player, physics, ink and timers advance a fixed
+amount per frame. A memory probe that switched the plaza between the game's
+own 30 and 60 FPS modes found 89 float fields flipping 1.0/2.0; a write trap
+showed they are animation rates set by a few plaza classes
+(`Gambit_fn_024B3F5C` via `024B3F38`). Only six functions in the whole game
+read the framework's 30 FPS bit, so a faster clock (tested: tutorial 89 FPS,
+character creation 119 FPS) always speeds the game up.
+
+The 120 FPS mode (`os/gx2/gx2_frame_interp.cpp`, menu "120 FPS mode",
+`RBREW_FPS120=interp`) keeps 60 logic steps and has the render thread draw
+every frame twice:
+- Each frame's posted commands (`StreamCommand`, `ListCall`, `ScanCopy`) are
+  kept, and every draw's uniform bytes (register block and guest uniform
+  blocks) are recorded per draw key (program, primitive, count, first vertex,
+  index count, attribute buffers, instance, occurrence).
+- At the frame's present the image is held; the commands are replayed with
+  each draw's transforms blended halfway between the previous and this frame
+  and that frame is presented; the held frame follows half a frame later.
+- Only matrices are blended: three vec4 rows whose 3x3 parts are mutually
+  orthogonal, plus the following vec4. Blending every plausible float turned
+  the ground blue and hid the player (ink and material parameters). A jump
+  keeps the whole matrix at the current frame; among several draws with the
+  same key the most similar previous one is used.
+- The replay never writes guest memory (queries, stream-out, readbacks) and
+  answers write-watch checks from frame N's history.
+- A replay with exact frame-N data (`RBREW_INTERP_NOBLEND=1`) is pixel-equal
+  to frame N (at most 0.1% of pixels), and so are the blended frames apart
+  from the half-frame camera/object offset.
+- Off-screen depth-only passes must be redrawn: skipping them
+  (`RBREW_INTERP_SKIP_DEPTH=1`) made characters and balloons disappear.
+- The game waits for the renderer at occlusion reads and at its swap, so a
+  replay can slow the game even when render time fits. A controller lowers
+  the share of replayed frames when the game's frame interval exceeds a 60 Hz
+  frame (and raises it again), so the game speed never changes.
+  `RBREW_INTERP_ALWAYS=1` replays every frame (diagnostics),
+  `RBREW_INTERP_STATS=<file>` logs replays, skips and timings per second.
+- In this mode GX2DrawDone no longer waits for the GPU unless stream-out
+  exports are pending (`RBREW_DRAWDONE_GPU_WAIT=1` restores the wait).
+
+Tutorial replay (your recording, `Game\Replays\Full`), 1440p:
+
+| | game steps/s | presented frames/s |
+|---|---|---|
+| normal | 59.3 (59.7 before) | 59.3 |
+| 120 FPS mode | 59.5 | 89.9 avg, median 85, best second 121, worst 48 |
+
+The limit is game logic (~9.5 ms per frame) plus the replay (~6 ms, was
+9 ms before skipping write-watch queries) within one 16.7 ms frame. 720p gave
+the same numbers: CPU-bound, not GPU-bound.
+
+#### Update: Vulkan-level replay (2026-10-26, evening)
+
+The GX2-level replay re-ran display-list decoding, register application,
+program resolution and cache checks: ~7 ms per in-between frame, so the
+controller left most frames without one (tutorial ~80-90 presents/s, and the
+game thread waited ~6 ms per frame behind it at its occlusion reads).
+
+Now `os/gx2/vk/gx2_vk_capture.cpp` captures frame N's Vulkan commands (a
+second wrapper layer over the volk vkCmd* pointers, chained in front of the
+render-split recorder) and the in-between frame re-issues them. Push
+descriptor uniform buffers are replaced by blended copies: each draw records
+which span it bound for which stage/bank (`note_ubo`), a draw that keeps an
+earlier binding points at the draw that uploaded it. Queries, timestamps,
+readbacks, texture uploads, compute and stream-out draws are not captured;
+frame N's upload chunks and deferred destructions stay alive until the
+in-between frame's submission (`retain_until_current_submission`).
+`RBREW_INTERP_VK=0` falls back to the GX2 replay.
+
+Found on the way:
+- The packed register block (the camera and object matrices) is host byte
+  order, guest uniform blocks are big-endian. Blending both as big-endian
+  found no matrix: the in-between frames were exact copies (presented as 120,
+  felt like 60).
+- Uniform bindings declare up to 64 KB; zero-filling the tail of every
+  blended block cost ~25 ms per frame (now: 1 KB tail).
+- Reading back the write-combined upload span (for a statistic) cost ~25 us
+  per block; blending happens in host memory now.
+- Retaining every upload chunk each frame allocated new 32 MB chunks every
+  frame; only frame N's are retained now.
+- Answering the game's occlusion reads with the previous result made no
+  difference once the replay was cheap; that change was removed (the game
+  sees exactly the queries it saw before).
+
+Tutorial replay, 1440p, same recording:
+
+| | game steps/s | presented frames/s |
+|---|---|---|
+| normal (no 120 mode) | 59.3-59.7 | same |
+| 120 mode, GX2 replay | 59.5 | 89.9 avg, median 85 |
+| 120 mode, Vulkan replay | 58.8 | 109.0 avg, **median 120**, 90% of seconds above 77 |
+
+In-between frame: 1.5-2.5 ms on the render thread (was ~7 ms). An exact
+replay (`RBREW_INTERP_NOBLEND=1`) is pixel-equal to frame N (<= 0.04%).
+On a 180 Hz screen without variable refresh, 120 FPS alternates one and two
+refreshes per frame; G-Sync/FreeSync (or a 120 Hz mode) shows it evenly.
+
+#### Update: occlusion reads and blending rules (2026-10-26, night)
+
+- With the in-between frame at ~2 ms, the game thread still waited 43% of its
+  time (~7 ms per frame) in GX2QueryGetOcclusionResult: Gambit re-runs its
+  listed queries every frame and reads one right after, before the GPU has
+  it, and the in-between frame's GPU work is queued ahead of it. In the 120
+  FPS mode the read now returns that query's previous completed result (one
+  execution older) instead of waiting (`RBREW_INTERP_QUERY_FAST=0` waits).
+  The normal mode is unchanged.
+- Flickering ink in play: the register block's vec4 after a 3x4 matrix is
+  another parameter and was blended as a 4th row. The 4th row is now taken
+  only when parallel to the 3rd (a projection's w row). A matrix whose rows
+  turn by more than ~20 degrees or whose translation changes by more than a
+  quarter keeps frame N (texture matrices switching buffers, cuts).
+
+| tutorial replay, 1440p | game steps/s | presented frames/s |
+|---|---|---|
+| 120 mode before this update | 58.8 | 109.0 avg, median 120, p10 77 |
+| 120 mode now | 59.0 | 113.4 avg, median 120, p10 94, 10 of 126 seconds below 90 |
+
+#### Update: only the main scene pass is blended (2026-10-26, late night)
+
+- Blending in every pass let a paint draw of the ink map be drawn with a
+  transform halfway between two different splats; the ink map keeps it, and
+  in one run the whole level (trees included) turned blue. Ink, UI and other
+  effects also flickered. Now only draws of the main scene pass are blended:
+  the render target (first color attachment, else depth) that receives the
+  most draws in the frame. The ink map, shadows, effects and the HUD are
+  replayed with frame N's data, so the in-between frame cannot change any
+  persistent target.
+- Draws with more than 8 copies of the same program and mesh (text glyphs,
+  ink drops, particles) blend only when the same position in the order is an
+  almost unchanged copy; two different copies are never blended.
+- The occlusion-read shortcut stays: without it the tutorial replay gave
+  110 avg / p10 73 presents per second and 58.7 game steps, with it 117 / 114
+  and 59.3. Contact sheets of the real frames show no wrong silhouettes.
+
+| tutorial replay, 1440p | game steps/s | presented frames/s |
+|---|---|---|
+| normal mode | 59.3-59.7 | same |
+| 120 mode now | 59.3 | 117.2 avg, median 120, p10 114, 4 of 127 seconds below 90 |
+
+Blue-ink share of the frames stayed within the normal game's range
+(normal: up to 29%; 120 mode now: up to 38% at the swim-up-walls section,
+real paint only; the broken run reached 69% with every surface blue).
+
+#### Update: exact occlusion reads, no dips below 90 (2026-10-27)
+
+Measured with presented-frame timestamps (`RBREW_PRESENT_LOG=<file>`,
+`tools/perf/presents.py`: half-second windows like the FPS overlay) instead
+of whole seconds. The tutorial still dipped to 50-60 FPS in its heavy scenes
+(2500-2800 draws): the game took 17 ms per frame there in the 120 mode
+(14 ms without it), so the controller dropped the in-between frames. 39% of
+the game thread waited in GX2QueryGetOcclusionResult for the render queue.
+
+- Listed queries are now counted when their list is posted (the existing
+  `RBREW_QUERY_LIST_COUNT` counting, from the start), and in the 120 mode a
+  read whose newest counted begin is executed and published returns that
+  result at once instead of draining the queue. It is the exact value:
+  `RBREW_QUERY_VERIFY=<file>` drains anyway and compared 5888 such reads in
+  Octo Valley and a level, 0 differed. Normal mode is unchanged
+  (`RBREW_QUERY_LIST_COUNT=0`: never count; `=4`: also in normal mode).
+- The older-result shortcut of yesterday returned the wrong visibility in 28%
+  of its reads (`RBREW_QUERY_VERIFY_STALE=<file>`). A read whose query is
+  executed but not yet finished on the GPU now waits for exactly that query:
+  the render thread, between its other work and while idle, submits the
+  recorded work holding ended queries and publishes the finished ones
+  (`gx2_render_query_service_waiter`), so the read no longer waits for the
+  whole queue and the in-between frame. The game always gets the exact
+  value. After 10 ms, or when a queued list may begin the query again, the
+  read drains as before (a 3 ms limit sent most level reads to the drain
+  path: 5 FPS). `RBREW_INTERP_QUERY_FAST=1`: older result, `=0`: drain.
+- Answering "not ready" instead (as the console does while that frame is in
+  flight, `RBREW_INTERP_QUERY_FAST=3`) was as fast in the tutorial but kept
+  Octo Valley black behind its fade.
+- Tried and dropped (the ground ink disappeared): answering with the older
+  result while the query's end is still queued, or with the published result
+  while a queued list may begin the query again.
+- A single hitch (streaming, 30-70 ms) counts as at most 1.5 frames in the
+  controller's average; it used to drop the in-between frames for half a
+  second. No in-between frame for 10 frames after a frame over 50 ms: those
+  are loading frames that set up the ink map, and replaying them painted the
+  whole tutorial level pink (`RBREW_INTERP_HITCH_CLAMP=0`: old behaviour).
+- Recording/replay sessions apply the tutorial motion policy every 6th frame
+  instead of every 100 ms: the wall-clock step made replays drift apart and
+  stop at the motion prompts ("Look left and right", "tilt upward").
+
+| tutorial replay, 1440p | game steps/s | presented frames/s (half-second windows) |
+|---|---|---|
+| normal mode | 59.9 | 60 |
+| 120 mode before (2026-10-26) | 59.6 | 113.8 avg, p5 63, 22 windows below 90 |
+| 120 mode now (two runs) | 59.7 / 59.7 | 117.9-118.1 avg, p10 116, below 90: loading plus 2-3 single windows at 81-88 |
+
+Heavy tutorial frames (> 2300 draws): game 17 ms -> 11 ms (normal mode 14 ms).
+
+Octo Valley and level 1 (`Game\Replays\Level`, with `RBREW_PLAZA_60FPS=0`,
+the plaza mode it was recorded with): level 59.1 game steps/s, p10 110
+presents/s outside the plaza. In the level's heavy frames (> 1800 draws)
+the 120 mode needs 10.3 ms per frame, the normal mode 15.6 ms (it waits 38%
+at occlusion reads). The remaining dips are the plaza (its old 30 FPS mode
+in this replay) and the game's own loading, respawn and streaming hitches
+(60-270 ms frames), which the normal mode has at the same places.
+
+Ink was checked on every run (`tools/perf/ink.py`: deep-blue share of the
+lower image half, sky excluded) against the 2026-10-26 reference, and the
+contact sheets show the HUD, ink and enemy ink intact.
+
+#### Update: the plaza, and flicker (2026-10-27, afternoon)
+
+Replays now keep the camera forward (`RBREW_GYRO=0`): the old recordings'
+gyro tilted it to the ground, which made the plaza look easy. Facing the
+plaza centre the game draws ~3000 calls per frame.
+
+- 120 FPS in the plaza (`RBREW_INTERP_PLAZA=0`: not there). Its adaptive
+  time account (30 FPS frames when behind) tipped after the loading hitch
+  into frames with twice the draws (~5900) and stayed at 46 FPS; in the
+  120 FPS mode the plaza keeps its 60 FPS mode and the controller drops
+  in-between frames instead (`RBREW_PLAZA_ADAPTIVE_120=1`: account on).
+- Which passes blend. The scene is drawn twice with depth (a pre-pass and
+  the main pass). The "most draws" target was the GamePad image in the
+  plaza (no motion at all in its in-between frames). The plaza now blends
+  every full-size target except the HUD output; elsewhere only the main
+  pass (blending the pre-pass there showed holes, a green floor).
+- Glass was dark and without the ink behind it in every in-between frame
+  while only the main pass blended (superseded the same evening, below:
+  both passes blend).
+- `tools/perf/flicker.py`: share of pixels where an in-between frame differs
+  from both neighbours although they agree. (The low tutorial numbers first
+  measured with it came from in-between frames that were copies of N; see
+  the evening update.)
+- Recording/replay: consecutive dumps `RBREW_FRAME_DUMP_FROM/_TO`, present
+  timestamps `RBREW_PRESENT_LOG`, pass list `RBREW_INTERP_PASS_LOG`.
+
+| 1440p, 120 FPS mode | game steps/s | presented frames/s |
+|---|---|---|
+| tutorial | 60.1 | 120.0 avg, half-second p5 118, below 90 only while loading |
+| plaza, facing the centre, after loading | 60.0 | 119.8 avg, worst second 114 |
+| plaza, walking, after loading | 60.2 | 120.5 avg |
+
+#### Update: blending that really moves, 180 and 30 FPS (2026-10-27, evening)
+
+- A check that in-between frames lie between N-1 and N (`tools/perf/motion.py`)
+  showed that an earlier glass "fix" (keeping draws that do not write depth at
+  frame N) made every in-between frame a copy of N: the main pass writes no
+  depth (it tests against the pre-pass). Reverted. `flicker.py` now erodes its
+  mask twice: a thin moving edge (a fence wire) between its two positions is
+  correct motion, not flicker.
+- Both scene passes blend everywhere now (every full-size target except the
+  HUD output), and a uniform block gets whatever the first draw with the same
+  bytes got (`RBREW_INTERP_CONTENT_CACHE=0`: per draw). The pre-pass and the
+  main pass draw an object with the same bytes; matched separately, one pass
+  could blend an object the other kept, and the depth test left holes (the
+  green floor). Tutorial, 800 in-between frames: no area flicker (worst 0.84%,
+  a fence post right in front of the camera), distances to N-1/N 0.78/0.55.
+- Tiny passes (128x1, 1x1: the eye adaptation) are not replayed: they blend
+  the old luminance with the new one, so each replay sped the adaptation up,
+  and with two in-between frames the second came out nearly black
+  (`RBREW_INTERP_REPLAY_TINY=1`: replay them).
+- 180 FPS (menu "Frame rate", `RBREW_FRAME_RATE=180`): two in-between frames
+  per step, blended at 1/3 and 2/3, both rendered right after frame N (the
+  second kept like N) and presented a third of a frame apart. Not in the plaza
+  (120 there). The controller's share covers both, so the second goes first.
+- 30 FPS for weak PCs (`RBREW_FRAME_RATE=30`): the game's own 30 FPS mode in
+  every scene (the plaza sync hook sets the request bit, cleared again when
+  left) and two vblanks per flip. Measured 30.0 frames and 60 logic steps per
+  second in the tutorial; without the flip pacing it ran ~97 steps at 49 FPS.
+
+| 1440p | game steps/s | presented frames/s |
+|---|---|---|
+| tutorial, 120 | 60.0 | 119.6 avg, half-second p10 119 |
+| tutorial, 180 | 59.9 | 178.8 avg, p10 176, below 90 only while loading |
+| Octo Valley + level, 180 (after the plaza) | 59.7 / 58.2 | 172.9 avg, median 180, p10 161 |
+| tutorial, 30 | 60 logic steps (30 frames x 2) | 30.0 |
+
+Menu: "G-Sync / FreeSync" (`settings.ini` `gsync=`) presents with IMMEDIATE
+so a variable-refresh display follows each frame; off keeps MAILBOX.
+`RBREW_VK_PRESENT_MODE` still wins.
+
+## 2026-10-29: plaza lighting, sky and time of day (work in progress)
+
+**Game lights driven by the time of day** (`os/gx2/gx2_env_light.cpp`, `gx2_sky_model.h`). The plaza's agl::env objects (DirectionalLight, HemisphereLight, Fog, PointLightRig, BloomObj, lens flares; `plazaday.baglenv` in `Env.pack`) are found once per visit by a background heap scan and written every frame, so the game's own shaders, light pre-pass and shadows relight the scene:
+- `Main` is re-blended each frame by guest function `0x0265E898` from the area lights (`MainPlaza`, `MainNews`): direction and intensity go to those sources, colours to `Main`.
+- The static depth shadow (object with the `Main` light pointer at +0x1198, cached direction at +0xF10) only rebuilds when its byte +0x47C is set; the driver sets it when the sun turns (0.2° steps).
+- Sun path: latitude 35.7°, declination 15° (sunrise 05:15, sunset 18:45); the game's own sun is reproduced at 14:34. Sunlight colour from Rayleigh/Mie/ozone transmittance; moonlight by night; lamps x2.6 and bloom at night; the lens flare off at night and under clouds.
+- Every write re-checks the parameter header (hash + vtable); a moved object triggers a new search. `RBREW_ENV_LIGHT=0`: original lights. Diagnostics: `RBREW_ENV_SCAN=<frame>` (dump all parameter objects), `RBREW_ENV_TRAP=<hex>,<frame>` (log the writer of a guest address).
+
+**Sky** (`gx2_weather.cpp`, `gx2_weather_shaders.h`): the dome's colour draw into the HDR target is replaced by a full-screen sky at the far plane (Hillaire 2020 atmosphere LUTs, sun disc and glare, moon with phase, stars with sidereal rotation and a faint Milky Way, high cirrus). Volumetric clouds are ray-marched into a direction dome texture (2048x512 on High), one of 16 interleaved phases per frame. `RBREW_SKY=0`: the game's dome. `RBREW_ATMOSPHERE=0`: no sky/post work at all. `RBREW_SKY_DUMP=<n>`: raw dome and LUT dumps.
+
+**Post (display space, before the HUD)**: half-resolution horizon AO, light shafts through silhouettes and clouds, wet ground with screen-space reflections and a sky fallback, bloom from the HDR scene target, contrast adaptive sharpening, filmic grade.
+
+**Decompiler fixes**: 555 game shaders failed to compile (`cubeMapArrayIndexN` undeclared when SET_CUBEMAP_INDEX targets a non-cube unit; a VS output declared twice when two export slots share a semantic). Both fixed in `third_party/cemu_shader`; stale cached translations are detected on load and translated again (no cache version bump: that would make every start re-read the 2.8 GB cache). 2 failures remain (syntax error at line 13, not yet investigated). The repaired shaders add draws in the plaza (3858 -> ~5900 per frame).
+
+**Measurements** (plaza replay `weather_user_20261028_191116`, 60 FPS mode, 2560x1440):
+
+| run | plaza avg FPS | guest p50 | draws |
+|---|---|---|---|
+| shaders off, before decompiler fix (`wx_base1`) | 47.6 | 13.7 ms | 3858 |
+| shaders off, after decompiler fix (`shaderr5`) | 43.8 | 21.8 ms | 5967 |
+| shaders High, Codex version (`wx_codex2`) | 43.6 | 24.0 ms | 4831 |
+| shaders High, new (`dome3_w1`) | 40.3 | 23.7 ms | 5805 |
+
+Not yet profiled with `dev analyze`; the frame time is CPU/guest-bound and grew with the restored draws. Open: Gaussian bloom (the blit pyramid is blocky around the moon), richer sunset colours, cloud detail, rain/thunder, after-rain wet streets, lit windows at night, interpolation (120/180) support with the shaders (still locked to 60).
+
+### 2026-10-29 (later): reference look, weather, image quality
+
+- Weather: Clear, Overcast, Rain, Thunderstorm (lightning bolts, clouds lit from inside, scene flash), After the rain (soaked streets that dry over ~20 min). All live from the ESC menu.
+- Clouds: 4096x1024 dome on High, refreshed over 64 interleaved phases (same cost per frame as 2048 with 16), smaller crisper cumulus, darker bases and lit edges at low sun; the far-cloud haze no longer leaks 4 % sky through overhead clouds.
+- Sky: deeper blue (less haze, more ozone), golden-hour white balance towards the sun, large sun glow at sunrise/sunset; sun disc and glare hidden by overcast.
+- Post: bloom is a 13-tap/tent chain from the HDR target (no more blocky pyramid), FXAA 3.11, lens fringes and fine grain ("Film look"), halation at low sun, stronger vibrance and contrast.
+- Wet ground rewritten: small soft-edged puddles in the noise minima, rough blurred reflections on asphalt (Fresnel capped), soaked surfaces darker and richer, paint and tiles less wet, raindrop rings only in puddles during rain.
+- Cinema mode (hides the HUD after the final scene pass; sway only there) exists but is not tuned yet. Screen-space rain streaks and weather sounds were removed again (to be redone).
+- Settings: `antialiasing`, `film_look`, `camera_motion`, `cinema_mode` in settings.ini; env: `RBREW_CINEMA=1`, `RBREW_LIGHTNING_TEST=1` (constant strike for screenshots), `RBREW_SHADER_ERRORS=1` (shader compiler log in release builds).
+
+Plaza replay, shaders High, 14:34 after rain (`ref4_874`): 49.9 FPS average, guest p50 18.1 ms (shaders off, same build: 50.7 in `prof_off`). With effects the render thread waits more on the GPU (wait_serial 13 % vs 3 %); the frame is still mostly bound by the render queue.
+
+### 2026-10-30: realistic look (docs/graphics-plan.md, phases 1-3)
+
+- **Learned grade:** `tools/perf/fit_look.py` aligns our frames to the user's realistic reference sheet and fits a cubic colour transform per look (day, golden hour) from a distribution transfer (luminance histogram matching + Monge-Kantorovitch chroma transfer; plain regression flattened contrast because the AI reference is not pixel-aligned). The coefficients live in `gx2_weather_shaders.h` (`lookDay`, `lookGolden`); menu "Look: Realistic/Original", `RBREW_LOOK=0`. Fit only against the exact frames the reference was made from (`ref4_874`, `ref4_1112`): replays are not frame-exact across runs.
+- **Air:** aerial perspective by depth with Mie in-scattering towards the sun, gated by the light-shaft mask; much weaker by day than at golden hour.
+- **Low sun:** tight veiling glare, diffraction spikes, four lens ghosts, dust motes lit only inside the shafts; the sun's light is boosted at low elevation (eye adaptation) and the evening sky light lowered, so lit sides read golden against darker shade; `BacksideColor` of the main light gives a golden rim at low sun.
+- **Temporal AA** after the composite: reprojection through depth and the previous camera, variance clipping in YCoCg, faster response under motion (`RBREW_TAA=0`). Plaza 48.3 FPS (`taa1_874`).
+
+### 2026-10-30 (later): the game's final image is linear
+
+The TV image the composite reads (A2B10G10R10 UNORM) holds **linear** values; the scan-out encodes sRGB. The composite treated it as display-encoded (`linearColor(source)` ... `displayColor(out)`), so all post work ran on doubly-linearised values: the learned look raised blacks and washed colours out ("filter look"), and the aerial perspective covered almost every pixel. Fixed: the composite reads and writes linear; the look and histogram work on `displayColor(c)`. The aerial perspective density is now 0.000003/0.000018 per unit (day/golden), distant buildings only.
+
+Look fitted again (`tools/perf/fit_look.py`, `build/lookfit7`) on look-off frames against the higher-resolution reference. Luma percentiles at 14:34 (p5/p25/p50/p75/p95): reference 0.050/0.177/0.294/0.488/0.844, ours 0.046/0.210/0.345/0.587/0.844; saturation 0.276 vs 0.286. At 18:32: reference 0.079/0.194/0.298/0.440/0.789, ours 0.075/0.183/0.283/0.466/0.866; saturation 0.546 vs 0.599. An adaptive histogram tone match exists (`RBREW_TONE_MATCH=1`) but equalises dark views, so it is off.
+
+### 2026-10-30 (evening): shadows, clouds, no filter look
+
+- Daytime sky fill reduced to 52 % of the game's ambient (`RBREW_ENV_AMBIENT_SCALE`), sun 15 % stronger: real shadow depth. The look adds a luma gamma about the 0.85 pivot (1.12 day, 1.06 golden).
+- By day the look only scales saturation (no colour-balance shift); clarity 0.3, CAS much weaker, vignette almost off by day, grain 0.015: these were what read as a "filter".
+- Clouds: clear 0.44 coverage, sunlit cumulus x2.1 brighter, more sky light in the clouds; low sun fills the sky with warm light; the game's lens flare is off below 20 degrees of sun (cyan ghosts); warmer evening sky light.
+- Reference match at 14:34 (p5/p25/p50/p75/p95, saturation): reference 0.050/0.177/0.294/0.488/0.844, 0.276; ours 0.031/0.171/0.305/0.532/0.851, 0.266. Plaza 48.4 FPS (`q3_874`).
+- Daytime "sad/filter" fix: no sky mix on dry ground (it turned asphalt milky grey), ambient fill 68 % of the game's, bloom from 1.1 (neon signs glow), neon yellow-green paint tamed by 28 % in daylight. 14:34: p25 0.178 (ref 0.177), p50 0.304 (0.294), saturation 0.258 (0.276).
+- Plan phase 3/4 steps: far depth of field (blurred-minus-sharp difference by distance, 900-4500 units, `RBREW_DOF=0`), AO-driven weathering (dirt in corners and joints, world-space tone variation), sunset sky x2.7 warm fill. Plaza 49.4 FPS (`q6_874`); 14:34 p25 0.190 / p50 0.314, saturation 0.240 (reference 0.177 / 0.294 / 0.276).
+
+### 2026-10-30 (night): texture packs, compare tool
+
+- **Texture packs work:** `Game\textures\<hash>.dds` (or `RBREW_TEXTURE_PACK=<dir>`) replaces level 0 of the texture with that content hash when DXGI format and size match the game texture; `RBREW_TEXTURE_DUMP=<dir>` writes the originals in exactly that layout. Verified with 40 BC1 textures recoloured red (ground, tower top and screen turned red).
+- **`tools/perf/compare_ref.py <prefix>`:** luma percentiles and saturation of `<prefix>_874`/`<prefix>_1112` frames 1800/2340 against the reference sheet, with a total error. p11 0.622 -> q6 0.434 -> q7 0.387 (day view error 0.013). Run-to-run noise is about 0.05 (clouds drift, camera varies), so smaller changes are not measurable this way.
+- Saturation: day chroma x1.02, golden x0.8; sunset sky x3.4 warm fill, less saturated.
+
+### 2026-10-30: the big cumulus, cloud sliders
+
+- **Hero cloud:** one towering cumulus congestus ray-marched as its own volume (18 lobes: wide base at 1.5 km, towers narrowing to a crown of small domes at ~8.4 km, eroded by both noise volumes for cauliflower edges; own 6-step light march, multiple-scattering octaves, darker grey-blue underside). Starts 8.5 km from the plaza behind the tower (main view -z, slightly right) and drifts with the wind at 6 m/s along a 16 km path (about 45 min), dissolving at the end and building up again at the start; it slowly changes shape; fades out above 0.7 cloud cover and in rain. `RBREW_HERO_CLOUD=0`. Marched behind the layer clouds in the same dome texel pass (48/64/96 steps by quality).
+- Clear-weather layer coverage 0.30 (the big cloud stands against blue), far layer clouds melt into the haze sooner (no streaky horizon).
+- Menu: "Cloud amount" (Weather / 0-100 %) and "Big cumulus" on/off, live; settings.ini `cloud_amount`, `big_cloud`.
+
+### 2026-10-30: HD texture packs, live weather, fog, picture settings
+
+- **HD texture packs:** a replacement 2x/4x/8x the game texture's size (same DXGI format, its own mip chain) takes over the whole texture: storage is created at the HD size and every level in the file is uploaded; the game's own data is skipped. Same-size replacements still only replace level 0. Verified with 40 BC1 textures at 2x with full mip chains (49 FPS, no validation errors).
+- **Live weather** (Weather: "Live"): clear 6-14 min -> overcast 3-7 -> rain 3-7 (30 % thunderstorm 2-4) -> after the rain 5-10 -> clear, with the usual smooth transitions; a session starts clear.
+- **PC clock:** "Use the PC clock" sets the time of day from the local time.
+- **Fog** (0-100 %): exponential height fog (60-unit scale height above ground = camera - 25), lit by the sky and by the sun with a Mie phase, modulated by the light-shaft mask so shafts show in it. `RBREW_FOG`.
+- **Rays through cloud gaps:** shafts use the unattenuated sun (the shaft mask already contains the clouds), boosted up to 2.5x with broken clouds (cover 0.25-0.75); computed whenever it is not raining.
+- **Picture:** saturation, contrast (about mid grey), exposure in quarter stops, live. Menu pages longer than 16 rows scroll around the selection (a panel taller than the screen was not drawn).
+- Look strength now 0.3 by day (`RBREW_LOOK_STRENGTH`), up to 0.6 at golden hour: the full learned grade read as a global filter. The day picture keeps the game's own colours with deeper shadows.
+- HD texture pipeline: `tools/textures/upscale_pack.py` (Real-ESRGAN x4plus, CPU: ~4 min per 1024² texture, ~8 min per 2048x1024) writes RGBA8 DDS with mips into `Game\textures`; BC colour textures accept RGBA8 HD replacements (no re-encoding loss). Model in `build\upscale\models` (downloaded with the user's OK, SHA-256 4fa0d389...82f1).
+- **Sun path turned** (`gx2_sky_model.h`): the sun now sets in the plaza's main view behind the tower (sunset azimuth +0.10/-0.995 in xz), as in the realistic reference, so evenings are backlit (tower in shade, silhouettes, warm sky, the glare and shafts can show). The afternoon sun no longer equals the game's own sun at 14:34; `RBREW_SUN_FRAME=game` restores that.
+- **Contact shadows:** 14-step world-space march towards the sun per pixel against the depth buffer (feet, bollards, kerbs, props the game's shadow map is too coarse for), up to 60 % darkening on sunlit surfaces within 1200 units. No measurable cost (both A/B runs 20 FPS while the CPU upscaler was running in the background).
+- **Golden hour camera:** warm ground-bounce light on vertical surfaces (stronger on the side away from the sun), veiling glare whenever the camera faces roughly towards a low sun (lifts the darks to gold, strongest towards the sun), lens ghosts and glow also for a sun just outside the frame, bloom 2.8x and threshold 0.75 at golden hour so bright edges bleed. The reference's wall view has the sun in front as well; in the replay that view faces away from the sunset, so only the bounce applies there.
+- **No more yellow cast at golden hour:** the cast came from the raw transmittance colour of a low sun (deep orange) used for the game's sunlight and in every post effect. Both now apply a camera white balance (60 % towards golden white at the same luminance); the golden look no longer shifts the chroma mean; shade keys and the game's fog at low sun are neutral grey-blue. Shaded ground stays neutral, only directly sunlit surfaces are golden, as in the reference.
+- **Nothing hangs in the air near the camera:** aerial perspective starts 300 units out, the backlit darkening 150-600, height fog 120; the veiling glare only covers the part of the frame towards the sun.
+- **Camera motion blur** (180 degree shutter, 8 taps along the camera's screen motion from depth reprojection, in the TAA pass; menu "Camera motion blur", `RBREW_MOTION_BLUR`).
+- **HD textures:** 60 plaza colour textures upscaled (Real-ESRGAN 4x, resampled to 2x, RGBA8 with mips) in `Game\textures`; 3 skipped as normal/data maps. Benchmark runs copy only the exe, so they need `RBREW_TEXTURE_PACK=<Game\textures>` to test them.
+- Evening shadows: the game's shadow map smears a very low light into long streaks, so the light sent to the game casts shadows from at least 14 degrees (`RBREW_SHADOW_MIN_ELEVATION`); sky and light colour keep the real sun. Golden-hour depth gamma 1.16 (deeper blacks, slightly more contrast).
+- **Camera (in progress):** the player camera's field of view sits in degrees right before near/far (plaza: 55, 2, 20000, e.g. at 3EAE96AC); the game builds its sead::PerspectiveProjection (near, far, fovy rad, sin, cos, tan, aspect; e.g. 3CB40338) from it every frame. `find_fov` locates it by matching both. Writing it each frame fights the game's own zoom smoothing (written 70 gave an effective 67 and visible zoom pumping), so the writer only runs with `RBREW_CAMERA_FOV` set until the target value the game smooths towards is found. Day contrast slightly lower (depth gamma 1.07).
+- **Field of view works:** guest 0200F24C (agl camera: set field of view in degrees, then sead::PerspectiveProjection::setFovy) is a wrapped hook (`profiles/agmp-v16.hooks`, needs `dev setup`); the hook scales the angle by camera_fov/55 only when it equals the player camera's own field (found by `find_fov`), so the game's smoothing and run-widening stay intact. 62 degrees gives exactly a 62.0 degree projection; no pumping. Menu "Camera field of view" (default 62), `RBREW_CAMERA_FOV`, `RBREW_CAMERA_HOOK=0`.
+- Second hero cumulus across the plaza (behind the camera in the main view), rotated for a different shape, drifting the other way on its own cycle.
+
+### 2026-10-30 (late): beginner menu, PC controls, camera, photo mode
+
+- **ESC menu for beginners:** "Graphics preset" at the top of the main page (Original = shaders off / Balanced / Realistic / Cinematic = realistic + cinema mode and sway; shows "Custom" once a single option differs). The long lighting page is split into "Graphics", "Weather & time" and "Camera & mouse"; a help line under the list explains the selected row in plain words. "Reset colours and brightness" resets saturation, contrast, exposure and fog.
+- **Mouse aiming like a PC game** (`mouse_direct`, default on; `RBREW_MOUSE_DIRECT=0` restores the stick blend): mouse counts (0.09 degree per count x sensitivity) turn the virtual GamePad, which the game's motion aiming follows 1:1, instead of being clamped to a stick deflection. Needs the game's own Motion Controls set to On.
+- **Every GamePad input has a key:** special weapon (right stick click) on the middle mouse button, D-pad callouts on 1-4, L on Z, left stick click on C. Old settings files (no `bindings=2`) get these once where the input is unbound and the key is free.
+- **Camera distance / height** (plaza; menu, `RBREW_CAMERA_DISTANCE` percent, `RBREW_CAMERA_HEIGHT` units): guest 0281ADB4 `sead::LookAtCamera::doUpdateMatrix` is wrapped (`profiles/agmp-v16.hooks`); for the main camera (position = player camera eye) the position is moved along focus->eye and raised before the view matrix is built, then restored. The look-at target is only a point one unit ahead of the eye (moving along it did nothing, and the height tilted the view straight down); the orbit centre is the player camera's focus point at eye + 0x0C (distance ~70 at eye + 0xE8), and the aim keeps the game's offset from it. Verified in the plaza replay at 150 % / +10: character centred, more of the plaza in view. **Free fly camera** (testing): F7 toggles; arrows move, PageUp/PageDown height, keypad 4/6/8/2 look, Shift faster. `RBREW_CAMERA_HOOK=0` turns both hooks off.
+- **Cloud speed** (0-400 %, `RBREW_CLOUD_SPEED`): the clouds and the drifting cumulus run on their own clock, the weather clock scaled by the setting (jumps in the weather clock do not move them).
+- **Photo mode:** F12 saves the next presented picture (without the FPS overlay and the menu) as `Screenshots\Splatoon_<date>_<time>.png` next to the executable (WIC PNG encoder). Cinema mode hides the HUD for photos.
+- Fixed: wet ground after rain never showed (the wetness assignment had ended up inside a comment).
+- The camera starts as the game's own (field of view 55, distance 100 %, height 0; old settings files with the earlier 62 default go back to 55); wider, farther or higher views are only applied when chosen in the menu. "Reset camera to the original" on the Camera & mouse page. New page **Tools & hacks**: free fly camera on/off (also F7), take a photo (also F12), cinema mode and its sway.
+- Cinema/photo sliders (`WeatherParams::cinema`, 28 vec4 now): focus blur (sharp at the screen-centre distance, 16-tap two-ring blur by relative depth difference, up to 9 px at 1440p; the Cinematic preset uses 40 %), vignette, white balance (warm/cool at constant luminance), sway strength. Wind direction rotates the cloud drift. Fly spots: three views per session to save and fly back to. `RBREW_FOCUS_BLUR`, `RBREW_VIGNETTE`, `RBREW_WHITE_BALANCE`. Plaza replay with focus blur 70 / vignette 60 / warmth 20: character sharp, background and near ground soft; 46 FPS (base run 43.5, same replay).
+- Known before these changes (also in the Codex runs since 16:17): one compute shader fails to compile with RBREW_SHADER_ERRORS=1 ("0:13 syntax error"); not investigated yet.
+
+- **Cinema mode without the shaders' help:** its HUD hiding now follows the game's frame structure itself (64+ depth draws, then the full-screen opaque composite into the TV image; every later TV draw is HUD), so it works with the shaders off and outside the plaza too (`RBREW_CINEMA_ANY=0`: plaza with shaders only). Verified in plaza replays with shaders high (133 frames) and off (71 frames): no HUD in any frame.
+- **Free camera in cinema mode:** switching cinema mode on in the menu turns the fly camera on. PC controls: mouse looks, WASD (or the left stick) moves, Space/Ctrl up/down, Shift fast, right stick looks; the game gets a neutral pad meanwhile, so the character waits. F7 returns to the game camera. `RBREW_FLY_TEST=1` (diagnostics) flies up and back by itself: the whole plaza area renders from above.
+- **User feedback round (video 17:50):** looking up at the sky left fewer than 64 3D draws, so the scene composite was not recognised: the effects dropped out for that frame and in cinema mode the HUD came back (the flash in the video). The plaza path now needs 2 depth draws, the generic cinema path 2 once the composite was seen within the last second (64 otherwise).
+- Mouse aiming (direct): up/down was inverted (negative pitch looks up) and 0.09 degree per count was far too fast; now 0.035 x sensitivity. The cursor shows while the ESC menu is open (relative mouse mode off) and is captured again when it closes.
+- Free camera zoom: mouse wheel or Q/E while flying, or the menu (15-110 degrees); the field of view hook uses it while the fly camera is on. Camera wiggle and its strength are also on the Camera & mouse page.
+- Clouds: a second, finer billow octave warped by the first (3.9/km), stronger erosion and crisper edges; overcast keeps thicker and thinner patches instead of a uniform blanket; the hero cumulus erodes more. Light shafts with broken clouds: wider around the sun and visible in daylight (the clear-air opacity alone kept them near zero by day); the ray boost now also works in light rain.
+- Loading screen in HD: its camo mask (512x256), dot mask and squid icons (BC4 grey masks the game tints) are replaced 4x by `tools/textures/hd_masks.py` (each grey level upscaled as its own soft region and re-sharpened, so edges stay smooth without seams; BC4 re-encoded with mips). 19 files in `Game\textures`.
+- Octo Valley belongs to the plaza's scene kind (active_scene_type 2, its own scene id), so the shaders already run there; its lights are not driven yet (the light search looks for PlazaDay).
+
+- **Spawn hack** (menu Cinema, photo & hacks; plaza): the player camera holds the character's position at eye - 0x1C; the player object (e.g. 3CB3D508) holds it 8 times within ~1.5 KB (current, previous, matrix columns). Writing one copy is undone the next frame; writing all moves the character for good and the camera follows. `find_player_copy` finds the object by clustering heap copies of the position (outside the camera struct). Three spawn spots: save where the character stands, spawn there, or spawn in front of the (free) camera (it drops to the ground). Verified with `RBREW_SPAWN_TEST=<frame>`: saved at x 63.6, spawned back from x 111.4, stayed until the replay walked on. Diagnostics: `RBREW_PLAYER_SCAN=<f1>,<f2>`, `RBREW_PLAYER_POKE=<hex>,<frame>` (+`RBREW_PLAYER_POKE_ALL=1`).
+- Menu: every shader-related entry is labelled (experimental).
+
+- **Shaders, field of view and camera features in every 3D scene** (`RBREW_SHADERS_ANYWHERE=0`: plaza only): the gate was `scene type == 2`. Scene types seen: 16 = title/boot, 2 = plaza, 5 = tutorial. Outside the plaza the game's lights are not driven; sky and post use a fixed afternoon sun from the game's sun direction, no rain. Tutorial replay: realistic sky, volumetric clouds and lens flare now show. A failed camera search waits 5 s before the next (the title screen searched every frame). `[scene] type t id i` is logged on every change (for Octo Valley's id).
+- **Field of view outside cinema mode:** verified in the plaza replay, `[camera] field of view 55.0 -> 75.0`; the search starts a few seconds after entering a scene.
+- **Camera wiggle moves the real camera** (look-at hook: yaw, pitch, roll from incommensurate sines, ~0.7 degree at 100 %), whenever 'Camera wiggle' is on, not only in cinema mode; the old 2-pixel picture shift (cinema only) was hardly visible (`RBREW_IMAGE_SWAY=1` restores it).
+- **Clouds and rays:** silver linings (forward-scattering lobe g 0.93 at low optical depth) on layer and hero clouds; broken cover keeps gaps up to ~85 % (the layer closes only near full cover or in rain); sky shafts are now relative to the sky's brightness (brighter in the shafts, darker between them; the previous absolute sun term washed the sky out to a flat grey). `RBREW_FLY_TEST=2` points the fly camera at the sun. Distinct volumetric shafts like the reference images still need a cloud shadow map march (not done).
+
+### 2026-10-30 (late): Octo Valley, tutorial and levels
+
+- Scene types: 16 title, 2 plaza, 3 Octo Valley, 5/6 tutorial, 1 story level. Full shaders (sky, clouds, time of day, weather) in plaza, Octo Valley and tutorial; story levels get the picture effects only (contact shadows, AO, bloom, edge smoothing, colours, focus blur) with the game's own sky and lights, sun direction read from the level's Main light (`RBREW_LEVEL_EFFECTS=0`: original; `RBREW_SHADERS_ANYWHERE=all`: everything everywhere).
+- Scene lights outside the plaza are found automatically: the group holding the 'Main' directional light (Octo Valley: 'Common', 1 directional, 2 ambient, 2 fog). Their fog keeps its own values (the plaza's fog keys turned Octo Valley white). Driven lights fade in over 1.5 s after a scene change (`RBREW_LIGHT_FADE=0`: at once); the search starts 20 frames after the change, the camera search 15 frames (was 120/300).
+- Octo Valley's view data is not in the plaza's uniform layout in any bank, so the effects take the camera from the game's own look-at camera (hook) and field of view when no bank decodes (`RBREW_HOOK_CAMERA=0`: off); a camera up to 0.5 s old bridges frames the hook skipped. The scene depth may be smaller than the TV image (same aspect accepted).
+- Octo Valley's sky is its own sphere (494 vertices, radius 3.6-18.7 km): outside the plaza the sky draw is found by shape (a big dome around its origin) instead of the plaza mesh hash (`RBREW_SKY_ANYWHERE=0`: the game's sky). Below the horizon the sky continues as horizon haze (Octo Valley's islands, a high free camera). The aerial perspective is off outside the plaza (`RBREW_HAZE_ANYWHERE=1`).
+- Test recording: `Game\Octo aufnehmen.bat` (own folder per recording); replay `Octo-20261030_205454` reaches Octo Valley and mission 1. Diagnostics: `RBREW_WEATHER_WHY=1`.
+
+- **HD textures for everyone, locally:** `HD-Textures.bat` (repo root) starts the game with `RBREW_TEXTURE_DUMP=Game\texture-dump`, then runs `scripts/hd_textures.py` (tracked; `tools/` is git-ignored): Real-ESRGAN x4plus with the network written inline (no basicsr), model downloaded once with SHA-256 check into `build\upscale\models`, CUDA in half precision when available, colour BC1-3 -> RGBA8 at 2x with mips, flat BC4 masks (loading screen) -> sharp BC4 at 4x, existing files skipped. The results derive from the game's files and are never committed. Checked: 128x128 colour texture and a 64x64 mask, sizes and colours correct (CPU: 3 s).

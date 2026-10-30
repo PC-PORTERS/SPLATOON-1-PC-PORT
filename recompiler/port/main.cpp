@@ -333,6 +333,7 @@ namespace rebrewu_generated { static uint32_t Gambit_entry_point; }
 #else
 void Gambit_game_register(CPUState* cpu);    // registers all recompiled game functions
 #endif
+#include "os/gx2/gx2_env_light.h"
 void player_anim_register();                 // idle look-around and opt-in (RBREW_ANIM_LOG) animation trace
 void coreinit_memory_init(uint8_t* mem);
 void coreinit_memory_register(CPUState* cpu);
@@ -520,6 +521,7 @@ int main(int argc, char** argv) {
     // Register all recompiled game functions so rbrew_dispatch can find them
     Gambit_game_register(&cpu_reg);
     player_anim_register();
+    gx2env::register_hooks();             // camera field of view (gx2_env_light.h)
     erreula_register(&cpu_reg);
 
     RBREW_LOGF(stderr, "[IMPORT] OS modules and game dispatch registered\n");
