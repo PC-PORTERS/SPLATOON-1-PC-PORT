@@ -28,8 +28,8 @@ $Recompiler = Join-Path $Root 'recompiler'
 $Work = Join-Path $Root 'build'
 $Downloads = Join-Path $Work 'downloads'
 
-# Only this game executable is supported (Splatoon, Europe, AGMP01, v16).
-$SupportedRpxSha256 = '45ECD1ED81A97F46B1C8AE24820CD47FBC55399B50AF09BF1F9050FE803308E5'
+# Every Manifest\*.manifest describes one supported image; the RPX selects it.
+$ManifestDir = Join-Path $Root 'Manifest'
 $BoundaryProfile = Join-Path $Root 'profiles\agmp-v16.entries'
 $HookProfile = Join-Path $Root 'profiles\agmp-v16.hooks'
 $MinimumFunctionCount = 96300
@@ -140,6 +140,14 @@ function Ask-Folder([string]$Description, [string]$Default) {
 }
 function File-Sha256([string]$Path) {
     return (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToUpperInvariant()
+}
+function Select-Manifest([string]$RpxPath) {
+    $resolver = Join-Path $Recompiler 'tools\plt_resolver.py'
+    $output = & $pyExe @pyArgs $resolver select --rpx $RpxPath --manifest-dir $ManifestDir
+    if ($LASTEXITCODE -ne 0) { return $null }
+    $line = $output | Where-Object { $_ -and $_.Trim() } | Select-Object -Last 1
+    if (-not $line) { return $null }
+    return ([string]$line).Trim()
 }
 function Complete-GeneratedModule([string]$Directory) {
     foreach ($name in @('Gambit.h', 'Gambit_data.cpp', 'Gambit_register.cpp')) {
@@ -516,15 +524,17 @@ Step 'Finding your game files'
 $script:StepSw = [System.Diagnostics.Stopwatch]::StartNew()
 if (-not $GameDump) {
     # Check known/common locations automatically before prompting
-    $candidateDumps = @(
-        (Join-Path ([Environment]::GetFolderPath('UserProfile')) 'Downloads\Splatoon [Game] [0005000010176a00]'),
-        (Join-Path $Root 'dump'),
-        (Join-Path $Root 'game-dump')
-    )
+    $candidateDumps = @()
+    $downloads = Join-Path ([Environment]::GetFolderPath('UserProfile')) 'Downloads'
+    if (Test-Path -LiteralPath $downloads -PathType Container) {
+        $candidateDumps += @(Get-ChildItem -LiteralPath $downloads -Directory |
+            ForEach-Object { $_.FullName })
+    }
+    $candidateDumps += @((Join-Path $Root 'dump'), (Join-Path $Root 'game-dump'))
     foreach ($candidate in $candidateDumps) {
         $candidateRpx = Join-Path $candidate 'code\Gambit.rpx'
         if ((Test-Path -LiteralPath $candidateRpx -PathType Leaf) -and
-            ((File-Sha256 $candidateRpx) -eq $SupportedRpxSha256)) {
+            (Select-Manifest $candidateRpx 2>$null)) {
             $GameDump = $candidate
             Good "Automatically detected valid game dump: $GameDump"
             break
@@ -549,12 +559,16 @@ $rpx = Join-Path $GameDump 'code\Gambit.rpx'
 foreach ($required in @($rpx, (Join-Path $GameDump 'meta\meta.xml'))) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { Fail "Your dump is missing $required. Select the folder that contains code, content and meta." }
 }
+if (-not (Test-Path -LiteralPath $ManifestDir -PathType Container)) {
+    Fail "The Manifest folder is missing: $ManifestDir. Extract the complete repository, including Manifest, and retry."
+}
 Info 'Checking the game version (this takes a few seconds) ...'
 $rpxHash = File-Sha256 $rpx
-if ($rpxHash -ne $SupportedRpxSha256) {
-    Fail "Unsupported game version. Only Splatoon EUR (AGMP01) with update v16 (288) is supported. Your code\Gambit.rpx hash is $rpxHash."
+$SelectedManifest = Select-Manifest $rpx
+if (-not $SelectedManifest) {
+    Fail "Unsupported game version. None of the manifests in $ManifestDir describes your code\Gambit.rpx (SHA-256 $rpxHash). Add a manifest for this image, or use a supported dump."
 }
-Good 'Supported game: Splatoon (EUR, AGMP01, v16).'
+Good "Matched manifest: $SelectedManifest"
 
 if (-not $Output) { $Output = Join-Path $ProjectRoot 'Game' }
 $Output = Full-FolderPath $Output
@@ -683,13 +697,13 @@ if (-not (Test-Path -LiteralPath $HookProfile -PathType Leaf)) { Fail 'The suppo
 # The profile is address metadata, not game code. The RPX hash above selects
 # its supported version; RebrewU still validates each boundary against the RPX.
 # Include it in the stamp so incomplete builds made without it regenerate.
-$current = $rpxHash + ':' + (File-Sha256 $rebrewu.FullName) + ':' + (File-Sha256 $BoundaryProfile) + ':' + (File-Sha256 $HookProfile)
+$current = $rpxHash + ':' + (File-Sha256 $rebrewu.FullName) + ':' + (File-Sha256 $BoundaryProfile) + ':' + (File-Sha256 $HookProfile) + ':' + (File-Sha256 $SelectedManifest)
 if (-not ((Complete-GeneratedModule $generated) -and (Test-Path -LiteralPath $stamp) -and ((Get-Content -LiteralPath $stamp -Raw).Trim() -eq $current))) {
     # Safe incremental regeneration: CppEmitter preserves unchanged file timestamps
     # and safely archives obsolete parts to avoid wiping valid compilation units.
     Ensure-Folder $generated
     # Hook wrappers let the port attach opt-in host code to listed functions.
-    & $rebrewu.FullName recompile --rpx $rpx --output $generated --analyzer-entries $BoundaryProfile --hooks $HookProfile
+    & $rebrewu.FullName recompile --rpx $rpx --output $generated --manifest $SelectedManifest --analyzer-entries $BoundaryProfile --hooks $HookProfile
     Check-Exit 'Recompiling Gambit.rpx'
     if (-not (Complete-GeneratedModule $generated)) { Fail 'The recompiler did not produce the complete supported-game function table. Installation stopped before building an incomplete game.' }
     Set-Content -LiteralPath $stamp -Value $current -Encoding ASCII
@@ -708,6 +722,7 @@ $gameCmakeArgs = @(
     "-DCMAKE_TOOLCHAIN_FILE=$toolchain",
     '-DVCPKG_TARGET_TRIPLET=x64-windows',
     '-DRBREW_GRAPHICS_BACKEND=Vulkan',
+    "-DRBREW_RPX=$rpx",
     "-DGAMBIT_GENERATED_DIR=$generated",
     "-DSDL2_DIR=$(Split-Path $sdlMarker)",
     "-Dglslang_DIR=$(Split-Path $glslangMarker)",

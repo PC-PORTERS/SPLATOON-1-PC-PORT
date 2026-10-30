@@ -36,6 +36,88 @@ set(HAVE_MINIAUDIO ON)
 
 add_subdirectory(third_party/cemu_shader)
 
+# Manifest
+# Every Manifest/*.manifest describes one image. Prefer an explicit
+# -DRBREW_MANIFEST, then the manifest that matches -DRBREW_RPX, then the only
+# manifest in the tree. A plain variable, not a cache entry: a cached default
+# would freeze a wrong path into an existing build tree.
+set(RBREW_MANIFEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../Manifest")
+set(RBREW_MANIFEST_PATH "")
+if(DEFINED RBREW_MANIFEST AND EXISTS "${RBREW_MANIFEST}")
+    set(RBREW_MANIFEST_PATH "${RBREW_MANIFEST}")   # explicit -DRBREW_MANIFEST=...
+endif()
+set(RBREW_PLT_RESOLVER "${CMAKE_CURRENT_SOURCE_DIR}/../tools/plt_resolver.py")
+set(RBREW_PLT_OUTPUTS
+    os/gambit_plt_auto.cpp
+    os/coreinit/coreinit_addrs.h
+    os/gx2/gx2_addrs.h
+    os/padscore/padscore_addrs.h
+    os/snd_core/snd_core_addrs.h
+    os/stubs/stubs_addrs.h
+    os/vpad/vpad_addrs.h)
+
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(NOT RBREW_MANIFEST_PATH AND Python3_Interpreter_FOUND AND EXISTS "${RBREW_PLT_RESOLVER}")
+    if(DEFINED RBREW_RPX AND EXISTS "${RBREW_RPX}")
+        # The image itself selects its manifest, exactly as the recompiler does.
+        execute_process(
+            COMMAND "${Python3_EXECUTABLE}" "${RBREW_PLT_RESOLVER}" select
+                    --rpx "${RBREW_RPX}" --manifest-dir "${RBREW_MANIFEST_DIR}"
+            RESULT_VARIABLE RBREW_SELECT_RESULT
+            OUTPUT_VARIABLE RBREW_SELECT_STDOUT
+            ERROR_VARIABLE  RBREW_SELECT_STDERR)
+        if(NOT RBREW_SELECT_RESULT EQUAL 0)
+            message(FATAL_ERROR
+                "No manifest describes ${RBREW_RPX}:\n${RBREW_SELECT_STDERR}")
+        endif()
+        string(STRIP "${RBREW_SELECT_STDOUT}" RBREW_MANIFEST_PATH)
+    else()
+        file(GLOB RBREW_MANIFESTS CONFIGURE_DEPENDS "${RBREW_MANIFEST_DIR}/*.manifest")
+        list(LENGTH RBREW_MANIFESTS RBREW_MANIFEST_COUNT)
+        if(RBREW_MANIFEST_COUNT EQUAL 1)
+            list(GET RBREW_MANIFESTS 0 RBREW_MANIFEST_PATH)
+        elseif(RBREW_MANIFEST_COUNT GREATER 1)
+            message(FATAL_ERROR
+                "Several manifests are available. Pass -DRBREW_RPX=<Gambit.rpx> "
+                "(or -DRBREW_MANIFEST=<file>) so the build uses the right one.")
+        endif()
+    endif()
+endif()
+
+# Reconfigure (and therefore re-emit) when the selected manifest changes.
+if(EXISTS "${RBREW_MANIFEST_PATH}")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${RBREW_MANIFEST_PATH}")
+endif()
+
+# A missing py3 or manifest is tolerated so an already-generated tree, or a
+# manifest-free build, still configures; the generated files are then trusted.
+set(RBREW_PLT_GENERATED OFF)
+if(Python3_Interpreter_FOUND AND EXISTS "${RBREW_MANIFEST_PATH}" AND EXISTS "${RBREW_PLT_RESOLVER}")
+    execute_process(
+        COMMAND "${Python3_EXECUTABLE}" "${RBREW_PLT_RESOLVER}" emit
+                --manifest "${RBREW_MANIFEST_PATH}"
+                --out "${CMAKE_CURRENT_SOURCE_DIR}"
+        RESULT_VARIABLE RBREW_PLT_RESULT
+        OUTPUT_VARIABLE RBREW_PLT_STDOUT
+        ERROR_VARIABLE  RBREW_PLT_STDERR)
+    if(NOT RBREW_PLT_RESULT EQUAL 0)
+        message(FATAL_ERROR
+            "Generating PLT addresses from ${RBREW_MANIFEST_PATH} failed:\n${RBREW_PLT_STDERR}")
+    endif()
+    set(RBREW_PLT_GENERATED ON)
+    message(STATUS "PLT addresses generated from ${RBREW_MANIFEST_PATH}")
+else()
+    foreach(relative IN LISTS RBREW_PLT_OUTPUTS)
+        if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${relative}")
+            message(FATAL_ERROR
+                "${relative} is missing and cannot be generated. Install Python 3, then pass "
+                "-DRBREW_RPX=<image> or -DRBREW_MANIFEST=<manifest> (searched ${RBREW_MANIFEST_DIR}), "
+                "and reconfigure.")
+        endif()
+    endforeach()
+    message(STATUS "PLT addresses: using the existing generated headers (no manifest selected)")
+endif()
+
 add_library(gambit_runtime STATIC
     runtime/rebrewu_runtime.cpp
     runtime/rebrewu_paired.cpp

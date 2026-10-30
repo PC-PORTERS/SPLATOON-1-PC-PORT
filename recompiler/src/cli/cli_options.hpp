@@ -16,6 +16,7 @@ namespace rebrewu::cli {
     ListImports,   // list RPL imports
     Audit,         // reusable read-only discovery/CFG inventory
     Analyze,       // run analysis only (no codegen)
+    Manifest,      // verify / seal / emit / show a manifest
     Help,
     Version
   };
@@ -52,6 +53,15 @@ namespace rebrewu::cli {
     std::string analyzer_entries_file; // external analyzer starts, corroboration only
     std::optional<uint32_t> functions_per_file;
     std::string hooks_file; // guest function entries given an opt-in host hook wrapper (hex per line)
+
+    // Manifest: per-image guest data (identity, PLT map, entry hints). When no
+    // path is given, every Manifest/*.manifest is a candidate and the RPX
+    // selects the one whose [identity] describes it.
+    std::filesystem::path manifest_path;
+    std::vector<std::filesystem::path> manifest_dirs;  // extra discovery roots
+    std::filesystem::path manifest_emit_dir;   // 'manifest emit' output root
+    std::string manifest_action;               // list | verify | seal | emit | show
+    bool allow_image_mismatch{false};          // downgrade identity mismatch to a warning
   };
 
   std::optional<CliOptions> parse(int argc, char** argv);

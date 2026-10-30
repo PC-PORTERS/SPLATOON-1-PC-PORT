@@ -11,6 +11,7 @@ void print_usage(const char* prog) {
         "Commands:\n"
         "  recompile   Recompile an RPX to C++ (default)\n"
         "  audit       Write read-only discovery/CFG/semantics JSON inventory\n"
+        "  manifest    list|verify|seal|emit|show [file]  Per-image guest data\n"
         "  inspect     Inspect binary structure\n"
         "  symbols     List symbols\n"
         "  sections    List sections\n"
@@ -29,7 +30,12 @@ void print_usage(const char* prog) {
         "  --emit-coverage   Emit RBREW_COVERAGE_* probes (needs RBREW_ENABLE_COVERAGE=ON)\n"
         "  --hooks F         Guest entries that get a host-hook wrapper (hex per line)\n"
         "  -F, --functions-per-file N  Max functions per generated shard\n"
-        "  --hints-file F    Diagnostic only: force extra entries (hex address per line)\n";
+        "  --hints-file F    Diagnostic only: force extra entries (hex address per line)\n"
+        "  --manifest F      Force this manifest instead of selecting one by RPX identity\n"
+        "  --manifest-dir D  Add a directory searched for Manifest/*.manifest (repeatable)\n"
+        "  --emit-dir D      Output root for 'manifest emit' (default recompiler/port)\n"
+        "  --rpx F           Image used to select and verify the manifest\n"
+        "  --allow-image-mismatch  Warn instead of failing on an identity mismatch\n";
 }
 
 void print_version() {
@@ -54,6 +60,19 @@ std::optional<CliOptions> parse(int argc, char** argv) {
     else if (cmd == "imports")     { opts.command = Command::ListImports; ++i; }
     else if (cmd == "disasm")      { opts.command = Command::Disassemble; ++i; }
     else if (cmd == "audit")       { opts.command = Command::Audit; ++i; }
+    else if (cmd == "manifest")    {
+        opts.command = Command::Manifest;
+        ++i;
+        // list | verify | seal | emit | show, then the manifest path.
+        if (i < argc && argv[i][0] != '-') {
+            opts.manifest_action = argv[i];
+            ++i;
+            if (i < argc && argv[i][0] != '-') {
+                opts.manifest_path = argv[i];
+                ++i;
+            }
+        }
+    }
     else if (cmd == "analyze")     { opts.command = Command::Analyze;   ++i; }
     else if (cmd == "help")        { print_usage(argv[0]); return {}; }
     else if (cmd == "version")     { print_version(); return {}; }
@@ -85,6 +104,14 @@ std::optional<CliOptions> parse(int argc, char** argv) {
             opts.emit_ppc_image = true;
         } else if (arg == "--emit-coverage") {
             opts.emit_coverage = true;
+        } else if (arg == "--manifest" && i + 1 < argc) {
+            opts.manifest_path = argv[++i];
+        } else if (arg == "--manifest-dir" && i + 1 < argc) {
+            opts.manifest_dirs.emplace_back(argv[++i]);
+        } else if (arg == "--emit-dir" && i + 1 < argc) {
+            opts.manifest_emit_dir = argv[++i];
+        } else if (arg == "--allow-image-mismatch") {
+            opts.allow_image_mismatch = true;
         } else if ((arg == "--functions-per-file" || arg == "-F") && i + 1 < argc) {
             opts.functions_per_file = static_cast<uint32_t>(std::stoul(argv[++i]));
         } else if (arg.starts_with("-")) {
