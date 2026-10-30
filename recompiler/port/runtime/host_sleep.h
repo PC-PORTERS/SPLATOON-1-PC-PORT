@@ -1,5 +1,8 @@
 #pragma once
+#include <algorithm>
 #include <chrono>
+#include <cstdlib>
+#include <cstring>
 #include <thread>
 #include <cstdint>
 #if defined(_WIN32)
@@ -65,6 +68,35 @@ inline void rbrew_host_sleep_until(std::chrono::steady_clock::time_point deadlin
         std::this_thread::yield();
 #endif
     }
+}
+
+// Busy-wait cap for a host thread waiting on another host thread (render
+// queue, recorder, shader translator). Spinning only pays while a spare
+// logical CPU exists: the port keeps the game thread, render thread, Vulkan
+// recorder, audio and translation helper runnable at once, so on a small CPU
+// a millisecond spin takes the core the awaited thread or the game needs.
+// Default: each wait's own budget on >= 8 logical CPUs, else 50 us before it
+// sleeps. RBREW_HOST_SPIN=full keeps every budget, =<us> caps it.
+inline std::chrono::microseconds rbrew_host_spin_cap() {
+    static const std::chrono::microseconds cap = [] {
+        constexpr auto kFull = std::chrono::microseconds::max();
+        if (const char* v = std::getenv("RBREW_HOST_SPIN"); v && *v)
+            return std::strcmp(v, "full") == 0 ? kFull : std::chrono::microseconds(std::strtoull(v, nullptr, 10));
+        unsigned cpus = 0;
+#if defined(_WIN32)
+        DWORD_PTR process = 0, system = 0;
+        if (GetProcessAffinityMask(GetCurrentProcess(), &process, &system))
+            for (; process; process &= process - 1) ++cpus;
+#endif
+        if (!cpus) cpus = std::thread::hardware_concurrency();
+        return cpus >= 8 ? kFull : std::chrono::microseconds(50);
+    }();
+    return cap;
+}
+// The Vulkan recorder's ~0.1 ms pause loops stay as they are: capping them
+// slowed a 2-CPU draw benchmark by 10% (sleep/wake per published chunk).
+inline std::chrono::microseconds rbrew_host_spin_budget(std::chrono::microseconds full) {
+    return std::min(full, rbrew_host_spin_cap());
 }
 
 inline void rbrew_host_sleep_for(uint64_t microseconds) {
