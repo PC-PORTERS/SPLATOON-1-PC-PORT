@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <string>
 
 #if !defined(_MSC_VER)
 #include <strings.h> // strcasecmp
@@ -51,8 +52,7 @@ static std::atomic<uint64_t> s_last_heartbeat_ns{0};
 static std::atomic<bool> s_watchdog_running{false};
 static std::thread s_watchdog_thread;
 
-// Overlay state
-static std::atomic<int> s_overlay_mode{0}; // 0 = off, 1 = compact, 2 = detailed
+// Live metrics for the ImGui performance overlay (gx2_imgui_overlay.cpp).
 static OverlayMetrics s_overlay_metrics{};
 static std::mutex s_overlay_mutex;
 
@@ -264,6 +264,32 @@ void RecordEvent(EventCategory category, EventSeverity severity, int16_t code, c
     std::snprintf(ev.message, sizeof(ev.message), "%s", message ? message : "");
 }
 
+namespace {
+// Resident host memory of this process (0 when the platform cannot report it).
+// Windows: the process working set, as before. Linux: VmRSS from
+// /proc/self/status, the same resident-page figure. Only called every 30
+// frames for the overlay readout, never on the per-frame hot path.
+uint64_t process_resident_bytes() {
+#if defined(_WIN32)
+    PROCESS_MEMORY_COUNTERS_EX counters{};
+    counters.cb = sizeof(counters);
+    if (K32GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&counters), sizeof(counters)))
+        return counters.WorkingSetSize;
+#elif defined(__linux__)
+    std::ifstream status("/proc/self/status");
+    for (std::string line; status && std::getline(status, line);) {
+        if (line.compare(0, 6, "VmRSS:") != 0) continue;
+        const char* value = line.c_str() + 6;
+        while (*value == ' ' || *value == '\t') ++value;
+        char* end = nullptr;
+        const unsigned long long kb = std::strtoull(value, &end, 10);
+        return end != value ? uint64_t(kb) * 1024 : 0;
+    }
+#endif
+    return 0;
+}
+}  // namespace
+
 void RecordFrame(uint32_t frame_index, float frame_time_ms, float cpu_time_ms,
                  float present_wait_ms, float vsync_wait_ms, float render_wait_ms,
                  uint16_t draw_calls, uint16_t shader_compiles, uint16_t texture_uploads,
@@ -378,14 +404,11 @@ void RecordFrame(uint32_t frame_index, float frame_time_ms, float cpu_time_ms,
             s_overlay_metrics.low_1pct_fps = sorted[low1_idx] > 0.001f ? (1000.0f / sorted[p99_idx]) : 0.0f;
         }
 
-#if defined(_WIN32)
-        // A process query per frame is unnecessary for a title readout.
+        // A process query per frame is unnecessary for a title readout; keep
+        // the last sample when a platform has no answer.
         static uint32_t s_ram_sample = 0;
-        PROCESS_MEMORY_COUNTERS pmc{};
-        if (s_ram_sample++ % 30 == 0 && GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc))) {
-            s_overlay_metrics.ram_usage_bytes = pmc.WorkingSetSize;
-        }
-#endif
+        if (s_ram_sample++ % 30 == 0)
+            if (const uint64_t resident = process_resident_bytes()) s_overlay_metrics.ram_usage_bytes = resident;
     }
 }
 
@@ -634,26 +657,8 @@ void TriggerCapture(const char* reason_tag, const char* detail_description) {
 }
 
 // ---------------------------------------------------------------------------
-// Overlay Management
+// Overlay metrics (read by the ImGui performance overlay)
 // ---------------------------------------------------------------------------
-void ToggleOverlay() {
-    int cur = s_overlay_mode.load();
-    s_overlay_mode.store(cur == 1 ? 0 : 1);
-}
-
-void ToggleDetailedOverlay() {
-    int cur = s_overlay_mode.load();
-    s_overlay_mode.store(cur == 2 ? 0 : 2);
-}
-
-bool IsOverlayVisible() {
-    return s_overlay_mode.load() != 0;
-}
-
-bool IsDetailedOverlay() {
-    return s_overlay_mode.load() == 2;
-}
-
 OverlayMetrics GetOverlayMetrics() {
     std::lock_guard<std::mutex> lock(s_overlay_mutex);
     return s_overlay_metrics;
@@ -663,16 +668,20 @@ void ManualCapture() {
     TriggerCapture("manual_snapshot", "Manual F9 snapshot triggered by user");
 }
 
+namespace { std::atomic<bool> s_manual_recording{false}; }  // flipped from the F8 key or the Debug window
+
 void ToggleManualRecord() {
-    static bool s_recording = false;
-    s_recording = !s_recording;
-    if (s_recording) {
+    const bool was_recording = s_manual_recording.load(std::memory_order_relaxed);
+    s_manual_recording.store(!was_recording, std::memory_order_relaxed);
+    if (!was_recording) {
         RecordEvent(EventCategory::Engine, EventSeverity::Info, 0, "Extended recording started (F8)");
     } else {
         RecordEvent(EventCategory::Engine, EventSeverity::Info, 0, "Extended recording finished (F8)");
         TriggerCapture("manual_extended_record", "Extended recording finished by user (F8)");
     }
 }
+
+bool IsManualRecording() { return s_manual_recording.load(std::memory_order_relaxed); }
 
 // ---------------------------------------------------------------------------
 // Local Offline Analyzer (No Internet / Paid API Needed)

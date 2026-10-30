@@ -12,7 +12,7 @@ An unofficial native PC port of **Splatoon (Wii U)** for **Windows and Linux**, 
 ## What's new
 
 **Settings menu (Esc / controller touchpad)**
-- Render resolution, Plaza 60 FPS on/off, fullscreen, FPS overlay
+- Render resolution, Plaza 60 FPS on/off, fullscreen, performance overlay
 - Gyro on/off, gyro and mouse sensitivity, invert gyro, volume
 - Rebind every button for keyboard/mouse and controller
 - HOME moved from Esc to H
@@ -103,7 +103,7 @@ For incremental rebuilds just run **`./build.sh`** — it reuses the configured 
 
 ## Controls
 
-**Esc** (or the touchpad button of a PlayStation controller) opens the port's settings menu: render resolution (applies at the next start), plaza 60 FPS on/off, fullscreen, FPS overlay, controller gyro on/off, gyro sensitivity, inverted gyro up/down, mouse sensitivity, volume and quit. Two pages show and rebind every GamePad input for keyboard & mouse and for the controller: select a row, press Enter/Cross, then the new key or button (a key already in use swaps with the old one; Delete/Square clears; "Reset to defaults" restores the layout below). The game keeps running but gets no input while the menu is open. Choices are saved in `settings.ini` next to the game executable (`Splatoon.exe` / `Splatoon`); an environment variable that is set (for example `RBREW_PLAZA_60FPS`, `RBREW_GYRO`, `RBREW_RENDER_RESOLUTION`) still wins over the file.
+**Esc** (or the touchpad button of a PlayStation controller) opens the port's settings menu: render resolution (applies at the next start), plaza 60 FPS on/off, fullscreen, performance overlay (ImGui), controller gyro on/off, gyro sensitivity, inverted gyro up/down, mouse sensitivity, volume and quit. Two pages show and rebind every GamePad input for keyboard & mouse and for the controller: select a row, press Enter/Cross, then the new key or button (a key already in use swaps with the old one; Delete/Square clears; "Reset to defaults" restores the layout below). The game keeps running but gets no input while the menu is open. Choices are saved in `settings.ini` next to the game executable (`Splatoon.exe` / `Splatoon`); an environment variable that is set (for example `RBREW_PLAZA_60FPS`, `RBREW_GYRO`, `RBREW_RENDER_RESOLUTION`) still wins over the file.
 
 The game starts in borderless fullscreen; **F11** switches to a 1280×720 window and back. The TV scene renders internally at the console's **1280×720** (light on the GPU) and is scaled to the window. For a sharper image set `RBREW_RENDER_RESOLUTION` before starting: `native` (your desktop resolution), `1080p`, `1440p` or any `WIDTHxHEIGHT`. The game's camera and UI keep their original layout.
 
@@ -127,8 +127,7 @@ Keyboard and mouse (default layout, rebindable in the menu):
 | Esc | Settings menu |
 | H | Home |
 | Tab | GamePad view (the mouse becomes the touch screen) NOT WORKING YET|
-| F3 | Show/hide the FPS overlay (translucent panel: FPS, frame time, 1% low, slowest frame, frame-time graph) and frame stats in the window title |
-| F4 | Detailed frame stats in the window title (1% low, P95/P99, RAM) |
+| F3 | Show/hide the debug overlay (ImGui windows: FPS, frame time, 1% low, frame-time graph, waits, RAM, shader compiles and diagnostics). |
 | F8 / F9 | Start/stop an extended diagnostic recording / save a diagnostic snapshot to `Game/Diagnostics` |
 
 Standing still with your weapon for about 5 seconds plays the inkling's look-around idle animation (`WaitHold_Nrml_LookAround`). It ships in the game's files but the original game never uses it. Set `RBREW_IDLE_LOOKAROUND=0` to turn it off.
@@ -139,7 +138,7 @@ With a DualShock 4 / DualSense, the controller's gyro aims wherever the game use
 
 `RBREW_PAIRED_INLINE=0` restores interpreted paired-single instructions for A/B comparisons. By default, generated code decodes common floating-point instruction words at compile time, preserving the existing rounding and memory access checks.
 
-Runtime switches for comparisons (set before starting the game): `RBREW_QUERY_ASYNC=0` (all queued occlusion-query reads wait), `RBREW_SCAN_COPY=0`, `RBREW_STICK_GYRO_YAW=1`, `RBREW_AC_CONNECT=ok` (old online attempt at boot), `RBREW_FPS_OVERLAY_STYLE=classic`, `RBREW_BLEND_COMBINE_OLD=1`, `RBREW_SCAN_SLICE_MATCH=0`, `RBREW_STREAMOUT_FLUSH_PUBLISH=1`, `RBREW_FRAME_PACING=0` (no flip pacing) / `=auto` (hold 30 FPS in heavy scenes) / `=vsync` (console-strict), `RBREW_AX_FILTERS=0`, `RBREW_GYRO_INVERT_PITCH=1` / `RBREW_GYRO_INVERT_YAW=1`, `RBREW_STREAMOUT_EAGER=1` (old per-draw stream-out readback), `RBREW_FPS_OVERLAY=0`, `RBREW_ASYNC_SHADERS=0` (wait for every shader compile instead of skipping the draw), `RBREW_PLAZA_60FPS=0` (plaza at the console's 30 FPS; `=1` fixed 60 FPS mode), `RBREW_QUERY_ASSUME_VISIBLE=0` (plaza waits for occlusion results), `RBREW_CONTEXT_STATE_SYNC=1`, `RBREW_SUBMIT_EVERY_DRAWS=0`, `SPLATOON_DIAGNOSTICS=off` (no automatic stutter reports).
+Runtime switches for comparisons (set before starting the game): `RBREW_QUERY_ASYNC=0` (all queued occlusion-query reads wait), `RBREW_SCAN_COPY=0`, `RBREW_STICK_GYRO_YAW=1`, `RBREW_AC_CONNECT=ok` (old online attempt at boot), `RBREW_BLEND_COMBINE_OLD=1`, `RBREW_SCAN_SLICE_MATCH=0`, `RBREW_STREAMOUT_FLUSH_PUBLISH=1`, `RBREW_FRAME_PACING=0` (no flip pacing) / `=auto` (hold 30 FPS in heavy scenes) / `=vsync` (console-strict), `RBREW_AX_FILTERS=0`, `RBREW_GYRO_INVERT_PITCH=1` / `RBREW_GYRO_INVERT_YAW=1`, `RBREW_STREAMOUT_EAGER=1` (old per-draw stream-out readback), `RBREW_FPS_OVERLAY=0`, `RBREW_ASYNC_SHADERS=0` (wait for every shader compile instead of skipping the draw), `RBREW_PLAZA_60FPS=0` (plaza at the console's 30 FPS; `=1` fixed 60 FPS mode), `RBREW_QUERY_ASSUME_VISIBLE=0` (plaza waits for occlusion results), `RBREW_CONTEXT_STATE_SYNC=1`, `RBREW_SUBMIT_EVERY_DRAWS=0`, `SPLATOON_DIAGNOSTICS=off` (no automatic stutter reports).
 
 Input recording and replay: `RBREW_INPUT_RECORD=<file>` records every frame's GamePad input (buttons, sticks, touch, controller gyro, motion time step) with scene-change marks; `RBREW_INPUT_REPLAY=<file>` plays it back, waiting at each scene change and each end of a loading screen until the game has caught up, and hands control back when the recording ends or the controller is used. `RBREW_SAVE_DIR=<dir>` uses another save folder than `save`, so a replay can start from the save it was recorded with.
 

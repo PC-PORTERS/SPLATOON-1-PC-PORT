@@ -107,14 +107,11 @@ void TriggerCapture(const char* reason_tag, const char* detail_description);
 // Heartbeat for watchdog freeze detection
 void Heartbeat();
 
-// Overlay management
-void ToggleOverlay();        // F3: off -> compact -> off
-void ToggleDetailedOverlay();// F4: off -> detailed -> off
-bool IsOverlayVisible();
-bool IsDetailedOverlay();
+// Live metrics for the ImGui performance overlay (F3)
 OverlayMetrics GetOverlayMetrics();
 void ManualCapture();        // F9: Save snapshot now
 void ToggleManualRecord();   // F8: Extended recording
+bool IsManualRecording();
 
 // Offline analyzer (local diagnosis without internet or paid APIs)
 bool AnalyzeReport(const std::string& report_dir, std::string& out_summary, std::string& out_report);

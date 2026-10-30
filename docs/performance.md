@@ -442,8 +442,11 @@ slowest frame interval of the last half second. These are measured at actual
 swapchain presentation. The text is rasterised on the CPU with a 5×7 font and
 copied into the top-left corner after the frame blit. It needs no shaders or
 render passes and costs one small buffer-to-image copy per frame. Text is
-scaled with window height. The overlay is shown by default, **F3** toggles
-it, and `RBREW_FPS_OVERLAY=0` starts it hidden. Captured presents used by image
+scaled with window height. The overlay starts hidden, **F3** toggles it, and
+`RBREW_FPS_OVERLAY=1` starts it visible. The settings menu (Esc) can also show
+a simple FPS / frame-time / max-FPS readout (`simple_overlay` in settings.ini,
+`RBREW_SIMPLE_OVERLAY=1`), which draws without window chrome and takes no
+input. Captured presents used by image
 tests omit it. `render_overlay` checks text, statistics and glyph
 rasterisation. `render_overlay_present` presents through a real hidden Vulkan
 window on each adapter and reads back the swapchain image

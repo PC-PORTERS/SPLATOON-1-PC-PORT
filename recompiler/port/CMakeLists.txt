@@ -8,6 +8,7 @@ if(DEFINED RBREW_GRAPHICS_BACKEND AND NOT RBREW_GRAPHICS_BACKEND STREQUAL "Vulka
     message(FATAL_ERROR "Gambit requires the Vulkan backend. No alternate graphics backend is available.")
 endif()
 include(${CMAKE_CURRENT_SOURCE_DIR}/gx2_graphics_backend.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/imgui.cmake)
 find_package(CURL REQUIRED)
 find_package(ZLIB REQUIRED)
 
@@ -51,7 +52,6 @@ add_library(gambit_runtime STATIC
     os/sysapp/sysapp_title.cpp
     os/coreinit/coreinit_fs.cpp
     os/gx2/gx2_context.cpp
-    os/gx2/gx2_settings_menu.cpp
     os/gx2/gx2_draw.cpp
     os/gx2/gx2_surface_layout.cpp
     os/gx2/r700_to_glsl.cpp
@@ -106,6 +106,9 @@ target_link_libraries(gambit_runtime PUBLIC
     CURL::libcurl
     ZLIB::ZLIB
 )
+# Dear ImGui (docking branch, fetched at configure time): the performance
+# overlay backend. PRIVATE: only the GX2 Vulkan layer uses it.
+target_link_libraries(gambit_runtime PRIVATE imgui)
 
 if(WIN32)
     target_link_libraries(gambit_runtime PUBLIC ws2_32 winmm)
@@ -311,7 +314,7 @@ if(RBREW_BUILD_TESTS)
         target_include_directories(gambit_render_profile PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
         target_link_options(gambit_render_profile PRIVATE /DEBUG)
     endif()
-    foreach(case fallback push churn contracts lifetime heavy heavy_push overdraw watch geometry packets plaza npc_1 npc_10 npc_25 npc_50 npc_100 npc_fallback_50 overlay overlay_present guest_hooks idle_lookaround)
+    foreach(case fallback push churn contracts lifetime heavy heavy_push overdraw watch geometry packets plaza npc_1 npc_10 npc_25 npc_50 npc_100 npc_fallback_50 guest_hooks idle_lookaround present_capture)
         add_test(NAME render_${case} COMMAND gambit_render_bench ${case})
         set_tests_properties(render_${case} PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
     endforeach()

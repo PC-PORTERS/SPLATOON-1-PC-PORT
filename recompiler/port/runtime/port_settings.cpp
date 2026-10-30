@@ -87,6 +87,7 @@ void write(const Values& v) {
         << "plaza_60fps=" << v.plaza_60fps << "\n"
         << "fullscreen=" << v.fullscreen << "\n"
         << "fps_overlay=" << v.fps_overlay << "\n"
+        << "simple_overlay=" << v.simple_overlay << "\n"
         << "gyro=" << v.gyro << "\n"
         << "gyro_sensitivity=" << v.gyro_sensitivity << "\n"
         << "gyro_invert_pitch=" << v.gyro_invert_pitch << "\n"
@@ -112,6 +113,7 @@ void load() {
         else if (key == "plaza_60fps") v.plaza_60fps = number != 0;
         else if (key == "fullscreen") v.fullscreen = number != 0;
         else if (key == "fps_overlay") v.fps_overlay = number != 0;
+        else if (key == "simple_overlay") v.simple_overlay = number != 0;
         else if (key == "gyro") v.gyro = number != 0;
         else if (key == "gyro_sensitivity") v.gyro_sensitivity = number;
         else if (key == "gyro_invert_pitch") v.gyro_invert_pitch = number != 0;
@@ -126,6 +128,7 @@ void load() {
     // Environment overrides (see header).
     if (env_set("RBREW_PLAZA_60FPS")) v.plaza_60fps = !env_off("RBREW_PLAZA_60FPS");
     if (env_set("RBREW_FPS_OVERLAY")) v.fps_overlay = !env_off("RBREW_FPS_OVERLAY");
+    if (env_set("RBREW_SIMPLE_OVERLAY")) v.simple_overlay = !env_off("RBREW_SIMPLE_OVERLAY");
     if (env_set("RBREW_GYRO")) v.gyro = !env_off("RBREW_GYRO");
     if (env_set("RBREW_GYRO_INVERT_PITCH")) v.gyro_invert_pitch = env_on("RBREW_GYRO_INVERT_PITCH");
     if (const char* r = std::getenv("RBREW_RENDER_RESOLUTION"); r && *r) {

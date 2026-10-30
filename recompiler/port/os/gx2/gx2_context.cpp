@@ -19,7 +19,6 @@
 #include "gx2_native_context.h"
 #include "gx2_surface.h"
 #include "gx2_display_list.h"
-#include "gx2_settings_menu.h"
 #include "../../runtime/port_settings.h"
 #include "gx2_render_vk_debug.h"
 #include "../vpad/game_controllers.h"
@@ -49,7 +48,7 @@ void gx2_draw_set_default_state(CPUState* cpu);
 #include <SDL2/SDL_syswm.h>
 #endif
 #include "vk/gx2_vk_shader.h"
-namespace gx2vk { void set_fps_overlay(bool visible); bool fps_overlay(); }   // vk/gx2_vk.h
+#include "vk/gx2_imgui_overlay.h"
 // gx2_render_vk.cpp owns the Vulkan device; this branch needs no GPU types.
 
 static SDL_Window*   s_window    = nullptr;
@@ -59,36 +58,21 @@ static bool          s_tv_enabled = true;
 static constexpr int DRC_W = 854;
 static constexpr int DRC_H = 480;
 
-// A visible rate measurement without console/file diagnostics or GPU readback.
-static uint64_t s_fps_sample_tick = 0;
-static unsigned s_fps_frames = 0;
-static double s_window_fps = 0;
+// Frame statistics live in the ImGui performance overlay (F3); the title
+// only shows the view mode.
 static void update_window_title() {
     if (!s_window) return;
-    auto metrics = SplatoonDiagnostics::GetOverlayMetrics();
-    char title_buf[256];
-    if (SplatoonDiagnostics::IsDetailedOverlay()) {
-        std::snprintf(title_buf, sizeof(title_buf),
-                     "Splatoon | %s | %.1f FPS (%.1fms) | 1%%: %.1f | P95: %.1fms P99: %.1fms | RAM: %uMB [F4=Off | Tab=View | F11=Win]",
-                     g_screen_mode == ScreenMode::TV ? "TV" : "Gamepad",
-                     metrics.avg_fps > 0.0f ? metrics.avg_fps : float(s_window_fps),
-                     metrics.frame_time_ms, metrics.low_1pct_fps,
-                     metrics.p95_frame_time_ms, metrics.p99_frame_time_ms,
-                     unsigned(metrics.ram_usage_bytes / (1024 * 1024)));
-    } else if (SplatoonDiagnostics::IsOverlayVisible()) {
-        std::snprintf(title_buf, sizeof(title_buf),
-                     "Splatoon | %s | %.1f FPS (%.1fms) | 1%% Low: %.1f | CPU: %.1fms [F3=Off | Tab=View | F11=Win]",
-                     g_screen_mode == ScreenMode::TV ? "TV" : "Gamepad",
-                     metrics.avg_fps > 0.0f ? metrics.avg_fps : float(s_window_fps),
-                     metrics.frame_time_ms, metrics.low_1pct_fps, metrics.cpu_time_ms);
-    } else {
-        std::snprintf(title_buf, sizeof(title_buf),
-                     "Splatoon | Vulkan | %s | %.1f FPS (%.1fms) [F3=FPS | F4=Stats | Tab=View | F11=Win]",
-                     g_screen_mode == ScreenMode::TV ? "TV" : "Gamepad",
-                     metrics.avg_fps > 0.0f ? metrics.avg_fps : float(s_window_fps),
-                     metrics.frame_time_ms);
-    }
+    char title_buf[128];
+    std::snprintf(title_buf, sizeof(title_buf), "Splatoon | %s | Vulkan [F3=overlay | Tab=view | F11=window]",
+                  g_screen_mode == ScreenMode::TV ? "TV" : "Gamepad");
     SDL_SetWindowTitle(s_window, title_buf);
+}
+
+// The ImGui windows need a free cursor; the game captures it in TV mode.
+static bool imgui_wants_cursor() { return gx2_imgui::visible() || gx2_imgui::menu_open(); }
+static void sync_overlay_mouse_mode() {
+    if (g_screen_mode == ScreenMode::TV)
+        SDL_SetRelativeMouseMode(imgui_wants_cursor() ? SDL_FALSE : SDL_TRUE);
 }
 
 // Switch between TV and Gamepad view, adjusting mouse capture accordingly
@@ -99,7 +83,7 @@ static void toggle_screen_mode() {
         g_touch_state = { false, 0, 0 };
     } else {
         g_screen_mode = ScreenMode::TV;
-        SDL_SetRelativeMouseMode(SDL_TRUE);  // capture cursor for camera
+        sync_overlay_mouse_mode();  // capture cursor for camera, unless the overlay is open
         g_touch_state = { false, 0, 0 };
     }
     update_window_title();
@@ -119,12 +103,10 @@ static void set_window_fullscreen(bool full) {
     }
     update_window_title();
 }
-// One switch for both FPS displays: the in-game overlay (documented in
-// README) and the compact title stats.
-static void set_fps_display(bool show) {
-    gx2vk::set_fps_overlay(show);
-    if (SplatoonDiagnostics::IsOverlayVisible() != show) SplatoonDiagnostics::ToggleOverlay();
-    update_window_title();
+// Single switch for the performance overlay (F3 and the ESC menu row).
+static void set_overlay_display(bool show) {
+    gx2_imgui::set_visible(show);
+    sync_overlay_mouse_mode();
 }
 
 // Map a window-space mouse position to GamePad touch coordinates [0,853] x [0,479]
@@ -244,19 +226,15 @@ static bool gx2_platform_open_window() {
     SDL_PumpEvents();
     SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
     g_screen_mode = ScreenMode::TV;
-    s_fps_sample_tick = 0; s_fps_frames = 0; s_window_fps = 0;
     update_window_title();
     {
-        // ESC menu: saved window and overlay choices, then its hooks.
+        // Saved window and overlay choices (the ImGui interface reads and
+        // writes rbrew_settings directly).
         const auto settings = rbrew_settings::get();
         if (!settings.fullscreen) set_window_fullscreen(false);
-        gx2vk::set_fps_overlay(settings.fps_overlay);
-        Gx2MenuActions actions;
-        actions.set_fullscreen = set_window_fullscreen;
-        actions.fullscreen = window_fullscreen;
-        actions.set_fps_overlay = set_fps_display;
-        actions.quit = [] { gx2_close_requested(); };
-        gx2_settings_menu_init(actions);
+        set_overlay_display(settings.fps_overlay);
+        gx2_imgui::set_simple_overlay(settings.simple_overlay);
+        gx2_imgui::note_fullscreen(window_fullscreen());
     }
 
     // Initialize the selected native renderer for the window.
@@ -794,7 +772,8 @@ static void GX2SwapScanBuffers(CPUState* cpu) {
         // Pump SDL events first
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
-            if (gx2_settings_menu_event(ev)) continue;   // ESC menu (gx2_settings_menu.h)
+            gx2_imgui::process_event(ev);                // queued for the render thread
+            if (gx2_imgui::menu_event(ev)) continue;     // ESC menu (vk/gx2_imgui_overlay.h)
             switch (ev.type) {
             case SDL_QUIT:
                 gx2_close_requested();
@@ -811,21 +790,15 @@ static void GX2SwapScanBuffers(CPUState* cpu) {
                     rbrew_settings::set(settings);
                 } else if (ev.key.keysym.scancode == SDL_SCANCODE_F3) {
                     auto settings = rbrew_settings::get();
-                    settings.fps_overlay = !gx2vk::fps_overlay();
-                    set_fps_display(settings.fps_overlay);
+                    settings.fps_overlay = !gx2_imgui::visible();
+                    set_overlay_display(settings.fps_overlay);
                     rbrew_settings::set(settings);
-                    controller_log("F3 pressed: Compact overlay visible=%d\n", SplatoonDiagnostics::IsOverlayVisible());
-                } else if (ev.key.keysym.scancode == SDL_SCANCODE_F4) {
-                    SplatoonDiagnostics::ToggleDetailedOverlay();
-                    update_window_title();
-                    controller_log("F4 pressed: Detailed overlay visible=%d\n", SplatoonDiagnostics::IsDetailedOverlay());
+                    controller_log("F3 pressed: overlay visible=%d\n", gx2_imgui::visible());
                 } else if (ev.key.keysym.scancode == SDL_SCANCODE_F8) {
                     SplatoonDiagnostics::ToggleManualRecord();
-                    update_window_title();
                     controller_log("F8 pressed: Manual recording toggled\n");
                 } else if (ev.key.keysym.scancode == SDL_SCANCODE_F9) {
                     SplatoonDiagnostics::ManualCapture();
-                    update_window_title();
                     controller_log("F9 pressed: Diagnostic snapshot captured\n");
                 } else if (ev.key.keysym.scancode == SDL_SCANCODE_F7) {
                     // Recording sessions (RBREW_PROFILE_TRIGGER): start the CPU
@@ -987,12 +960,27 @@ static void GX2SwapScanBuffers(CPUState* cpu) {
         std::fflush(stderr);
     }
 #if defined(HAVE_SDL2)
+    // Requests made by ImGui widgets on the render thread are applied here,
+    // on the thread that owns the SDL window.
     if (s_window) {
-        if (!s_fps_sample_tick) { s_fps_sample_tick = flip_tick; s_fps_frames = 0; }
-        else if (++s_fps_frames; flip_tick - s_fps_sample_tick >= (RBREW_TIMER_CLOCK / 4)) {   // 4 Hz: SetWindowTitle is not free
-            s_window_fps = double(s_fps_frames) * RBREW_TIMER_CLOCK / double(flip_tick - s_fps_sample_tick);
-            s_fps_sample_tick = flip_tick; s_fps_frames = 0;
-            update_window_title();
+        bool fullscreen = false;
+        if (gx2_imgui::consume_fullscreen_request(fullscreen)) set_window_fullscreen(fullscreen);
+        if (gx2_imgui::consume_quit_request()) gx2_close_requested();
+        if (gx2_imgui::consume_menu_changed()) sync_overlay_mouse_mode();
+        gx2_imgui::note_fullscreen(window_fullscreen());
+        // The overlay window's close button flips visibility on the render
+        // thread: sync mouse capture and persist the choice here.
+        if (gx2_imgui::consume_visibility_changed()) {
+            sync_overlay_mouse_mode();
+            auto settings = rbrew_settings::get();
+            settings.fps_overlay = gx2_imgui::visible();
+            rbrew_settings::set(settings);
+        }
+        // The simple overlay is visual only: no cursor or input change.
+        if (gx2_imgui::consume_simple_overlay_changed()) {
+            auto settings = rbrew_settings::get();
+            settings.simple_overlay = gx2_imgui::simple_overlay();
+            rbrew_settings::set(settings);
         }
     }
 #endif
