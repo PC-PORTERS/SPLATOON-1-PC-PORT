@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <string>
 
 #if !defined(_MSC_VER)
 #include <strings.h> // strcasecmp
@@ -263,6 +264,32 @@ void RecordEvent(EventCategory category, EventSeverity severity, int16_t code, c
     std::snprintf(ev.message, sizeof(ev.message), "%s", message ? message : "");
 }
 
+namespace {
+// Resident host memory of this process (0 when the platform cannot report it).
+// Windows: the process working set, as before. Linux: VmRSS from
+// /proc/self/status, the same resident-page figure. Only called every 30
+// frames for the overlay readout, never on the per-frame hot path.
+uint64_t process_resident_bytes() {
+#if defined(_WIN32)
+    PROCESS_MEMORY_COUNTERS_EX counters{};
+    counters.cb = sizeof(counters);
+    if (K32GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&counters), sizeof(counters)))
+        return counters.WorkingSetSize;
+#elif defined(__linux__)
+    std::ifstream status("/proc/self/status");
+    for (std::string line; status && std::getline(status, line);) {
+        if (line.compare(0, 6, "VmRSS:") != 0) continue;
+        const char* value = line.c_str() + 6;
+        while (*value == ' ' || *value == '\t') ++value;
+        char* end = nullptr;
+        const unsigned long long kb = std::strtoull(value, &end, 10);
+        return end != value ? uint64_t(kb) * 1024 : 0;
+    }
+#endif
+    return 0;
+}
+}  // namespace
+
 void RecordFrame(uint32_t frame_index, float frame_time_ms, float cpu_time_ms,
                  float present_wait_ms, float vsync_wait_ms, float render_wait_ms,
                  uint16_t draw_calls, uint16_t shader_compiles, uint16_t texture_uploads,
@@ -377,14 +404,11 @@ void RecordFrame(uint32_t frame_index, float frame_time_ms, float cpu_time_ms,
             s_overlay_metrics.low_1pct_fps = sorted[low1_idx] > 0.001f ? (1000.0f / sorted[p99_idx]) : 0.0f;
         }
 
-#if defined(_WIN32)
-        // A process query per frame is unnecessary for a title readout.
+        // A process query per frame is unnecessary for a title readout; keep
+        // the last sample when a platform has no answer.
         static uint32_t s_ram_sample = 0;
-        PROCESS_MEMORY_COUNTERS pmc{};
-        if (s_ram_sample++ % 30 == 0 && GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc))) {
-            s_overlay_metrics.ram_usage_bytes = pmc.WorkingSetSize;
-        }
-#endif
+        if (s_ram_sample++ % 30 == 0)
+            if (const uint64_t resident = process_resident_bytes()) s_overlay_metrics.ram_usage_bytes = resident;
     }
 }
 

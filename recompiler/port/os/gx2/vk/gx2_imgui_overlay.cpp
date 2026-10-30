@@ -334,7 +334,10 @@ void build_performance_window(const diag::OverlayMetrics& metrics, VkExtent2D ex
     ImGui::Text("VSync   %.2f ms", metrics.vsync_wait_ms);
     ImGui::Text("Render  %.2f ms", metrics.render_wait_ms);
     ImGui::Separator();
-    ImGui::Text("RAM     %u MB", unsigned(metrics.ram_usage_bytes / (1024 * 1024)));
+    if (metrics.ram_usage_bytes)
+        ImGui::Text("RAM     %u MB", unsigned(metrics.ram_usage_bytes / (1024 * 1024)));
+    else
+        ImGui::TextDisabled("RAM     --");   // platform did not report it
     if (ImGui::CollapsingHeader("Backend")) {
         const auto& caps = gx2vk::caps();
         ImGui::Text("Device %s", caps.device_name.c_str());
