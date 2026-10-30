@@ -9,4 +9,4 @@ assignees: ''
 
 [Your Content]
 
-[ ] I’ve looked everywhere, and **no similar issue exists**.
+- [ ] I’ve looked everywhere, and **no similar issue exists**.
