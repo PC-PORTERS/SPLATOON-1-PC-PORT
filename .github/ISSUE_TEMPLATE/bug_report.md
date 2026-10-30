@@ -30,4 +30,4 @@ A clear and concise description of what you expected to happen.
 
 [Compile Time (before I can open the game) / Runtime (In the produced game)] 
 
-[ ] I’ve looked everywhere, and the bug hasn’t been reported yet.
+- [ ]  I’ve looked everywhere, and the bug hasn’t been reported yet.
