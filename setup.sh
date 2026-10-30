@@ -22,8 +22,8 @@ WORK="$ROOT/build"
 DOWNLOADS="$WORK/downloads"
 DEPS="$WORK/deps"
 
-# Only this game executable is supported (Splatoon, Europe, AGMP01, v16).
-SUPPORTED_RPX_SHA256='45ecd1ed81a97f46b1c8ae24820cd47fbc55399b50af09bf1f9050fe803308e5'
+# Every Manifest/*.manifest describes one supported image; the RPX selects it.
+MANIFEST_DIR="$ROOT/Manifest"
 BOUNDARY_PROFILE="$ROOT/profiles/agmp-v16.entries"
 HOOK_PROFILE="$ROOT/profiles/agmp-v16.hooks"
 MINIMUM_FUNCTION_COUNT=96300
@@ -83,6 +83,12 @@ stage_done() { STAGE_TIMES["$1"]=$(( $(date +%s) - STAGE_START )); }
 check_exit() { [ "$1" -eq 0 ] || fail "$2 (exit code $1)."; }
 
 sha256() { sha256sum -- "$1" | awk '{print $1}'; }
+
+# Prints the manifest in Manifest/ whose [identity] describes this image.
+select_manifest() { # <rpx>
+    python3 "$RECOMPILER/tools/plt_resolver.py" select \
+        --rpx "$1" --manifest-dir "$MANIFEST_DIR"
+}
 
 download() { # <url> <destination>
     local url="$1" dest="$2"
@@ -335,10 +341,10 @@ if [ -z "$GAME_DUMP" ]; then
     # Check known/common locations automatically before prompting.
     local_candidate=""
     for local_candidate in \
-        "$HOME"/Downloads/*0005000010176a00* \
+        "$HOME"/Downloads/* \
         "$ROOT/dump" "$ROOT/game-dump"; do
         if [ -f "$local_candidate/code/Gambit.rpx" ] \
-            && [ "$(sha256 "$local_candidate/code/Gambit.rpx")" = "$SUPPORTED_RPX_SHA256" ]; then
+            && select_manifest "$local_candidate/code/Gambit.rpx" >/dev/null 2>&1; then
             GAME_DUMP="$local_candidate"
             good "Automatically detected valid game dump: $GAME_DUMP"
             break
@@ -363,12 +369,13 @@ done
 rpx="$GAME_DUMP/code/Gambit.rpx"
 [ -f "$rpx" ] || fail 'Your dump is missing code/Gambit.rpx.'
 [ -f "$GAME_DUMP/meta/meta.xml" ] || fail 'Your dump is missing meta/meta.xml.'
+[ -d "$MANIFEST_DIR" ] || fail "The Manifest folder is missing: $MANIFEST_DIR. Extract the complete repository, including Manifest, and retry."
 info 'Checking the game version (this takes a few seconds) ...'
 rpx_hash="$(sha256 "$rpx")"
-if [ "$rpx_hash" != "$SUPPORTED_RPX_SHA256" ]; then
-    fail "Unsupported game version. Only Splatoon EUR (AGMP01) with update v16 (288) is supported. Your code/Gambit.rpx hash is $rpx_hash."
-fi
-good 'Supported game: Splatoon (EUR, AGMP01, v16).'
+SELECTED_MANIFEST="$(select_manifest "$rpx")" || {
+    fail "Unsupported game version. None of the manifests in $MANIFEST_DIR describes your code/Gambit.rpx (SHA-256 $rpx_hash). Add a manifest for this image, or use a supported dump."
+}
+good "Matched manifest: $SELECTED_MANIFEST"
 
 if [ -z "$OUTPUT" ]; then OUTPUT="$ROOT/Game"; fi
 OUTPUT="$(readlink -f -- "$(dirname -- "$OUTPUT")")/$(basename -- "$OUTPUT")"
@@ -449,7 +456,7 @@ STAMP="$WORK/generated/source.sha256"
 # The profile is address metadata, not game code. The RPX hash above selects
 # its supported version; RebrewU still validates each boundary against the RPX.
 # Include the tool and profile hashes in the stamp so changes regenerate.
-current="$rpx_hash:$(sha256 "$REBREWU"):$(sha256 "$BOUNDARY_PROFILE"):$(sha256 "$HOOK_PROFILE")"
+current="$rpx_hash:$(sha256 "$REBREWU"):$(sha256 "$BOUNDARY_PROFILE"):$(sha256 "$HOOK_PROFILE"):$(sha256 "$SELECTED_MANIFEST")"
 previous=""
 [ -f "$STAMP" ] && previous="$(cat -- "$STAMP")"
 if ! generated_module_complete "$GENERATED" || [ "$current" != "$previous" ]; then
@@ -457,6 +464,7 @@ if ! generated_module_complete "$GENERATED" || [ "$current" != "$previous" ]; th
     # timestamps and archives obsolete parts safely.
     ensure_folder "$GENERATED"
     "$REBREWU" recompile --rpx "$rpx" --output "$GENERATED" \
+        --manifest "$SELECTED_MANIFEST" \
         --analyzer-entries "$BOUNDARY_PROFILE" --hooks "$HOOK_PROFILE" \
         || fail 'Recompiling Gambit.rpx'
     generated_module_complete "$GENERATED" \
@@ -478,6 +486,7 @@ GLSLANG_DIR="$DEPS/glslang-vulkan/lib/cmake/glslang"
 cmake -S "$RECOMPILER/port" -B "$GAME_BUILD" -G "$GENERATOR" \
     -DCMAKE_BUILD_TYPE=Release \
     -DRBREW_GRAPHICS_BACKEND=Vulkan \
+    -DRBREW_RPX="$rpx" \
     -DGAMBIT_GENERATED_DIR="$GENERATED" \
     -DSDL2_DIR="$SDL2_DIR" \
     -Dglslang_DIR="$GLSLANG_DIR" \

@@ -38,7 +38,7 @@ An unofficial native PC port of **Splatoon (Wii U)** for **Windows and Linux**, 
 - **GPU with Vulkan 1.3** and an up-to-date driver (developed on an RTX 5060 Ti; a modern NVIDIA is recommended)
 - **CPU:** modern 6–8 cores or more · **RAM:** 16 GB minimum, 32 GB recommended (building the game uses a lot of memory)
 - **Disk:** about 40 GB free during setup FINAL BUILD IS 6GB COUNTING THE SHADER CACHES
-- **Your own game dump:** Splatoon **EUR (AGMP01) with update v16**, with the folders `code`, `content` and `meta` (for example made with *Dumpling* on your Wii U). Other regions and versions are not supported yet.
+- **Your own game dump:** Supported Splatoon version (see VersionDb.md), with the folders `code`, `content` and `meta` (for example made with *Dumpling* on your Wii U).
 
 ## Installation (simple)
 
@@ -87,7 +87,8 @@ Options: `./setup.sh --clean` rebuilds everything, `--output ~/Games/Splatoon` p
 cmake -S recompiler -B build/rebrewu -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build/rebrewu --target rebrewu
 
-# 2. Recompile your dump into C++ (writes build/generated/Gambit)
+# 2. Recompile your dump into C++ (writes build/generated/Gambit).
+#    The RPX selects its manifest from Manifest/*.manifest automatically.
 build/rebrewu/bin/rebrewu recompile \
     --rpx "/path/to/dump/code/Gambit.rpx" --output build/generated/Gambit \
     --analyzer-entries profiles/agmp-v16.entries --hooks profiles/agmp-v16.hooks
