@@ -1,3 +1,6 @@
+Copyright (c) 2026 PC-PORTERS and Contributors
+Original work copyright (c) ApfelTeeSaft
+
 Mozilla Public License Version 2.0
 ==================================
 
