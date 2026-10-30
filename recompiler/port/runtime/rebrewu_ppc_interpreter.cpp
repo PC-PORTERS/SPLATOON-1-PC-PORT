@@ -8,9 +8,8 @@ uint32_t sign_extend(uint32_t value, unsigned width) {
 }
 
 bool in_arena(const CPUState* cpu, uint32_t address, uint32_t size) {
-    return cpu->mem && cpu->guest_memory_size <= WIIU_MEM_SIZE &&
-        uint64_t(address) + size <= cpu->guest_memory_size &&
-        rbrew_memory_accessible(cpu->mem, address, size);
+    return cpu->mem && cpu->guest_memory_size <= WIIU_MEM_SIZE && uint64_t(address) + size <= cpu->guest_memory_size &&
+           rbrew_memory_accessible(cpu->mem, address, size);
 }
 
 uint32_t read_be(const uint8_t* bytes, uint32_t size) {
@@ -55,8 +54,7 @@ uint32_t rotate_word(uint32_t value, unsigned shift) {
 uint32_t cyclic_mask(unsigned begin, unsigned end) {
     uint32_t mask = 0;
     for (unsigned bit = 0; bit < 32; ++bit) {
-        const bool selected = begin <= end ? bit >= begin && bit <= end
-                                          : bit >= begin || bit <= end;
+        const bool selected = begin <= end ? bit >= begin && bit <= end : bit >= begin || bit <= end;
         if (selected) mask |= 1u << (31u - bit);
     }
     return mask;
@@ -85,8 +83,7 @@ bool branch_condition(CPUState* cpu, uint32_t bo, uint32_t bi) {
 } // namespace
 
 RbrewPPCStep rbrew_ppc_step(CPUState* cpu, uint32_t pc) {
-    RbrewPPCStep result{RbrewPPCStop::Continue, RbrewPPCTransfer::Sequential,
-                        pc + 4u, 0u, "completed"};
+    RbrewPPCStep result{RbrewPPCStop::Continue, RbrewPPCTransfer::Sequential, pc + 4u, 0u, "completed"};
     const auto stop = [&](RbrewPPCStop reason, const char* detail) {
         result.stop = reason;
         result.next_pc = pc;
@@ -107,62 +104,63 @@ RbrewPPCStep rbrew_ppc_step(CPUState* cpu, uint32_t pc) {
     const bool rc = (word & 1u) != 0u;
 
     switch (op) {
-    case 14: // addi (including li); RA=0 is an architectural zero base.
+    case 14:   // addi (including li); RA=0 is an architectural zero base.
     case 15: { // addis
         const uint32_t value = sign_extend(immediate, 16u);
         cpu->r[rt] = (ra ? cpu->r[ra] : 0u) + (op == 15 ? value << 16 : value);
         return result;
     }
-    case 24: // ori
-    case 25: // oris
-    case 26: // xori
-    case 27: // xoris
-    case 28: // andi. (record is mandatory)
+    case 24:   // ori
+    case 25:   // oris
+    case 26:   // xori
+    case 27:   // xoris
+    case 28:   // andi. (record is mandatory)
     case 29: { // andis.
         const uint32_t value = (op & 1u) ? immediate << 16 : immediate;
         uint32_t output;
-        if (op < 26) output = cpu->r[rt] | value;
-        else if (op < 28) output = cpu->r[rt] ^ value;
-        else output = cpu->r[rt] & value;
+        if (op < 26)
+            output = cpu->r[rt] | value;
+        else if (op < 28)
+            output = cpu->r[rt] ^ value;
+        else
+            output = cpu->r[rt] & value;
         cpu->r[ra] = output;
         if (op >= 28) record_integer(cpu, output);
         return result;
     }
-    case 10: // cmpli
+    case 10:   // cmpli
     case 11: { // cmpi: BF, reserved bit, L, RA, immediate.
         if (word & 0x00600000u) {
             return stop(RbrewPPCStop::Unsupported, "64-bit or reserved immediate compare");
         }
         const uint32_t field = (word >> 23) & 7u;
         cpu->cr[field] = op == 10 ? compare_unsigned(cpu->r[ra], immediate, cpu->xer)
-            : compare_signed(cpu->r[ra], sign_extend(immediate, 16u), cpu->xer);
+                                  : compare_signed(cpu->r[ra], sign_extend(immediate, 16u), cpu->xer);
         return result;
     }
-    case 20: // rlwimi
+    case 20:   // rlwimi
     case 21: { // rlwinm
         const unsigned begin = (word >> 6) & 31u;
         const unsigned end = (word >> 1) & 31u;
         const uint32_t mask = cyclic_mask(begin, end);
         const uint32_t rotated = rotate_word(cpu->r[rt], rb);
-        const uint32_t output = op == 20 ? (cpu->r[ra] & ~mask) | (rotated & mask)
-                                        : rotated & mask;
+        const uint32_t output = op == 20 ? (cpu->r[ra] & ~mask) | (rotated & mask) : rotated & mask;
         cpu->r[ra] = output;
         if (rc) record_integer(cpu, output);
         return result;
     }
-    case 32: // lwz
-    case 34: // lbz
-    case 40: // lhz
-    case 42: // lha
-    case 36: // stw
-    case 37: // stwu
-    case 38: // stb
+    case 32:   // lwz
+    case 34:   // lbz
+    case 40:   // lhz
+    case 42:   // lha
+    case 36:   // stw
+    case 37:   // stwu
+    case 38:   // stb
     case 44: { // sth
         if (op == 37 && !ra) {
             return stop(RbrewPPCStop::Unsupported, "store-update requires nonzero RA");
         }
-        const uint32_t size = op == 34 || op == 38 ? 1u
-                            : op == 40 || op == 42 || op == 44 ? 2u : 4u;
+        const uint32_t size = op == 34 || op == 38 ? 1u : op == 40 || op == 42 || op == 44 ? 2u : 4u;
         const uint32_t address = (ra ? cpu->r[ra] : 0u) + sign_extend(immediate, 16u);
         if (address & (size - 1u)) {
             return stop(RbrewPPCStop::MemoryFault, "unaligned data access is outside prototype");
@@ -189,7 +187,7 @@ RbrewPPCStep rbrew_ppc_step(CPUState* cpu, uint32_t pc) {
         result.transfer = rc ? RbrewPPCTransfer::Call : RbrewPPCTransfer::Branch;
         return result;
     }
-    case 16: // bc
+    case 16:   // bc
     case 19: { // bclr/bcctr; all other XL encodings fail closed.
         const uint32_t bo = rt;
         const uint32_t bi = ra;
@@ -208,7 +206,8 @@ RbrewPPCStep rbrew_ppc_step(CPUState* cpu, uint32_t pc) {
         }
         // Capture old LR/CTR before predicate effects or linked LR publication.
         uint32_t target;
-        if (op == 19) target = (xo == 16u ? cpu->lr : cpu->ctr) & ~3u;
+        if (op == 19)
+            target = (xo == 16u ? cpu->lr : cpu->ctr) & ~3u;
         else {
             target = sign_extend(word & 0xFFFCu, 16u);
             if (!(word & 2u)) target += pc;
@@ -224,50 +223,48 @@ RbrewPPCStep rbrew_ppc_step(CPUState* cpu, uint32_t pc) {
     case 31: {
         const uint32_t xo = (word >> 1) & 1023u;
         switch (xo) {
-        case 0: // cmp
+        case 0:    // cmp
         case 32: { // cmpl
             if (rc || (word & 0x00600000u)) {
                 return stop(RbrewPPCStop::Unsupported, "64-bit or reserved register compare");
             }
             const uint32_t field = (word >> 23) & 7u;
             cpu->cr[field] = xo == 0 ? compare_signed(cpu->r[ra], cpu->r[rb], cpu->xer)
-                                  : compare_unsigned(cpu->r[ra], cpu->r[rb], cpu->xer);
+                                     : compare_unsigned(cpu->r[ra], cpu->r[rb], cpu->xer);
             return result;
         }
-        case 28: // and
-        case 316: // xor
+        case 28:    // and
+        case 316:   // xor
         case 444: { // or (including mr)
-            const uint32_t output = xo == 28 ? cpu->r[rt] & cpu->r[rb]
-                                  : xo == 316 ? cpu->r[rt] ^ cpu->r[rb]
-                                              : cpu->r[rt] | cpu->r[rb];
+            const uint32_t output = xo == 28    ? cpu->r[rt] & cpu->r[rb]
+                                    : xo == 316 ? cpu->r[rt] ^ cpu->r[rb]
+                                                : cpu->r[rt] | cpu->r[rb];
             cpu->r[ra] = output;
             if (rc) record_integer(cpu, output);
             return result;
         }
-        case 40: // subf: RB - RA, without OE or CA changes.
+        case 40:    // subf: RB - RA, without OE or CA changes.
         case 266: { // add: without OE or CA changes.
-            const uint32_t output = xo == 40 ? cpu->r[rb] - cpu->r[ra]
-                                            : cpu->r[ra] + cpu->r[rb];
+            const uint32_t output = xo == 40 ? cpu->r[rb] - cpu->r[ra] : cpu->r[ra] + cpu->r[rb];
             cpu->r[rt] = output;
             if (rc) record_integer(cpu, output);
             return result;
         }
-        case 339: // mfspr
+        case 339:   // mfspr
         case 467: { // mtspr; five-bit SPR halves are swapped in the encoding.
             if (rc) return stop(RbrewPPCStop::Unsupported, "reserved SPR record bit");
             const uint32_t spr = ra | (rb << 5u);
-            uint32_t* special = spr == 1 ? &cpu->xer : spr == 8 ? &cpu->lr
-                                : spr == 9 ? &cpu->ctr : nullptr;
+            uint32_t* special = spr == 1 ? &cpu->xer : spr == 8 ? &cpu->lr : spr == 9 ? &cpu->ctr : nullptr;
             if (!special) return stop(RbrewPPCStop::Unsupported, "unsupported special register");
-            if (xo == 339) cpu->r[rt] = *special;
-            else *special = cpu->r[rt];
+            if (xo == 339)
+                cpu->r[rt] = *special;
+            else
+                *special = cpu->r[rt];
             return result;
         }
-        default:
-            return stop(RbrewPPCStop::Unsupported, "unsupported X/XO instruction");
+        default: return stop(RbrewPPCStop::Unsupported, "unsupported X/XO instruction");
         }
     }
-    default:
-        return stop(RbrewPPCStop::Unsupported, "unsupported primary opcode");
+    default: return stop(RbrewPPCStop::Unsupported, "unsupported primary opcode");
     }
 }

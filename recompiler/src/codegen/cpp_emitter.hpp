@@ -11,32 +11,29 @@
 #include <vector>
 
 namespace rebrewu::codegen {
-  struct EmitConfig {
-    bool emit_comments{false};          // include source-address comments
-    bool emit_guest_addr_labels{true};  // label every guest instruction
+struct EmitConfig {
+    bool emit_comments{false};         // include source-address comments
+    bool emit_guest_addr_labels{true}; // label every guest instruction
     bool verbose{false};
     bool emit_data_sections{true};
-    bool emit_ppc_image{false};         // independent original-code fallback image
-    bool use_goto{true};               // use goto for block jumps (vs setjmp)
-    uint32_t functions_per_file{250};  // max functions per shard (~500 KB/shard, optimal balance avoiding MSVC RAM & SSA thrashing while minimizing process startup overhead)
+    bool emit_ppc_image{false}; // independent original-code fallback image
+    bool use_goto{true};        // use goto for block jumps (vs setjmp)
+    uint32_t functions_per_file{
+        250}; // max functions per shard (~500 KB/shard, optimal balance avoiding MSVC RAM & SSA thrashing while minimizing process startup overhead)
     uint32_t max_instructions_per_shard{25000}; // max IR instructions per shard
-    uint32_t isolate_instruction_threshold{2800}; // isolate monster functions into dedicated shards to prevent stragglers
+    uint32_t isolate_instruction_threshold{
+        2800}; // isolate monster functions into dedicated shards to prevent stragglers
     std::string runtime_header{"rebrewu_runtime.h"};
     bool emit_coverage{false};
     // Entries whose callers reach a wrapper that runs a registered host hook
     // (rbrew_guest_hook) or, with none registered, the original body.
     std::set<uint32_t> hooked;
-  };
+};
 
-  class CppEmitter {
-  public:
-    CppEmitter(
-      const ir::IRModule& module,
-      const rpx::RpxModule& rpx_module,
-      const linker::Linker& linker,
-      NamingContext names,
-      EmitConfig cfg = {}
-    );
+class CppEmitter {
+public:
+    CppEmitter(const ir::IRModule& module, const rpx::RpxModule& rpx_module, const linker::Linker& linker,
+               NamingContext names, EmitConfig cfg = {});
 
     // Emit entire module to a directory
     // Produces: <outdir>/<module_name>.cpp, <outdir>/<module_name>.h
@@ -53,7 +50,7 @@ namespace rebrewu::codegen {
 
     std::string_view last_error() const { return m_last_error; }
 
-  private:
+private:
     void emit_file_prologue(std::ostream& out);
     bool emit_ppc_image(const std::filesystem::path& outdir);
     void emit_block(const ir::BasicBlock& block, const ir::IRFunction& func, std::ostream& out, int indent);
@@ -73,5 +70,5 @@ namespace rebrewu::codegen {
     std::unordered_map<uint32_t, uint32_t> m_temp_map{};
     std::unordered_map<uint32_t, std::string> m_inline_temps{};
     std::unordered_set<const ir::IRInstr*> m_skip_instrs{};
-  };
-}
+};
+} // namespace rebrewu::codegen

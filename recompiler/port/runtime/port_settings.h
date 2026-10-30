@@ -15,9 +15,27 @@ enum Resolution : int { k720p, k1080p, k1440p, kNative, kResolutionCount };
 
 // GamePad inputs that keyboard/mouse and controller buttons can be bound to.
 enum Action : int {
-    kActA, kActB, kActX, kActY, kActL, kActR, kActZL, kActZR, kActPlus, kActMinus, kActHome,
-    kActUp, kActDown, kActLeft, kActRight, kActStickL, kActStickR,
-    kActMoveUp, kActMoveDown, kActMoveLeft, kActMoveRight,   // left stick (keyboard only)
+    kActA,
+    kActB,
+    kActX,
+    kActY,
+    kActL,
+    kActR,
+    kActZL,
+    kActZR,
+    kActPlus,
+    kActMinus,
+    kActHome,
+    kActUp,
+    kActDown,
+    kActLeft,
+    kActRight,
+    kActStickL,
+    kActStickR,
+    kActMoveUp,
+    kActMoveDown,
+    kActMoveLeft,
+    kActMoveRight, // left stick (keyboard only)
     kActionCount
 };
 constexpr int kFirstMoveAction = kActMoveUp;
@@ -31,18 +49,18 @@ constexpr int kPadTouchpad = 20;
 void default_bindings(int (&keys)[kActionCount], int (&pad)[kActionCount]);
 
 struct Values {
-    int resolution = k720p;        // takes effect at the next start
-    bool plaza_60fps = true;       // RBREW_PLAZA_60FPS
+    int resolution = k720p;  // takes effect at the next start
+    bool plaza_60fps = true; // RBREW_PLAZA_60FPS
     bool fullscreen = true;
-    bool fps_overlay = false;      // debug overlay (F3), hidden at launch; RBREW_FPS_OVERLAY
-    bool simple_overlay = false;   // FPS / frame time / max FPS readout; RBREW_SIMPLE_OVERLAY
-    bool gyro = true;              // RBREW_GYRO
-    int gyro_sensitivity = 100;    // percent
-    bool gyro_invert_pitch = false;  // RBREW_GYRO_INVERT_PITCH
-    int mouse_sensitivity = 100;   // percent
-    int volume = 100;              // percent
-    int keys[kActionCount];        // keyboard/mouse binding per action
-    int pad[kActionCount];         // controller binding per action
+    bool fps_overlay = false;       // debug overlay (F3), hidden at launch; RBREW_FPS_OVERLAY
+    bool simple_overlay = false;    // FPS / frame time / max FPS readout; RBREW_SIMPLE_OVERLAY
+    bool gyro = true;               // RBREW_GYRO
+    int gyro_sensitivity = 100;     // percent
+    bool gyro_invert_pitch = false; // RBREW_GYRO_INVERT_PITCH
+    int mouse_sensitivity = 100;    // percent
+    int volume = 100;               // percent
+    int keys[kActionCount];         // keyboard/mouse binding per action
+    int pad[kActionCount];          // controller binding per action
     Values() { default_bindings(keys, pad); }
 };
 
@@ -65,4 +83,4 @@ inline std::atomic<float> g_volume{1.0f};
 inline std::atomic<int> g_keys[kActionCount];
 inline std::atomic<int> g_pad[kActionCount];
 
-}  // namespace rbrew_settings
+} // namespace rbrew_settings

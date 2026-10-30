@@ -17,6 +17,6 @@ struct RbrewGx2SurfaceLayout {
     uint32_t levels{}, image_size{}, mip_size{}, tile_mode{}, swizzle{}, alignment{}, pitch{};
     std::array<uint32_t, 13> mip_offsets{};
     uint32_t padded_height{};
-    std::array<uint32_t,14> level_pitch{},level_height{},level_tile{},level_size{};
+    std::array<uint32_t, 14> level_pitch{}, level_height{}, level_tile{}, level_size{};
 };
 std::optional<RbrewGx2SurfaceLayout> rbrew_gx2_calc_surface_layout(const RbrewGx2SurfaceDesc& desc);

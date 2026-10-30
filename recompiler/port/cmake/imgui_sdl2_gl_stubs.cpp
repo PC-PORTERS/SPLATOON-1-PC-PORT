@@ -22,7 +22,9 @@ void SDL_GL_GetDrawableSize(SDL_Window* window, int* w, int* h) {
     SDL_GetWindowSize(window, w, h);
 }
 
-SDL_GLContext SDL_GL_GetCurrentContext(void) { return nullptr; }
+SDL_GLContext SDL_GL_GetCurrentContext(void) {
+    return nullptr;
+}
 
 int SDL_GL_SetAttribute(SDL_GLattr attr, int value) {
     (void)attr;
@@ -42,13 +44,17 @@ int SDL_GL_MakeCurrent(SDL_Window* window, SDL_GLContext context) {
     return SDL_SetError("this build of SDL2 has no OpenGL support");
 }
 
-void SDL_GL_DeleteContext(SDL_GLContext context) { (void)context; }
+void SDL_GL_DeleteContext(SDL_GLContext context) {
+    (void)context;
+}
 
 int SDL_GL_SetSwapInterval(int interval) {
     (void)interval;
     return SDL_SetError("this build of SDL2 has no OpenGL support");
 }
 
-void SDL_GL_SwapWindow(SDL_Window* window) { (void)window; }
+void SDL_GL_SwapWindow(SDL_Window* window) {
+    (void)window;
+}
 
-}  // extern "C"
+} // extern "C"

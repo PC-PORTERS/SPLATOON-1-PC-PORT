@@ -30,12 +30,12 @@ struct Caps {
     uint32_t api_version = 0;
     std::string device_name;
     VkPhysicalDeviceLimits limits{};
-    bool push_descriptor = false;      // core 1.4 or VK_KHR_push_descriptor
+    bool push_descriptor = false; // core 1.4 or VK_KHR_push_descriptor
     uint32_t max_push_descriptors = 0;
-    bool custom_border_color = false;  // VK_EXT_custom_border_color
-    bool list_restart = false;         // VK_EXT_primitive_topology_list_restart
-    bool transform_feedback = false;   // VK_EXT_transform_feedback (offline replay positions)
-    bool vertex_divisor = false;       // vertexAttributeInstanceRateDivisor
+    bool custom_border_color = false; // VK_EXT_custom_border_color
+    bool list_restart = false;        // VK_EXT_primitive_topology_list_restart
+    bool transform_feedback = false;  // VK_EXT_transform_feedback (offline replay positions)
+    bool vertex_divisor = false;      // vertexAttributeInstanceRateDivisor
     bool vertex_divisor_zero = false;
     bool mirror_clamp_to_edge = false;
     bool anisotropy = false;
@@ -44,12 +44,12 @@ struct Caps {
     bool geometry_shader = false;
     bool image_cube_array = false;
     bool robust_buffer_access = false;
-    bool d24s8 = false;                // D24_UNORM_S8_UINT attachment + sampled
-    bool negative_one_to_one = false;  // native GPU/GX2 clip depth in fixed-function viewport
+    bool d24s8 = false;                 // D24_UNORM_S8_UINT attachment + sampled
+    bool negative_one_to_one = false;   // native GPU/GX2 clip depth in fixed-function viewport
     bool provoking_vertex_last = false; // VK_EXT_provoking_vertex LAST convention (flat shading)
     bool depth_clamp = false;           // depthClamp feature (Latte always clamps depth)
     bool depth_clip_enable = false;     // VK_EXT_depth_clip_enable (PA_CL_CLIP_CNTL ZCLIP_*_DISABLE)
-    bool validation = false;           // VK_LAYER_KHRONOS_validation enabled
+    bool validation = false;            // VK_LAYER_KHRONOS_validation enabled
     bool sync_validation = false;
     float max_anisotropy = 1.0f;
 };
@@ -73,12 +73,12 @@ std::string last_validation_error();
 struct Allocation {
     VkDeviceMemory memory = VK_NULL_HANDLE;
     VkDeviceSize offset = 0, size = 0;
-    uint8_t* mapped = nullptr;           // host pointer at offset (Upload/Readback)
-    int32_t block = -1;                  // allocator block, -1 = dedicated
+    uint8_t* mapped = nullptr; // host pointer at offset (Upload/Readback)
+    int32_t block = -1;        // allocator block, -1 = dedicated
     uint32_t pool = 0;
     uint32_t memory_type = 0;
     VkMemoryPropertyFlags properties = 0;
-    VkDeviceSize backing_size = 0;       // bounds atom-aligned flush/invalidate ranges
+    VkDeviceSize backing_size = 0; // bounds atom-aligned flush/invalidate ranges
     explicit operator bool() const { return memory != VK_NULL_HANDLE; }
 };
 enum class MemoryUse { DeviceLocal, Upload, Readback };
@@ -119,11 +119,14 @@ bool begin_command_batch();
 void end_command_batch();
 class CommandBatch {
     bool active_;
+
 public:
-    CommandBatch():active_(begin_command_batch()){}
-    ~CommandBatch(){if(active_)end_command_batch();}
-    CommandBatch(const CommandBatch&)=delete;
-    CommandBatch& operator=(const CommandBatch&)=delete;
+    CommandBatch() : active_(begin_command_batch()) {}
+    ~CommandBatch() {
+        if (active_) end_command_batch();
+    }
+    CommandBatch(const CommandBatch&) = delete;
+    CommandBatch& operator=(const CommandBatch&) = delete;
 };
 // Called before the command buffer is ended (end rendering, close query
 // sub-segments) and after a submission (renderer bookkeeping).
@@ -139,9 +142,9 @@ bool finish();
 uint64_t submission_count();
 
 // ---- barriers ------------------------------------------------------------
-void note_gpu_write();          // a draw/clear/copy wrote device memory
+void note_gpu_write(); // a draw/clear/copy wrote device memory
 bool gpu_dirty();
-void barrier_if_dirty();        // must be outside a rendering instance
+void barrier_if_dirty(); // must be outside a rendering instance
 void full_barrier();
 uint64_t barrier_count();
 
@@ -150,7 +153,7 @@ struct Span {
     VkBuffer buffer = VK_NULL_HANDLE;
     VkDeviceSize offset = 0, size = 0;
     uint8_t* data = nullptr;
-    uint64_t chunk_id = 0;       // identifies the backing chunk generation
+    uint64_t chunk_id = 0; // identifies the backing chunk generation
 };
 Span upload(VkDeviceSize bytes, VkDeviceSize alignment);
 // Read-only residency query for discarding stale cache metadata. Unlike
@@ -168,7 +171,7 @@ struct Buffer {
     VkDeviceSize size = 0;
 };
 Buffer create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, MemoryUse use);
-void destroy_buffer(Buffer& buffer);   // deferred until GPU completion
+void destroy_buffer(Buffer& buffer); // deferred until GPU completion
 
 // ---- images --------------------------------------------------------------
 struct ImageDesc {
@@ -184,7 +187,10 @@ struct Image {
     ImageDesc desc;
     VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
     uint64_t content_generation = 0; // changes on creation and every recorded image write
-    struct View { uint64_t key; VkImageView view; };
+    struct View {
+        uint64_t key;
+        VkImageView view;
+    };
     std::vector<View> views;
     explicit operator bool() const { return image != VK_NULL_HANDLE; }
 };
@@ -199,13 +205,13 @@ bool format_is_compressed(VkFormat format);
 bool format_supports(VkFormat format, VkFormatFeatureFlags features, bool optimal = true);
 // Creates the image and records its UNDEFINED -> GENERAL transition.
 bool create_image(Image& image, const ImageDesc& desc);
-void destroy_image(Image& image);      // deferred until GPU completion
+void destroy_image(Image& image); // deferred until GPU completion
 struct ViewDesc {
     VkImageViewType type = VK_IMAGE_VIEW_TYPE_2D;
-    VkFormat format = VK_FORMAT_UNDEFINED;      // UNDEFINED = image format
+    VkFormat format = VK_FORMAT_UNDEFINED; // UNDEFINED = image format
     VkComponentMapping swizzle{};
     uint32_t base_level = 0, levels = 1, base_layer = 0, layers = 1;
-    VkImageAspectFlags aspect = 0;               // 0 = image aspect (depth only for depth/stencil)
+    VkImageAspectFlags aspect = 0; // 0 = image aspect (depth only for depth/stencil)
 };
 VkImageView image_view(Image& image, const ViewDesc& desc);
 uint64_t image_count();
@@ -226,18 +232,18 @@ VkPresentModeKHR present_mode();
 // ---- one-shot readback -------------------------------------------------------
 // Records a copy of one image subresource into host memory, submits, waits and
 // returns the tightly packed bytes (texel blocks for compressed formats).
-bool read_image(Image& image, VkImageAspectFlags aspect, uint32_t level, uint32_t layer,
-                uint32_t width, uint32_t height, std::vector<uint8_t>& out);
+bool read_image(Image& image, VkImageAspectFlags aspect, uint32_t level, uint32_t layer, uint32_t width,
+                uint32_t height, std::vector<uint8_t>& out);
 uint32_t format_block_bytes(VkFormat format, VkImageAspectFlags aspect);
 
 // Debug names for validation output.
 void set_name(VkObjectType type, uint64_t handle, const char* name);
 
-}  // namespace gx2vk
+} // namespace gx2vk
 
 namespace gx2vk {
 // Tests and screen captures: keep a host copy of each presented swapchain
 // image (RGBA8). Captured presents omit every overlay.
 bool capture_presents(bool enable); // returns the previous setting
 bool last_present(std::vector<uint8_t>& rgba, uint32_t& width, uint32_t& height);
-}
+} // namespace gx2vk

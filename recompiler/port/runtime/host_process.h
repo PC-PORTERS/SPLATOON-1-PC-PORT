@@ -19,7 +19,7 @@ inline RbrewProcessPolicy rbrew_configure_game_process() {
     RbrewProcessPolicy policy;
     // Clear inherited CPU-set selections as well as hard affinity masks.
     // Resolve these optional Windows 10 APIs without changing the minimum OS.
-    using SetCpuSets = BOOL (WINAPI*)(HANDLE, const ULONG*, ULONG);
+    using SetCpuSets = BOOL(WINAPI*)(HANDLE, const ULONG*, ULONG);
     const HMODULE kernel = GetModuleHandleW(L"kernel32.dll");
     const auto process_sets = reinterpret_cast<SetCpuSets>(GetProcAddress(kernel, "SetProcessDefaultCpuSets"));
     const auto thread_sets = reinterpret_cast<SetCpuSets>(GetProcAddress(kernel, "SetThreadSelectedCpuSets"));

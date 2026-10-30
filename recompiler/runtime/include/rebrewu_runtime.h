@@ -28,7 +28,7 @@ extern "C" {
 extern uint8_t* rebrewu_mem_base;
 
 /// Total size of the guest memory mapping (bytes).
-extern size_t   rebrewu_mem_size;
+extern size_t rebrewu_mem_size;
 
 // ============================================================================
 // Memory access helpers
@@ -37,8 +37,9 @@ extern size_t   rebrewu_mem_size;
 // little-endian hosts.
 // ============================================================================
 
-static inline uint8_t  mem_read_u8 (uint32_t addr)
-    { return rebrewu_mem_base[addr]; }
+static inline uint8_t mem_read_u8(uint32_t addr) {
+    return rebrewu_mem_base[addr];
+}
 
 static inline uint16_t mem_read_u16(uint32_t addr) {
     uint16_t v;
@@ -53,26 +54,30 @@ static inline uint32_t mem_read_u32(uint32_t addr) {
     uint32_t v;
     memcpy(&v, rebrewu_mem_base + addr, 4);
 #if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-    v = ((v & 0xFF000000u) >> 24) | ((v & 0x00FF0000u) >> 8)
-      | ((v & 0x0000FF00u) <<  8) | ((v & 0x000000FFu) << 24);
+    v = ((v & 0xFF000000u) >> 24) | ((v & 0x00FF0000u) >> 8) | ((v & 0x0000FF00u) << 8) | ((v & 0x000000FFu) << 24);
 #endif
     return v;
 }
 
 static inline float mem_read_f32(uint32_t addr) {
     uint32_t raw = mem_read_u32(addr);
-    float f; memcpy(&f, &raw, 4); return f;
+    float f;
+    memcpy(&f, &raw, 4);
+    return f;
 }
 
 static inline double mem_read_f64(uint32_t addr) {
     uint32_t hi = mem_read_u32(addr);
     uint32_t lo = mem_read_u32(addr + 4);
     uint64_t raw = ((uint64_t)hi << 32) | lo;
-    double d; memcpy(&d, &raw, 8); return d;
+    double d;
+    memcpy(&d, &raw, 8);
+    return d;
 }
 
-static inline void mem_write_u8 (uint32_t addr, uint8_t v)
-    { rebrewu_mem_base[addr] = v; }
+static inline void mem_write_u8(uint32_t addr, uint8_t v) {
+    rebrewu_mem_base[addr] = v;
+}
 
 static inline void mem_write_u16(uint32_t addr, uint16_t v) {
 #if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
@@ -83,14 +88,14 @@ static inline void mem_write_u16(uint32_t addr, uint16_t v) {
 
 static inline void mem_write_u32(uint32_t addr, uint32_t v) {
 #if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-    v = ((v & 0xFF000000u) >> 24) | ((v & 0x00FF0000u) >> 8)
-      | ((v & 0x0000FF00u) <<  8) | ((v & 0x000000FFu) << 24);
+    v = ((v & 0xFF000000u) >> 24) | ((v & 0x00FF0000u) >> 8) | ((v & 0x0000FF00u) << 8) | ((v & 0x000000FFu) << 24);
 #endif
     memcpy(rebrewu_mem_base + addr, &v, 4);
 }
 
 static inline void mem_write_f32(uint32_t addr, float f) {
-    uint32_t raw; memcpy(&raw, &f, 4);
+    uint32_t raw;
+    memcpy(&raw, &f, 4);
     mem_write_u32(addr, raw);
 }
 
@@ -102,13 +107,13 @@ static inline void mem_write_f32(uint32_t addr, float f) {
 // ============================================================================
 
 typedef struct {
-    uint32_t gpr[32];   ///< General purpose registers r0-r31
-    double   fpr[32];   ///< Floating-point registers f0-f31
-    uint32_t cr;        ///< Condition register (8 × 4-bit fields)
-    uint32_t lr;        ///< Link register
-    uint32_t ctr;       ///< Count register
-    uint32_t xer;       ///< XER (fixed-point exception register)
-    uint32_t pc;        ///< Program counter (current guest PC)
+    uint32_t gpr[32]; ///< General purpose registers r0-r31
+    double fpr[32];   ///< Floating-point registers f0-f31
+    uint32_t cr;      ///< Condition register (8 × 4-bit fields)
+    uint32_t lr;      ///< Link register
+    uint32_t ctr;     ///< Count register
+    uint32_t xer;     ///< XER (fixed-point exception register)
+    uint32_t pc;      ///< Program counter (current guest PC)
 } GuestCPU;
 
 // ============================================================================
@@ -120,11 +125,9 @@ typedef struct {
 
 typedef void (*RebrewuThunkFn)(GuestCPU* cpu);
 
-void rebrewu_register_import(const char* module, const char* symbol,
-                              RebrewuThunkFn fn);
+void rebrewu_register_import(const char* module, const char* symbol, RebrewuThunkFn fn);
 
-void rebrewu_call_import(const char* module, const char* symbol,
-                          GuestCPU* cpu);
+void rebrewu_call_import(const char* module, const char* symbol, GuestCPU* cpu);
 
 // ============================================================================
 // Initialisation / teardown

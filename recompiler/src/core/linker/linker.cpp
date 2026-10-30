@@ -2,8 +2,7 @@
 
 namespace rebrewu::linker {
 
-Linker::Linker(diagnostics::DiagEngine& diag, LinkerConfig cfg) noexcept
-    : m_diag(diag), m_cfg(std::move(cfg)) {}
+Linker::Linker(diagnostics::DiagEngine& diag, LinkerConfig cfg) noexcept : m_diag(diag), m_cfg(std::move(cfg)) {}
 
 void Linker::add_rpl(std::shared_ptr<rpl::RplModule> rpl) {
     if (!rpl) return;
@@ -32,8 +31,7 @@ bool Linker::resolve_module_imports(rpx::RpxModule& rpx) {
         const auto* node = m_graph.find(imp.from_module);
         if (!node || !node->module) {
             if (!m_cfg.allow_unresolved) {
-                m_diag.error("RPL not loaded: " + imp.from_module +
-                             " (needed for symbol '" + imp.name + "')");
+                m_diag.error("RPL not loaded: " + imp.from_module + " (needed for symbol '" + imp.name + "')");
                 all_ok = false;
             }
             continue;
@@ -51,21 +49,19 @@ bool Linker::resolve_module_imports(rpx::RpxModule& rpx) {
 
         ResolvedSymbol rs;
         rs.from_module = rpx.name;
-        rs.to_module   = imp.from_module;
-        rs.name        = imp.name;
-        rs.address     = exp->address;
-        rs.is_data     = exp->is_data;
+        rs.to_module = imp.from_module;
+        rs.name = imp.name;
+        rs.address = exp->address;
+        rs.is_data = exp->is_data;
         m_resolved.push_back(std::move(rs));
     }
 
     return all_ok;
 }
 
-std::optional<uint32_t> Linker::resolve(const std::string& module_name,
-                                         const std::string& sym_name) const noexcept {
+std::optional<uint32_t> Linker::resolve(const std::string& module_name, const std::string& sym_name) const noexcept {
     for (const auto& rs : m_resolved) {
-        if (rs.to_module == module_name && rs.name == sym_name)
-            return rs.address;
+        if (rs.to_module == module_name && rs.name == sym_name) return rs.address;
     }
     // Also check the module's own exports
     const auto* node = m_graph.find(module_name);
@@ -93,11 +89,8 @@ std::optional<std::string> Linker::module_for_addr(uint32_t addr) const noexcept
     return {};
 }
 
-std::function<std::optional<uint32_t>(const std::string&, const std::string&)>
-Linker::make_resolver() const {
-    return [this](const std::string& mod, const std::string& sym) {
-        return resolve(mod, sym);
-    };
+std::function<std::optional<uint32_t>(const std::string&, const std::string&)> Linker::make_resolver() const {
+    return [this](const std::string& mod, const std::string& sym) { return resolve(mod, sym); };
 }
 
-}
+} // namespace rebrewu::linker

@@ -23,9 +23,9 @@ namespace rebrewu::manifest {
 inline constexpr const char* kFormatVersion = "rebrew-manifest/1";
 
 struct Import {
-    std::string module;   // e.g. "coreinit"
-    std::string symbol;   // e.g. "FSReadFile"
-    uint32_t address{};   // PLT stub address, or the slot of a data import
+    std::string module; // e.g. "coreinit"
+    std::string symbol; // e.g. "FSReadFile"
+    uint32_t address{}; // PLT stub address, or the slot of a data import
     // Data imports (`.dimport_*`) resolve to a guest data address, not to a
     // callable thunk, so they get an address define but never a PLT stub.
     bool data{false};
@@ -33,17 +33,17 @@ struct Import {
 
 struct Entry {
     uint32_t address{};
-    bool force{false};    // bypass is_valid_code_addr for coverage gaps
+    bool force{false}; // bypass is_valid_code_addr for coverage gaps
 };
 
 struct Manifest {
     std::string path;
-    std::string id;                                        // [manifest] id
-    std::map<std::string, std::string> meta;               // [manifest]
-    std::map<std::string, std::string> identity;           // [identity]
-    std::map<std::string, std::string> modules;            // [modules]  module -> header path
-    std::vector<Import> imports;                           // [imports]
-    std::vector<Entry> entries;                            // [entries]
+    std::string id;                              // [manifest] id
+    std::map<std::string, std::string> meta;     // [manifest]
+    std::map<std::string, std::string> identity; // [identity]
+    std::map<std::string, std::string> modules;  // [modules]  module -> header path
+    std::vector<Import> imports;                 // [imports]
+    std::vector<Entry> entries;                  // [entries]
 
     // section name -> hash stored in the file / recomputed from content
     std::map<std::string, uint64_t> stored_hashes;
@@ -81,8 +81,7 @@ std::string file_sha256(const std::string& path, std::string* error);
 
 // Verifies that an RPX file matches this manifest's [identity] section.
 // Checks size always; checks SHA-256 when the field is present.
-bool verify_image(const Manifest& m, const std::string& rpx_path,
-                  std::vector<std::string>& problems);
+bool verify_image(const Manifest& m, const std::string& rpx_path, std::vector<std::string>& problems);
 
 // ---------------------------------------------------------------------------
 // Discovery and automatic selection
@@ -113,8 +112,7 @@ struct ImageMatch {
 // Parses every candidate and compares it against the image. The image is
 // hashed once, not once per candidate. Parsing failures are reported in
 // `problems`, not treated as matches.
-std::vector<ImageMatch> match_image(const std::string& rpx_path,
-                                    const std::vector<std::string>& manifest_paths,
+std::vector<ImageMatch> match_image(const std::string& rpx_path, const std::vector<std::string>& manifest_paths,
                                     std::vector<std::string>* problems = nullptr);
 
 // Chooses the manifest that describes `rpx_path`, discovering candidates under
@@ -122,22 +120,18 @@ std::vector<ImageMatch> match_image(const std::string& rpx_path,
 // of the same strength are ambiguous and fail. On failure `error` lists the
 // image fingerprint and every manifest that was considered, so adding a new
 // version or region is an obvious next step.
-std::optional<Manifest> select_for_image(const std::string& rpx_path,
-                                         const std::vector<std::string>& roots,
-                                         std::string* error,
-                                         std::vector<std::string>* notes = nullptr);
+std::optional<Manifest> select_for_image(const std::string& rpx_path, const std::vector<std::string>& roots,
+                                         std::string* error, std::vector<std::string>* notes = nullptr);
 
 // Same, for an explicit candidate list (already discovered by the caller).
 std::optional<Manifest> select_for_image_from(const std::string& rpx_path,
-                                              const std::vector<std::string>& manifest_paths,
-                                              std::string* error,
+                                              const std::vector<std::string>& manifest_paths, std::string* error,
                                               std::vector<std::string>* notes = nullptr);
 
 // Regenerates the address headers and the PLT stub table described by the
 // manifest, under out_dir (i.e. recompiler/port). Returns false on I/O error
 // and lists what it wrote in `written`.
-bool emit(const Manifest& m, const std::string& out_dir,
-          std::vector<std::string>& written, std::string* error);
+bool emit(const Manifest& m, const std::string& out_dir, std::vector<std::string>& written, std::string* error);
 
 // Sorted, de-duplicated-by-address import view used by the emitters.
 std::vector<Import> imports_by_address(const Manifest& m);
@@ -147,4 +141,4 @@ std::vector<std::string> header_paths(const Manifest& m);
 std::string format_hash(uint64_t value);
 std::string format_address(uint32_t value);
 
-}  // namespace rebrewu::manifest
+} // namespace rebrewu::manifest

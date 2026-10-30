@@ -15,22 +15,22 @@ namespace rebrewu::ir {
 
 /// A data section captured from the original binary.
 struct IRDataSection {
-    std::string  name{};         // e.g. ".rodata", ".data"
-    uint32_t     guest_addr{0};  // base virtual address
+    std::string name{};          // e.g. ".rodata", ".data"
+    uint32_t guest_addr{0};      // base virtual address
     std::vector<uint8_t> data{}; // raw bytes (host order, already decompressed)
-    bool         read_only{false};
-    bool         executable{false};
+    bool read_only{false};
+    bool executable{false};
 };
 
 /// The complete IR representation of one RPX or RPL module.
 struct IRModule {
-    std::string  name{};     // module name (without extension)
-    bool         is_rpx{false}; // true if executable (RPX), false if library (RPL)
+    std::string name{}; // module name (without extension)
+    bool is_rpx{false}; // true if executable (RPX), false if library (RPL)
 
-    std::vector<IRFunction>    functions{};
+    std::vector<IRFunction> functions{};
     std::vector<IRDataSection> data_sections{};
 
-    std::unordered_map<uint32_t, std::string> addr_to_name{};   // symbol table
+    std::unordered_map<uint32_t, std::string> addr_to_name{}; // symbol table
     std::unordered_map<std::string, uint32_t> name_to_addr{};
 
     // Imports: module name → set of symbol names
@@ -44,7 +44,7 @@ struct IRModule {
 
     IRFunction& add_function(std::string func_name, uint32_t entry) {
         IRFunction f;
-        f.name       = std::move(func_name);
+        f.name = std::move(func_name);
         f.entry_addr = entry;
         functions.push_back(std::move(f));
         return functions.back();
@@ -79,9 +79,9 @@ struct IRModule {
     }
 
     void add_symbol(uint32_t addr, std::string sym_name) {
-        addr_to_name[addr]       = sym_name;
-        name_to_addr[sym_name]   = addr;
+        addr_to_name[addr] = sym_name;
+        name_to_addr[sym_name] = addr;
     }
 };
 
-}
+} // namespace rebrewu::ir

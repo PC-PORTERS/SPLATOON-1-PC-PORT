@@ -14,20 +14,21 @@
 
 namespace gx2vk {
 
-void shader_set_cache_dir(const std::string& directory);  // empty disables the disk cache
+void shader_set_cache_dir(const std::string& directory); // empty disables the disk cache
 // Directory given to shader_set_cache_dir (empty: no disk cache).
 const std::string& shader_cache_dir();
-bool compile_glsl(VkShaderStageFlagBits stage, const std::string& source, std::vector<uint32_t>& spirv, std::string* log);
+bool compile_glsl(VkShaderStageFlagBits stage, const std::string& source, std::vector<uint32_t>& spirv,
+                  std::string* log);
 // Thread-safe exact-source cache. Concurrent requests share one compilation.
 // VK_NULL_HANDLE on failure (diagnostic tools retain compiler messages).
 VkShaderModule shader_module(VkShaderStageFlagBits stage, const std::string& source);
 VkPipelineCache pipeline_cache();
-void shader_cache_flush();       // writes the pipeline cache to disk
+void shader_cache_flush(); // writes the pipeline cache to disk
 void shader_shutdown();
-uint64_t shader_compile_count();      // glslang compilations
-uint64_t shader_disk_hits();          // SPIR-V loaded from the disk cache
+uint64_t shader_compile_count(); // glslang compilations
+uint64_t shader_disk_hits();     // SPIR-V loaded from the disk cache
 uint64_t shader_module_count();
 // Stable 64-bit content hash (FNV-1a, length-prefixed) used for cache keys.
 uint64_t stable_hash(const void* data, size_t bytes, uint64_t seed = 0xCBF29CE484222325ull);
 
-}  // namespace gx2vk
+} // namespace gx2vk

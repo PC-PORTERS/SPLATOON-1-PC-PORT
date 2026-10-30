@@ -34,7 +34,9 @@ struct OverlayHostMapping {
 
 #if defined(_WIN32)
 #include <windows.h>
-static void platform_sleep_us(unsigned us) { Sleep(us / 1000); }
+static void platform_sleep_us(unsigned us) {
+    Sleep(us / 1000);
+}
 static uint8_t* alloc_arena(size_t sz) {
     // Write watch lets the renderer skip guest pages the CPU did not write
     // since it last copied them (gx2_write_watch.h).
@@ -76,7 +78,10 @@ static bool map_overlay(void* user, uint32_t base, uint32_t size, bool enable) {
     rbrew_set_overlay_access(mapping.arena, false);
     return true;
 }
-static void free_arena(uint8_t* p, size_t sz) { (void)sz; VirtualFree(p, 0, MEM_RELEASE); }
+static void free_arena(uint8_t* p, size_t sz) {
+    (void)sz;
+    VirtualFree(p, 0, MEM_RELEASE);
+}
 
 // Diagnostic (RBREW_HANG_SAMPLE=<seconds>): after the delay, suspend every
 // other thread a few times, read RIP and name the nearest registered guest
@@ -98,15 +103,18 @@ static void start_hang_sampler(const CPUState* cpu) {
             if (table[i]) hosts.push_back({reinterpret_cast<uintptr_t>(table[i]), i << 2});
         std::sort(hosts.begin(), hosts.end());
         const DWORD self = GetCurrentThreadId(), pid = GetCurrentProcessId();
-        RBREW_LOGF(stderr, "[hang] module base=%p (map preferred base 0x140000000)\n", (void*)GetModuleHandleW(nullptr));
+        RBREW_LOGF(stderr, "[hang] module base=%p (map preferred base 0x140000000)\n",
+                   (void*)GetModuleHandleW(nullptr));
         for (int round = 0; round < 12; ++round) {
             HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-            THREADENTRY32 entry{}; entry.dwSize = sizeof(entry);
+            THREADENTRY32 entry{};
+            entry.dwSize = sizeof(entry);
             for (BOOL ok = Thread32First(snap, &entry); ok; ok = Thread32Next(snap, &entry)) {
                 if (entry.th32OwnerProcessID != pid || entry.th32ThreadID == self) continue;
                 HANDLE thread = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, entry.th32ThreadID);
                 if (!thread) continue;
-                CONTEXT context{}; context.ContextFlags = CONTEXT_CONTROL;
+                CONTEXT context{};
+                context.ContextFlags = CONTEXT_CONTROL;
                 if (SuspendThread(thread) != DWORD(-1)) {
                     const bool got = GetThreadContext(thread, &context);
                     ResumeThread(thread);
@@ -116,7 +124,8 @@ static void start_hang_sampler(const CPUState* cpu) {
                         if (it != hosts.begin()) {
                             --it;
                             RBREW_LOGF(stderr, "[hang] round=%d tid=%lu rip=%p nearest guest fn %08X +0x%llX\n", round,
-                                    entry.th32ThreadID, (void*)rip, it->second, (unsigned long long)(rip - it->first));
+                                       entry.th32ThreadID, (void*)rip, it->second,
+                                       (unsigned long long)(rip - it->first));
                         }
                     }
                 }
@@ -151,10 +160,12 @@ static unsigned profile_unwind(CONTEXT walk, uintptr_t exe, uintptr_t exe_end, u
             DWORD64 image = 0;
             auto* function = RtlLookupFunctionEntry(walk.Rip, &image, nullptr);
             if (function) {
-                void* handler_data = nullptr; DWORD64 frame = 0;
+                void* handler_data = nullptr;
+                DWORD64 frame = 0;
                 RtlVirtualUnwind(UNW_FLAG_NHANDLER, image, walk.Rip, function, &walk, &handler_data, &frame, nullptr);
             } else {
-                walk.Rip = *reinterpret_cast<DWORD64*>(walk.Rsp); walk.Rsp += 8;
+                walk.Rip = *reinterpret_cast<DWORD64*>(walk.Rsp);
+                walk.Rsp += 8;
             }
         }
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
@@ -188,24 +199,30 @@ static void start_profiler() {
         std::map<std::pair<DWORD, std::string>, unsigned> hits;
         std::map<uintptr_t, std::string> module_names;
         std::map<DWORD, HANDLE> threads;
-        HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+        HANDLE timer =
+            CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
         const ULONGLONG stop = GetTickCount64() + seconds * 1000ull;
         ULONGLONG refreshed = 0;
         unsigned rounds = 0;
         while (GetTickCount64() < stop) {
-            if (GetTickCount64() - refreshed >= 500) {  // thread list changes rarely
+            if (GetTickCount64() - refreshed >= 500) { // thread list changes rarely
                 refreshed = GetTickCount64();
                 HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-                THREADENTRY32 entry{}; entry.dwSize = sizeof(entry);
+                THREADENTRY32 entry{};
+                entry.dwSize = sizeof(entry);
                 for (BOOL ok = Thread32First(snap, &entry); ok; ok = Thread32Next(snap, &entry)) {
-                    if (entry.th32OwnerProcessID != pid || entry.th32ThreadID == self || threads.count(entry.th32ThreadID)) continue;
-                    if (HANDLE thread = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, entry.th32ThreadID))
+                    if (entry.th32OwnerProcessID != pid || entry.th32ThreadID == self ||
+                        threads.count(entry.th32ThreadID))
+                        continue;
+                    if (HANDLE thread =
+                            OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, entry.th32ThreadID))
                         threads[entry.th32ThreadID] = thread;
                 }
                 CloseHandle(snap);
             }
             for (const auto& [tid, thread] : threads) {
-                CONTEXT context{}; context.ContextFlags = CONTEXT_FULL;
+                CONTEXT context{};
+                context.ContextFlags = CONTEXT_FULL;
                 if (SuspendThread(thread) == DWORD(-1)) continue;
                 const bool got = GetThreadContext(thread, &context);
                 // Resume before unwinding: RtlLookupFunctionEntry can take
@@ -220,7 +237,8 @@ static void start_profiler() {
                 if (!in_exe(context.Rip)) {
                     HMODULE module = nullptr;
                     key = "?";
-                    if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                    if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                               GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
                                            reinterpret_cast<LPCWSTR>(context.Rip), &module)) {
                         auto& cached = module_names[reinterpret_cast<uintptr_t>(module)];
                         if (cached.empty()) {
@@ -233,14 +251,16 @@ static void start_profiler() {
                     key += '|';
                 }
                 for (unsigned i = 0; i < depth_found; ++i) {
-                    char rva[24]; snprintf(rva, sizeof(rva), i ? "<%llX" : "%llX", (unsigned long long)chain[i]);
+                    char rva[24];
+                    snprintf(rva, sizeof(rva), i ? "<%llX" : "%llX", (unsigned long long)chain[i]);
                     key += rva;
                 }
                 ++hits[{tid, key}];
             }
             ++rounds;
             if (timer) {
-                LARGE_INTEGER due{}; due.QuadPart = -20000;  // 2 ms
+                LARGE_INTEGER due{};
+                due.QuadPart = -20000; // 2 ms
                 SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE);
                 WaitForSingleObject(timer, INFINITE);
             } else {
@@ -254,7 +274,8 @@ static void start_profiler() {
             std::fprintf(f, "# frames %u %u\n", first_frame, rbrew_benchmark::frame.load(std::memory_order_relaxed));
             for (const auto& [key, n] : hits) std::fprintf(f, "%lu %u %s\n", key.first, n, key.second.c_str());
             fclose(f);
-        } else RBREW_LOGF(stderr, "[profile] cannot write %s\n", path.c_str());
+        } else
+            RBREW_LOGF(stderr, "[profile] cannot write %s\n", path.c_str());
         RBREW_LOGF(stderr, "[profile] finished %u rounds\n", rounds);
         rbrew_benchmark::profiling.store(false, std::memory_order_relaxed);
     }).detach();
@@ -264,10 +285,11 @@ static void start_profiler() {}
 static void start_hang_sampler(const CPUState*) {}
 #include <sys/mman.h>
 #include <unistd.h>
-static void platform_sleep_us(unsigned us) { usleep(us); }
+static void platform_sleep_us(unsigned us) {
+    usleep(us);
+}
 static uint8_t* alloc_arena(size_t sz) {
-    void* p = mmap(nullptr, sz, PROT_NONE,
-                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    void* p = mmap(nullptr, sz, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (p == MAP_FAILED) return nullptr;
     auto* base = static_cast<uint8_t*>(p);
     if (mprotect(p, RBREW_APPLICATION_ARENA_END, PROT_READ | PROT_WRITE) ||
@@ -294,7 +316,9 @@ static bool map_overlay(void* user, uint32_t base, uint32_t size, bool enable) {
     if (enable) RBREW_LOGF(stderr, "[MEM] OverlayArena mapped: base=%08X size=%08X\n", base, size);
     return true;
 }
-static void free_arena(uint8_t* p, size_t sz) { munmap(p, sz); }
+static void free_arena(uint8_t* p, size_t sz) {
+    munmap(p, sz);
+}
 #endif
 
 // ---------------------------------------------------------------------------
@@ -312,11 +336,10 @@ uint32_t g_blank_import_addr[kBlankLoggerSlots];
 std::atomic<bool> g_blank_import_seen[kBlankLoggerSlots];
 template <size_t I> void blank_import_trampoline(CPUState* cpu) {
     if (!g_blank_import_seen[I].exchange(true))
-        RBREW_LOGF(stderr, "[IMPORT] first call to blank import %08X lr=%08X r3=%08X\n",
-                g_blank_import_addr[I], cpu->lr, cpu->r[3]);
+        RBREW_LOGF(stderr, "[IMPORT] first call to blank import %08X lr=%08X r3=%08X\n", g_blank_import_addr[I],
+                   cpu->lr, cpu->r[3]);
 }
-template <size_t... I>
-constexpr std::array<HostFunc, sizeof...(I)> make_blank_loggers(std::index_sequence<I...>) {
+template <size_t... I> constexpr std::array<HostFunc, sizeof...(I)> make_blank_loggers(std::index_sequence<I...>) {
     return {&blank_import_trampoline<I>...};
 }
 HostFunc blank_import_logger(unsigned slot, uint32_t addr) {
@@ -325,15 +348,17 @@ HostFunc blank_import_logger(unsigned slot, uint32_t addr) {
     g_blank_import_addr[slot] = addr;
     return loggers[slot];
 }
-}
+} // namespace
 #ifdef RBREW_DISTRIBUTABLE_RUNTIME
 static void (*Gambit_game_register)(CPUState*);
 static void (*Gambit_data_init)(uint8_t*);
-namespace rebrewu_generated { static uint32_t Gambit_entry_point; }
+namespace rebrewu_generated {
+static uint32_t Gambit_entry_point;
+}
 #else
-void Gambit_game_register(CPUState* cpu);    // registers all recompiled game functions
+void Gambit_game_register(CPUState* cpu); // registers all recompiled game functions
 #endif
-void player_anim_register();                 // idle look-around and opt-in (RBREW_ANIM_LOG) animation trace
+void player_anim_register(); // idle look-around and opt-in (RBREW_ANIM_LOG) animation trace
 void coreinit_memory_init(uint8_t* mem);
 void coreinit_memory_register(CPUState* cpu);
 void coreinit_dimport_repatch(CPUState* cpu); // re-apply after Gambit_data_init
@@ -389,40 +414,43 @@ int main(int argc, char** argv) {
     // ESC-menu options (settings.ini); start-only values reach the environment here.
     rbrew_settings::load();
     rbrew::discord_rpc_init();
-    RBREW_LOGF(stderr, "[BOOT] Splatoon launch runtime; RPX header entry=0x%08X\n", rebrewu_generated::Gambit_entry_point);
+    RBREW_LOGF(stderr, "[BOOT] Splatoon launch runtime; RPX header entry=0x%08X\n",
+               rebrewu_generated::Gambit_entry_point);
     RBREW_LOGF(stderr, "[FS] RBREW_CONTENT_DIR=%s\n",
-        getenv("RBREW_CONTENT_DIR") ? getenv("RBREW_CONTENT_DIR") : "./content");
+               getenv("RBREW_CONTENT_DIR") ? getenv("RBREW_CONTENT_DIR") : "./content");
 
     // 1. Allocate the shared native layout, including application heap memory
     const size_t arena_sz = WIIU_MEM_SIZE;
     uint8_t* arena = alloc_arena(arena_sz);
     if (!arena) {
-        RBREW_LOGF(stderr, "[gambit] Failed to allocate %zu MB guest arena\n",
-                arena_sz >> 20);
+        RBREW_LOGF(stderr, "[gambit] Failed to allocate %zu MB guest arena\n", arena_sz >> 20);
         return 1;
     }
     // VirtualAlloc and anonymous mmap already return zero-filled pages. Keep
     // unused arena pages lazy rather than touching every reserved guest byte.
-    RBREW_LOGF(stderr, "[MEM] Guest arena: %p – %p (%zu MB)\n",
-            (void*)arena, (void*)(arena + arena_sz), arena_sz >> 20);
+    RBREW_LOGF(stderr, "[MEM] Guest arena: %p – %p (%zu MB)\n", (void*)arena, (void*)(arena + arena_sz),
+               arena_sz >> 20);
 #if defined(_WIN32)
     {
         // Owner request: use the RAM this machine has. Ask Windows to keep a
         // large working set resident (soft limits: under real memory
         // pressure Windows may still trim; nothing fails if refused).
-        const uint64_t committed = uint64_t(RBREW_APPLICATION_ARENA_END) + RBREW_FG_FREE_SIZE + RBREW_MEM1_SIZE + RBREW_SHARED_DATA_SIZE;
+        const uint64_t committed =
+            uint64_t(RBREW_APPLICATION_ARENA_END) + RBREW_FG_FREE_SIZE + RBREW_MEM1_SIZE + RBREW_SHARED_DATA_SIZE;
         MEMORYSTATUSEX status{};
         status.dwLength = sizeof(status);
         if (GlobalMemoryStatusEx(&status)) {
             const uint64_t min_ws = std::min<uint64_t>(status.ullAvailPhys / 2, committed + (2ull << 30));
             const uint64_t max_ws = std::max<uint64_t>(status.ullTotalPhys / 4 * 3, min_ws + (64ull << 20));
-            const bool ok = SetProcessWorkingSetSizeEx(GetCurrentProcess(), SIZE_T(min_ws), SIZE_T(max_ws),
-                                                       QUOTA_LIMITS_HARDWS_MIN_DISABLE | QUOTA_LIMITS_HARDWS_MAX_DISABLE) != 0;
-            RBREW_LOGF(stderr, "[MEM] System RAM %llu MB, free %llu MB | guest reserved %zu MB, committed %llu MB | "
-                            "working set min %llu MB max %llu MB (%s)\n",
-                    (unsigned long long)(status.ullTotalPhys >> 20), (unsigned long long)(status.ullAvailPhys >> 20),
-                    arena_sz >> 20, (unsigned long long)(committed >> 20), (unsigned long long)(min_ws >> 20),
-                    (unsigned long long)(max_ws >> 20), ok ? "set" : "refused");
+            const bool ok =
+                SetProcessWorkingSetSizeEx(GetCurrentProcess(), SIZE_T(min_ws), SIZE_T(max_ws),
+                                           QUOTA_LIMITS_HARDWS_MIN_DISABLE | QUOTA_LIMITS_HARDWS_MAX_DISABLE) != 0;
+            RBREW_LOGF(stderr,
+                       "[MEM] System RAM %llu MB, free %llu MB | guest reserved %zu MB, committed %llu MB | "
+                       "working set min %llu MB max %llu MB (%s)\n",
+                       (unsigned long long)(status.ullTotalPhys >> 20), (unsigned long long)(status.ullAvailPhys >> 20),
+                       arena_sz >> 20, (unsigned long long)(committed >> 20), (unsigned long long)(min_ws >> 20),
+                       (unsigned long long)(max_ws >> 20), ok ? "set" : "refused");
         }
     }
 #endif
@@ -439,9 +467,9 @@ int main(int argc, char** argv) {
 
     // 3. Set up a scratch CPUState for registration calls
     CPUState cpu_reg = {};
-    cpu_reg.mem            = arena;
+    cpu_reg.mem = arena;
     cpu_reg.dispatch_table = dispatch_table;
-    cpu_reg.dispatch_size  = DISPATCH_LEN;
+    cpu_reg.dispatch_size = DISPATCH_LEN;
     // Shared with guest workers, like the arena and dispatch table. It must
     // survive main's stack frame while process termination stops the workers.
     auto* overlay_mapping = new OverlayHostMapping{arena};
@@ -451,15 +479,15 @@ int main(int argc, char** argv) {
     // explicit console selection. No title name or game ordinal is hardcoded.
     try {
         std::filesystem::path metadata;
-        if (const char* configured = getenv("RBREW_TITLE_METADATA"); configured && *configured)
-            metadata = configured;
+        if (const char* configured = getenv("RBREW_TITLE_METADATA"); configured && *configured) metadata = configured;
 #if defined(RBREW_TITLE_METADATA_PATH) && !defined(RBREW_DISABLE_LOGGING)
-        else metadata = RBREW_TITLE_METADATA_PATH;
+        else
+            metadata = RBREW_TITLE_METADATA_PATH;
 #else
         else {
             const char* content = getenv("RBREW_CONTENT_DIR");
-            metadata = std::filesystem::weakly_canonical(content ? content : "./content").parent_path()
-                / "meta" / "meta.xml";
+            metadata =
+                std::filesystem::weakly_canonical(content ? content : "./content").parent_path() / "meta" / "meta.xml";
         }
 #endif
         std::optional<uint32_t> selected;
@@ -473,16 +501,16 @@ int main(int argc, char** argv) {
         // Explicit native offline profile: English and unregistered country.
         // These match the selected local reference profile, independently of
         // title region. Neither the provider nor guest code depends on Cemu.
-        RbrewUcSystemProfile uc_profile{1,0};
-        if(const char* value=getenv("RBREW_CONSOLE_LANGUAGE");value && *value)
-            uc_profile.language=rbrew_parse_native_uc_scalar(value,11);
-        if(const char* value=getenv("RBREW_COUNTRY_REGISTRATION");value && *value)
-            uc_profile.country_registration=rbrew_parse_native_uc_scalar(value,255);
-        rbrew_uc_configure_profile(&cpu_reg,uc_profile);
-        RBREW_LOGF(stderr,"[UC] Native profile: language=%u country_registration=%u\n",
-            uc_profile.language,uc_profile.country_registration);
+        RbrewUcSystemProfile uc_profile{1, 0};
+        if (const char* value = getenv("RBREW_CONSOLE_LANGUAGE"); value && *value)
+            uc_profile.language = rbrew_parse_native_uc_scalar(value, 11);
+        if (const char* value = getenv("RBREW_COUNTRY_REGISTRATION"); value && *value)
+            uc_profile.country_registration = rbrew_parse_native_uc_scalar(value, 255);
+        rbrew_uc_configure_profile(&cpu_reg, uc_profile);
+        RBREW_LOGF(stderr, "[UC] Native profile: language=%u country_registration=%u\n", uc_profile.language,
+                   uc_profile.country_registration);
         RBREW_LOGF(stderr, "[MCP] Native profile: console=0x%X title_regions=0x%X metadata=%s\n",
-            regions.console_region, regions.title_regions, metadata.string().c_str());
+                   regions.console_region, regions.title_regions, metadata.string().c_str());
     } catch (const std::exception& error) {
         RBREW_LOGF(stderr, "[MCP] Native profile setup failed: %s\n", error.what());
         delete overlay_mapping;
@@ -532,8 +560,7 @@ int main(int argc, char** argv) {
             for (uint32_t addr = 0x02D05000u; addr < 0x02D10000u; addr += 4)
                 if (cpu_reg.dispatch_table[addr >> 2] == blank_stub) {
                     RBREW_LOGF(out, "%08X\n", addr);
-                    if (HostFunc logger = blank_import_logger(blank, addr))
-                        cpu_reg.dispatch_table[addr >> 2] = logger;
+                    if (HostFunc logger = blank_import_logger(blank, addr)) cpu_reg.dispatch_table[addr >> 2] = logger;
                     ++blank;
                 }
             fclose(out);
@@ -586,14 +613,14 @@ int main(int argc, char** argv) {
     //   node + 4 : prev free node
     {
         static constexpr uint32_t ALLOC_BASE = 0x101D2554u;
-        static constexpr uint32_t SENTINEL   = ALLOC_BASE + 0x20u; // 0x101D2574
+        static constexpr uint32_t SENTINEL = ALLOC_BASE + 0x20u;   // 0x101D2574
         static constexpr uint32_t EXTENT_HDR = ALLOC_BASE + 0x28u; // 0x101D257C
         // The first free node sits 8 bytes into the heap region so that the
         // 4-byte size field (node-4) and any alignment pad fit before it.
-        static constexpr uint32_t FREE_NODE  = 0x20000008u;
-        static constexpr uint32_t FREE_SIZE  = 0x07FFF000u; // 128MB - overhead
-        static constexpr uint32_t HEAP_START = 0x20000000u; // FREE_NODE - 8
-        static constexpr uint32_t HEAP_END   = FREE_NODE + FREE_SIZE; // 0x27FFF008
+        static constexpr uint32_t FREE_NODE = 0x20000008u;
+        static constexpr uint32_t FREE_SIZE = 0x07FFF000u;          // 128MB - overhead
+        static constexpr uint32_t HEAP_START = 0x20000000u;         // FREE_NODE - 8
+        static constexpr uint32_t HEAP_END = FREE_NODE + FREE_SIZE; // 0x27FFF008
 
         // Allocator header
         rbrew_write32(arena, ALLOC_BASE + 0x00u, 0x02080101u); // type marker
@@ -602,58 +629,58 @@ int main(int argc, char** argv) {
         // Free-list head points directly at the first real free node (not the
         // sentinel).  The scan loop reads head.next on its first iteration, so
         // starting from the free node makes the sentinel the "previous" anchor.
-        rbrew_write32(arena, ALLOC_BASE + 0x10u, FREE_NODE);   // head
+        rbrew_write32(arena, ALLOC_BASE + 0x10u, FREE_NODE); // head
 
         // Sentinel size field sits at sentinel-4 = ALLOC_BASE+0x1C
-        rbrew_write32(arena, ALLOC_BASE + 0x1Cu, 0u);          // size = 0 (sentinel marker)
+        rbrew_write32(arena, ALLOC_BASE + 0x1Cu, 0u); // size = 0 (sentinel marker)
 
         // Sentinel node: doubly-linked to the free node
-        rbrew_write32(arena, SENTINEL + 0u, FREE_NODE);   // sentinel.next
-        rbrew_write32(arena, SENTINEL + 4u, FREE_NODE);   // sentinel.prev
+        rbrew_write32(arena, SENTINEL + 0u, FREE_NODE); // sentinel.next
+        rbrew_write32(arena, SENTINEL + 4u, FREE_NODE); // sentinel.prev
 
         // Free node: size header + circular links back to sentinel
-        rbrew_write32(arena, FREE_NODE - 4u, FREE_SIZE);  // size
-        rbrew_write32(arena, FREE_NODE + 0u, SENTINEL);   // free_node.next
-        rbrew_write32(arena, FREE_NODE + 4u, SENTINEL);   // free_node.prev
+        rbrew_write32(arena, FREE_NODE - 4u, FREE_SIZE); // size
+        rbrew_write32(arena, FREE_NODE + 0u, SENTINEL);  // free_node.next
+        rbrew_write32(arena, FREE_NODE + 4u, SENTINEL);  // free_node.prev
 
         // Extent descriptor used by bounds-check in Gambit_fn_02C86B90 and by
         // the heap-grow path in Gambit_fn_02C86CB4.
-        rbrew_write32(arena, EXTENT_HDR + 0u, HEAP_START);  // extent start (min addr)
-        rbrew_write32(arena, EXTENT_HDR + 4u, HEAP_END);    // extent end   (max addr)
+        rbrew_write32(arena, EXTENT_HDR + 0u, HEAP_START);    // extent start (min addr)
+        rbrew_write32(arena, EXTENT_HDR + 4u, HEAP_END);      // extent end   (max addr)
         rbrew_write32(arena, ALLOC_BASE + 0x30u, HEAP_START); // tracked low bound
         rbrew_write32(arena, ALLOC_BASE + 0x34u, HEAP_END);   // tracked high bound
         rbrew_write32(arena, ALLOC_BASE + 0x3Cu, EXTENT_HDR); // ptr to extent header
 
-        RBREW_LOGF(stderr, "[gambit] Heap pre-seeded: free=[0x%08X,0x%08X) %u MB\n",
-                FREE_NODE, HEAP_END, (HEAP_END - FREE_NODE) >> 20);
+        RBREW_LOGF(stderr, "[gambit] Heap pre-seeded: free=[0x%08X,0x%08X) %u MB\n", FREE_NODE, HEAP_END,
+                   (HEAP_END - FREE_NODE) >> 20);
     }
 
     // 6. Set up initial guest CPU state
     //    - r1  = guest stack (top of a 1MB stack block placed at 0x1FC00000)
     //    - r2  = SDA2 base (.rodata anchor)
     //    - r13 = SDA  base (.data anchor)
-    const uint32_t STACK_TOP   = 0x1FC00000u;
-    const uint32_t STACK_SIZE  = 0x00100000u; // 1MB guest stack
+    const uint32_t STACK_TOP = 0x1FC00000u;
+    const uint32_t STACK_SIZE = 0x00100000u; // 1MB guest stack
 
     CPUState cpu = {};
-    cpu.mem            = arena;
+    cpu.mem = arena;
     cpu.dispatch_table = dispatch_table;
-    cpu.dispatch_size  = DISPATCH_LEN;
+    cpu.dispatch_size = DISPATCH_LEN;
     rbrew_init_thread_gqrs(&cpu); // main thread starts like any coreinit thread (decaf)
 #ifdef RBREW_ENABLE_PPC_FALLBACK
-    if (const char* opt = getenv("RBREW_PPC_FALLBACK"); opt && strcmp(opt,"1") == 0) {
+    if (const char* opt = getenv("RBREW_PPC_FALLBACK"); opt && strcmp(opt, "1") == 0) {
         if (!Gambit_ppc_image_init(&cpu, GAMBIT_PPC_IMAGE_PATH)) {
-            RBREW_LOGF(stderr,"[hybrid] cannot initialize relocated executable image\n");
+            RBREW_LOGF(stderr, "[hybrid] cannot initialize relocated executable image\n");
             return 1;
         }
         cpu.ppc_fallback_enabled = true;
-        RBREW_LOGF(stderr,"[hybrid] bounded integer/control prototype enabled; executable ranges=%u\n",
-            cpu.guest_code_range_count);
+        RBREW_LOGF(stderr, "[hybrid] bounded integer/control prototype enabled; executable ranges=%u\n",
+                   cpu.guest_code_range_count);
     }
 #endif
-    cpu.r[1]  = STACK_TOP - 8;   // r1 = stack pointer (8-byte aligned)
-    cpu.r[2]  = 0x10008000u;     // verified FILEINFO SDA2 (offset 0x28)
-    cpu.r[13] = 0x10256C80u;     // verified FILEINFO SDA (offset 0x24)
+    cpu.r[1] = STACK_TOP - 8; // r1 = stack pointer (8-byte aligned)
+    cpu.r[2] = 0x10008000u;   // verified FILEINFO SDA2 (offset 0x28)
+    cpu.r[13] = 0x10256C80u;  // verified FILEINFO SDA (offset 0x24)
 
     // 6b. Run static constructors from the GHS ctor table in .rodata.
     //
@@ -666,7 +693,7 @@ int main(int argc, char** argv) {
     // matching the original GHS initializer, so reentrant or later guest
     // startup observes that initialization has already begun.
     {
-        const uint32_t CTOR_TABLE     = 0x101BFA54u;
+        const uint32_t CTOR_TABLE = 0x101BFA54u;
         const uint32_t CTOR_DONE_FLAG = 0x101CC020u;
         RBREW_LOGF(stderr, "[PPC] Running constructor table at 0x%08X\n", CTOR_TABLE);
         uint32_t n_ctors = rbrew_run_constructors(&cpu, CTOR_TABLE, CTOR_DONE_FLAG);
@@ -701,9 +728,11 @@ int main(int argc, char** argv) {
 #ifdef RBREW_DISTRIBUTABLE_RUNTIME
 // Only boot crosses this boundary. Guest dispatch keeps the existing direct
 // function pointers, CPUState layout and exception ABI (clang-cl/MSVC x64).
-extern "C" __declspec(dllexport) unsigned rbrew_runtime_abi() { return 1; }
-extern "C" __declspec(dllexport) int rbrew_launch(
-    void (*register_game)(CPUState*), void (*initialize_data)(uint8_t*), uint32_t entry) {
+extern "C" __declspec(dllexport) unsigned rbrew_runtime_abi() {
+    return 1;
+}
+extern "C" __declspec(dllexport) int rbrew_launch(void (*register_game)(CPUState*), void (*initialize_data)(uint8_t*),
+                                                  uint32_t entry) {
     if (!register_game || !initialize_data || !entry) return 1;
     // A moved player installation always owns its local resources, even when
     // started by Explorer from a shell with old developer path overrides.

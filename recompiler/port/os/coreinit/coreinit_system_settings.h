@@ -11,19 +11,19 @@ inline constexpr uint32_t RBREW_MCP_REGION_MASK = 0x77;
 using RbrewMcpSysProdBytes = std::array<uint8_t, RBREW_MCP_SYS_PROD_SIZE>;
 
 struct RbrewMcpSystemProfile {
-    uint32_t product_area{};                       // +00: selected console region
-    uint16_t eeprom_version{};                     // +04
+    uint32_t product_area{};   // +00: selected console region
+    uint16_t eeprom_version{}; // +04
     std::array<uint8_t, 2> padding_06{};
-    uint32_t game_region{};                        // +08: title allowed-region mask
+    uint32_t game_region{}; // +08: title allowed-region mask
     std::array<uint8_t, 4> unknown_0c{};
-    std::array<uint8_t, 5> ntsc_pal{};              // +10
+    std::array<uint8_t, 5> ntsc_pal{};               // +10
     std::array<uint8_t, 4> wifi_5ghz_country_code{}; // +15
-    uint8_t wifi_5ghz_country_code_revision{};      // +19
-    std::array<uint8_t, 8> code_id{};               // +1a
-    std::array<uint8_t, 12> serial_id{};            // +22
+    uint8_t wifi_5ghz_country_code_revision{};       // +19
+    std::array<uint8_t, 8> code_id{};                // +1a
+    std::array<uint8_t, 12> serial_id{};             // +22
     std::array<uint8_t, 4> unknown_2e{};
-    std::array<uint8_t, 16> model_number{};         // +32
-    uint32_t version{};                            // +42, packed/unaligned
+    std::array<uint8_t, 16> model_number{}; // +32
+    uint32_t version{};                     // +42, packed/unaligned
     bool operator==(const RbrewMcpSystemProfile&) const = default;
 };
 

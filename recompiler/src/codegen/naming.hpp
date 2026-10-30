@@ -6,8 +6,8 @@
 #include <set>
 
 namespace rebrewu::codegen {
-  class NamingContext {
-  public:
+class NamingContext {
+public:
     explicit NamingContext(std::string_view module_name);
 
     // Get C-safe name for a function
@@ -28,10 +28,10 @@ namespace rebrewu::codegen {
     // Check if name is taken
     bool is_name_used(std::string_view name) const;
 
-  private:
+private:
     std::string m_module_prefix;
     std::unordered_map<uint32_t, std::string> m_overrides;
     mutable std::unordered_map<uint32_t, std::string> m_cache;
     mutable std::set<std::string> m_used_names;
-  };
-}
+};
+} // namespace rebrewu::codegen

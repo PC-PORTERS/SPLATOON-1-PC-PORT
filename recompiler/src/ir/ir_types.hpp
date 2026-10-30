@@ -24,44 +24,56 @@ namespace rebrewu::ir {
 // ============================================================================
 
 enum class RegKind : uint8_t {
-    GPR,   // general purpose r0-r31
-    FPR,   // floating point f0-f31
-    CR,    // condition register field cr0-cr7
-    LR,    // link register
-    CTR,   // count register
-    XER,   // fixed-point exception register
-    Temp,  // synthetic temporaries introduced by the recompiler
+    GPR,  // general purpose r0-r31
+    FPR,  // floating point f0-f31
+    CR,   // condition register field cr0-cr7
+    LR,   // link register
+    CTR,  // count register
+    XER,  // fixed-point exception register
+    Temp, // synthetic temporaries introduced by the recompiler
 };
 
 struct VReg {
     RegKind kind{RegKind::Temp};
-    uint32_t index{0};  // register number (or temp id)
+    uint32_t index{0}; // register number (or temp id)
 
     bool operator==(const VReg&) const noexcept = default;
 
     static constexpr VReg gpr(uint32_t n) noexcept { return {RegKind::GPR, n}; }
     static constexpr VReg fpr(uint32_t n) noexcept { return {RegKind::FPR, n}; }
-    static constexpr VReg cr (uint32_t n) noexcept { return {RegKind::CR,  n}; }
-    static constexpr VReg lr ()           noexcept { return {RegKind::LR,  0}; }
-    static constexpr VReg ctr()           noexcept { return {RegKind::CTR, 0}; }
-    static constexpr VReg xer()           noexcept { return {RegKind::XER, 0}; }
-    static constexpr VReg temp(uint32_t n)noexcept { return {RegKind::Temp,n}; }
+    static constexpr VReg cr(uint32_t n) noexcept { return {RegKind::CR, n}; }
+    static constexpr VReg lr() noexcept { return {RegKind::LR, 0}; }
+    static constexpr VReg ctr() noexcept { return {RegKind::CTR, 0}; }
+    static constexpr VReg xer() noexcept { return {RegKind::XER, 0}; }
+    static constexpr VReg temp(uint32_t n) noexcept { return {RegKind::Temp, n}; }
 };
 
 // ============================================================================
 // IROperand — an instruction operand (register, immediate, or block label)
 // ============================================================================
 
-struct ImmOp  { uint64_t value; };
-struct RegOp  { VReg     reg;   };
-struct LabelOp{ uint32_t block_id; };  // branch target block
+struct ImmOp {
+    uint64_t value;
+};
+struct RegOp {
+    VReg reg;
+};
+struct LabelOp {
+    uint32_t block_id;
+}; // branch target block
 
 using IROperand = std::variant<ImmOp, RegOp, LabelOp>;
 
 // Helpers
-inline IROperand imm(uint64_t v)      { return ImmOp{v};       }
-inline IROperand reg(VReg r)          { return RegOp{r};        }
-inline IROperand label(uint32_t bid)  { return LabelOp{bid};    }
+inline IROperand imm(uint64_t v) {
+    return ImmOp{v};
+}
+inline IROperand reg(VReg r) {
+    return RegOp{r};
+}
+inline IROperand label(uint32_t bid) {
+    return LabelOp{bid};
+}
 
 // ============================================================================
 // Opcode
@@ -69,13 +81,13 @@ inline IROperand label(uint32_t bid)  { return LabelOp{bid};    }
 
 enum class Opcode : uint16_t {
     // Control flow
-    Jump,        // unconditional branch to block
-    Branch,      // conditional branch (cond, true_block, false_block)
-    IndirectJump,// bctr — indirect branch through CTR
-    Call,        // bl — direct call (addr, [ret_reg])
-    ConditionalCall, // bcl/bcla — linked direct call (taken_condition, addr); resumes at PC+4
-    IndirectCall,// bctrl — indirect call through CTR
-    Return,      // blr
+    Jump,              // unconditional branch to block
+    Branch,            // conditional branch (cond, true_block, false_block)
+    IndirectJump,      // bctr — indirect branch through CTR
+    Call,              // bl — direct call (addr, [ret_reg])
+    ConditionalCall,   // bcl/bcla — linked direct call (taken_condition, addr); resumes at PC+4
+    IndirectCall,      // bctrl — indirect call through CTR
+    Return,            // blr
     ConditionalReturn, // bclr — return to LR if condition, else fall through (cond, fallthrough_addr)
 
     // Integer arithmetic
@@ -102,7 +114,7 @@ enum class Opcode : uint16_t {
     CountLeadingZeros,
     CountLeadingOnes,
     PopCount,
-    ExtractBits,  // rlwinm / rlwimi style
+    ExtractBits, // rlwinm / rlwimi style
 
     // Comparison
     CmpSigned,
@@ -127,9 +139,9 @@ enum class Opcode : uint16_t {
     StoreFloat32,
     StoreFloat64,
     StoreFloatInteger32, // stfiwx: raw low FPR word, not a float store
-    PairedSingle,  // rbrew_ps(cpu, word): paired-single / GQR instruction (imm word)
-    PairedFill,    // ps1[n] = f[n]: single-precision scalar result fills slot 1 (imm n)
-    Trap,          // rbrew_trap(cpu, word, pc): tw/twi, traps when the TO condition holds
+    PairedSingle,        // rbrew_ps(cpu, word): paired-single / GQR instruction (imm word)
+    PairedFill,          // ps1[n] = f[n]: single-precision scalar result fills slot 1 (imm n)
+    Trap,                // rbrew_trap(cpu, word, pc): tw/twi, traps when the TO condition holds
 
     // Register transfer
     Move,
@@ -137,7 +149,7 @@ enum class Opcode : uint16_t {
     SignExtend,
 
     // Floating point
-    FSelect,     // nonrecord fsel: condition, nonnegative value, negative/NaN value
+    FSelect, // nonrecord fsel: condition, nonnegative value, negative/NaN value
     FAdd,
     FSub,
     FMul,
@@ -157,8 +169,8 @@ enum class Opcode : uint16_t {
 
     // Misc
     Nop,
-    Phi,           // SSA φ-node
-    Undefined,     // unreachable / undefined behaviour
+    Phi,       // SSA φ-node
+    Undefined, // unreachable / undefined behaviour
 };
 
 // ============================================================================
@@ -166,14 +178,13 @@ enum class Opcode : uint16_t {
 // ============================================================================
 
 struct IRInstr {
-    Opcode             opcode{Opcode::Nop};
-    std::optional<VReg>result{};         // destination VReg (empty if void)
-    std::vector<IROperand> operands{};   // source operands
-    uint32_t           guest_addr{0};    // originating guest PC (0 = synthetic)
+    Opcode opcode{Opcode::Nop};
+    std::optional<VReg> result{};      // destination VReg (empty if void)
+    std::vector<IROperand> operands{}; // source operands
+    uint32_t guest_addr{0};            // originating guest PC (0 = synthetic)
 
     // Convenience ctor
-    IRInstr(Opcode op, std::optional<VReg> dst, std::vector<IROperand> ops,
-            uint32_t addr = 0)
+    IRInstr(Opcode op, std::optional<VReg> dst, std::vector<IROperand> ops, uint32_t addr = 0)
         : opcode(op), result(dst), operands(std::move(ops)), guest_addr(addr) {}
 
     IRInstr() = default;
@@ -196,9 +207,9 @@ struct BasicBlock {
     std::vector<uint32_t> predecessors{};
 
     bool is_entry{false};
-    bool is_exit {false};
+    bool is_exit{false};
 
     void append(IRInstr instr) { instrs.push_back(std::move(instr)); }
 };
 
-}
+} // namespace rebrewu::ir

@@ -21,17 +21,22 @@ constexpr uint64_t kGx2WriteUntracked = ~0ull;
 // lands while they are read appears in the next query.
 uint64_t gx2_write_generation(const uint8_t* mem, uint32_t addr, uint32_t size);
 
-struct Gx2WriteRange { uint32_t address=0,size=0; uint64_t generation=0; };
+struct Gx2WriteRange {
+    uint32_t address = 0, size = 0;
+    uint64_t generation = 0;
+};
 // Collect a group of ranges at the same consumption point. Results retain
 // input order and the same per-page history as individual queries.
-void gx2_write_generations(const uint8_t* mem,Gx2WriteRange* ranges,uint32_t count);
+void gx2_write_generations(const uint8_t* mem, Gx2WriteRange* ranges, uint32_t count);
 uint64_t gx2_write_query_count(); // diagnostic: actual platform write-watch calls
 // Render thread, before running a batch it took from the queue: pages already
 // collected during this batch are answered from history, without asking the
 // OS again (every command in the batch was queued before it started). Only
 // the calling thread reuses; other callers query every time.
 void gx2_write_watch_begin_batch();
-struct Gx2WriteWatchStats { uint64_t ranges=0,queries=0,reused=0,range_hits=0; };
+struct Gx2WriteWatchStats {
+    uint64_t ranges = 0, queries = 0, reused = 0, range_hits = 0;
+};
 Gx2WriteWatchStats gx2_write_watch_stats();
 // Pages of [mem, mem + size) written at least once since the arena was
 // reserved: pages the OS still reports written plus pages this module already

@@ -59,7 +59,7 @@ void timing() {
         require(Clock::now() >= deadline, "absolute frame timer returned early");
     }
     std::printf("absolute 60 Hz timer: 20 deadlines in %.3f ms (333.333 ms requested)\n",
-        std::chrono::duration<double, std::milli>(Clock::now() - phase_start).count());
+                std::chrono::duration<double, std::milli>(Clock::now() - phase_start).count());
 }
 struct Renderer {
     Renderer() { gx2_render_init(); }
@@ -91,8 +91,10 @@ void uploads() {
     require(gx2vk::finish(), "GPU completion failed");
     const auto retained = gx2vk::allocated_bytes();
     std::printf("upload allocations: initial %llu MiB, peak %llu MiB, retained %llu MiB\n",
-        (unsigned long long)(initial / mib), (unsigned long long)(peak / mib), (unsigned long long)(retained / mib));
-    for (const auto& span : spans) require(gx2vk::span_resident(span), "cached upload was evicted without reuse pressure");
+                (unsigned long long)(initial / mib), (unsigned long long)(peak / mib),
+                (unsigned long long)(retained / mib));
+    for (const auto& span : spans)
+        require(gx2vk::span_resident(span), "cached upload was evicted without reuse pressure");
     require(retained == peak, "idle frames changed upload residency");
 }
 void textures() {
@@ -100,10 +102,17 @@ void textures() {
     std::vector<uint8_t> mem(65536);
     constexpr uint32_t descriptor = 0x1000, image = 0x4000, size = 32 * 32 * 4;
     auto word = [&](uint32_t offset, uint32_t value) { rbrew_write32(mem.data(), descriptor + offset, value); };
-    word(GX2SURF_DIM, 1); word(GX2SURF_WIDTH, 32); word(GX2SURF_HEIGHT, 32);
-    word(GX2SURF_DEPTH, 1); word(GX2SURF_MIP_LEVELS, 1); word(GX2SURF_FORMAT, 0x1a);
-    word(GX2SURF_IMAGE_SIZE, size); word(GX2SURF_TILE_MODE, 1); word(GX2SURF_PITCH, 32);
-    word(GX2TEX_VIEW_NUM_SLICES, 1); word(GX2TEX_COMP_MAP, 0x06880000);
+    word(GX2SURF_DIM, 1);
+    word(GX2SURF_WIDTH, 32);
+    word(GX2SURF_HEIGHT, 32);
+    word(GX2SURF_DEPTH, 1);
+    word(GX2SURF_MIP_LEVELS, 1);
+    word(GX2SURF_FORMAT, 0x1a);
+    word(GX2SURF_IMAGE_SIZE, size);
+    word(GX2SURF_TILE_MODE, 1);
+    word(GX2SURF_PITCH, 32);
+    word(GX2TEX_VIEW_NUM_SLICES, 1);
+    word(GX2TEX_COMP_MAP, 0x06880000);
     auto bind = [&](uint32_t address, uint8_t value) {
         std::memset(mem.data() + address, value, size);
         word(GX2SURF_IMAGE, address);
@@ -131,10 +140,13 @@ void textures() {
             auto cb = gx2vk::cmd();
             vkCmdCopyImageToBuffer(cb, cold.image.image, VK_IMAGE_LAYOUT_GENERAL, readback.buffer, 1, &copy);
             VkMemoryBarrier2 host{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
-            host.srcStageMask = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT; host.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-            host.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT; host.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT;
+            host.srcStageMask = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT;
+            host.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+            host.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT;
+            host.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT;
             VkDependencyInfo dependency{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
-            dependency.memoryBarrierCount = 1; dependency.pMemoryBarriers = &host;
+            dependency.memoryBarrierCount = 1;
+            dependency.pMemoryBarriers = &host;
             vkCmdPipelineBarrier2(cb, &dependency);
         }
         frame();
@@ -143,11 +155,13 @@ void textures() {
     require(bool(cold.image), "unbound reusable texture was evicted");
     require(active && active->image && *active->image, "bound texture storage was evicted");
     require(gx2vk::invalidate_mapped(readback.memory), "in-flight readback invalidation failed");
-    for (unsigned i = 0; i < size; ++i) require(readback.memory.mapped[i] == 0x42, "in-flight texture copy was corrupted");
+    for (unsigned i = 0; i < size; ++i)
+        require(readback.memory.mapped[i] == 0x42, "in-flight texture copy was corrupted");
     gx2vk::destroy_buffer(readback);
     const auto count = gx2_render_texture_upload_count();
     gx2_render_restore_context_state(0x1234, mem.data());
-    require(cold.image && gx2_render_texture_upload_count() == count, "saved context needlessly reuploaded a cached texture");
+    require(cold.image && gx2_render_texture_upload_count() == count,
+            "saved context needlessly reuploaded a cached texture");
     std::vector<uint8_t> pixels;
     require(gx2vk::read_image(cold.image, VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 32, 32, pixels), "texture readback failed");
     require(pixels.size() == size, "unexpected texture readback size");
@@ -157,7 +171,8 @@ void textures() {
         for (unsigned i = 0; i < 200; ++i) frame();
         require(bool(cold.image), "repeated transition evicted reusable texture storage");
         gx2_render_restore_context_state(0x1234, mem.data());
-        require(gx2vk::read_image(cold.image, VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 32, 32, pixels), "transition readback failed");
+        require(gx2vk::read_image(cold.image, VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 32, 32, pixels),
+                "transition readback failed");
         for (auto pixel : pixels) require(pixel == 0x42, "repeated context transition changed pixels");
         require(gx2vk::image_count() <= 2, "repeated transition accumulated texture images");
     }
@@ -175,23 +190,31 @@ void queue() {
     const auto start = std::chrono::steady_clock::now();
     for (unsigned i = 1; i <= 200; ++i) {
         rbrew_host_sleep_for(2000);
-        gx2_native_run(true, [&] { require(observed + 1 == i, "render queue reordered tasks"); observed = i; });
+        gx2_native_run(true, [&] {
+            require(observed + 1 == i, "render queue reordered tasks");
+            observed = i;
+        });
     }
     gx2_native_run(true, [&] { render_cpu_end = thread_cpu_seconds(); });
     const double wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
     const double cpu = render_cpu_end - render_cpu_start;
     std::printf("render queue idle handoffs: wall %.3f ms, render CPU %.3f ms\n", wall * 1000, cpu * 1000);
     struct Task final : Gx2AsyncWork {
-        unsigned& value; unsigned expected;
+        unsigned& value;
+        unsigned expected;
         Task(unsigned& value, unsigned expected) : value(value), expected(expected) {}
-        void run() override { require(value + 1 == expected, "async queue reordered tasks"); value = expected; }
+        void run() override {
+            require(value + 1 == expected, "async queue reordered tasks");
+            value = expected;
+        }
     };
     for (unsigned i = 201; i <= 1224; ++i) gx2_native_post(new Task(observed, i));
     gx2_native_run(true, [&] { require(observed == 1224, "waited task overtook asynchronous work"); });
     std::array<std::thread, 3> producers;
-    for (auto& producer : producers) producer = std::thread([&] {
-        for (unsigned i = 0; i < 100; ++i) gx2_native_run(true, [&] { ++observed; });
-    });
+    for (auto& producer : producers)
+        producer = std::thread([&] {
+            for (unsigned i = 0; i < 100; ++i) gx2_native_run(true, [&] { ++observed; });
+        });
     for (auto& producer : producers) producer.join();
     gx2_native_stop_render_thread();
     require(observed == 1524, "render queue lost a task");
@@ -202,11 +225,16 @@ void queries() {
     std::vector<uint8_t> mem(65536);
     std::vector<HostFunc> table((ADDR_GX2QueryGetOcclusionResult >> 2) + 1);
     CPUState cpu{};
-    cpu.mem = mem.data(); cpu.guest_memory_size = uint32_t(mem.size());
-    cpu.dispatch_table = table.data(); cpu.dispatch_size = uint32_t(table.size());
-    gx2_draw_register(&cpu); gx2_display_list_register(&cpu);
+    cpu.mem = mem.data();
+    cpu.guest_memory_size = uint32_t(mem.size());
+    cpu.dispatch_table = table.data();
+    cpu.dispatch_size = uint32_t(table.size());
+    gx2_draw_register(&cpu);
+    gx2_display_list_register(&cpu);
     auto call = [&](uint32_t fn, uint32_t a, uint32_t b = 0) {
-        cpu.r[3] = a; cpu.r[4] = b; cpu.r[5] = 0;
+        cpu.r[3] = a;
+        cpu.r[4] = b;
+        cpu.r[5] = 0;
         require(table[fn >> 2] != nullptr, "query import missing");
         table[fn >> 2](&cpu);
         return cpu.r[3];
@@ -235,12 +263,16 @@ void queries() {
     for (unsigned i = 0; i < 1000; ++i)
         require(call(ADDR_GX2QueryGetOcclusionResult, query, output) == 1 && rbrew_read64(mem.data(), output) == 0,
                 "cached query changed its result");
-    require(gx2_query_fast_read_count_for_test() - before == 1001, "listed queries still round-trip through the render queue");
-    const double fast_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - fast_start).count();
+    require(gx2_query_fast_read_count_for_test() - before == 1001,
+            "listed queries still round-trip through the render queue");
+    const double fast_ms =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - fast_start).count();
     const auto queued_start = std::chrono::steady_clock::now();
     for (unsigned i = 0; i < 1000; ++i)
-        gx2_native_run(true, [&] { require(gx2_render_query_result(query, output, mem.data()), "queued query failed"); });
-    const double queued_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - queued_start).count();
+        gx2_native_run(true,
+                       [&] { require(gx2_render_query_result(query, output, mem.data()), "queued query failed"); });
+    const double queued_ms =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - queued_start).count();
     rbrew_write64(mem.data(), query + 8, rbrew_bswap64((1ull << 63) | 7));
     require(call(ADDR_GX2QueryGetOcclusionResult, query, output) == 1 && rbrew_read64(mem.data(), output) == 7,
             "CPU counter updates were hidden by a cache");
@@ -253,12 +285,17 @@ void queries() {
     call(ADDR_GX2BeginDisplayListEx, list + 4096, 4096);
     call(ADDR_GX2QueryBegin, 0, query);
     const uint32_t begin_bytes = call(ADDR_GX2EndDisplayList, list + 4096);
-    require(call(ADDR_GX2QueryGetOcclusionResult, query, output) == 0, "recording a CPU query did not clear its counters immediately");
+    require(call(ADDR_GX2QueryGetOcclusionResult, query, output) == 0,
+            "recording a CPU query did not clear its counters immediately");
     std::memcpy(mem.data() + query, previous.data(), previous.size());
     struct Gate final : Gx2AsyncWork {
-        std::promise<void>& entered; std::shared_future<void> release;
+        std::promise<void>& entered;
+        std::shared_future<void> release;
         Gate(std::promise<void>& entered, std::shared_future<void> release) : entered(entered), release(release) {}
-        void run() override { entered.set_value(); release.wait(); }
+        void run() override {
+            entered.set_value();
+            release.wait();
+        }
     };
     std::promise<void> entered, release;
     gx2_native_post(new Gate(entered, release.get_future().share()));
@@ -278,43 +315,70 @@ void queries() {
             "query reuse failed after pending work");
     gx2_native_stop_render_thread();
     std::puts("queries: 1001 caller-side reads; sibling publication, CPU writes and queued begin ordering preserved");
-    std::printf("synthetic 1000 completed-query reads: queued %.3f ms, caller-side %.3f ms (not game FPS)\n", queued_ms, fast_ms);
+    std::printf("synthetic 1000 completed-query reads: queued %.3f ms, caller-side %.3f ms (not game FPS)\n", queued_ms,
+                fast_ms);
 }
 void compiler() {
     gx2vk::CompileQueue queue(1);
     std::promise<void> started, released;
     auto release = released.get_future().share();
-    auto blocker = queue.post([&] { started.set_value(); release.wait(); return 0; }, true);
+    auto blocker = queue.post(
+        [&] {
+            started.set_value();
+            release.wait();
+            return 0;
+        },
+        true);
     started.get_future().wait();
     std::vector<unsigned> order;
-    auto first = queue.post([&] { order.push_back(1); return 1; }, true);
-    auto second = queue.post([&] { order.push_back(2); return 2; }, true);
-    auto demand = queue.post([&] { order.push_back(9); return 9; });
+    auto first = queue.post(
+        [&] {
+            order.push_back(1);
+            return 1;
+        },
+        true);
+    auto second = queue.post(
+        [&] {
+            order.push_back(2);
+            return 2;
+        },
+        true);
+    auto demand = queue.post([&] {
+        order.push_back(9);
+        return 9;
+    });
     released.set_value();
     require(queue.get(demand) == 9, "demand compile job failed");
-    require(queue.get(first) == 1 && queue.get(second) == 2 && queue.get(blocker) == 0, "background compile job failed");
+    require(queue.get(first) == 1 && queue.get(second) == 2 && queue.get(blocker) == 0,
+            "background compile job failed");
     queue.drain();
     require(order.size() == 3 && order.front() == 9, "demand compilation did not overtake warm-up jobs");
     std::puts("compiler: one worker completes demand work ahead of queued warm-up without deadlock");
 }
-}
+} // namespace
 void gx2_detile_set_workers_for_test(unsigned);
 unsigned gx2_detile_workers();
 void detile() {
-    for (unsigned mode : {1u, 2u, 4u}) for (unsigned bpp : {8u, 16u, 32u, 64u, 128u}) {
-        Gx2DetileDesc desc;
-        desc.width = 129; desc.height = 130; desc.pitch = 256; desc.surface_height = 256;
-        desc.bits_per_element = bpp; desc.tile_mode = mode;
-        const size_t size = size_t(desc.width) * desc.height * (bpp / 8);
-        std::vector<uint8_t> linear(size), serial(size), parallel(size), tiled(4u << 20);
-        for (size_t i = 0; i < size; ++i) linear[i] = uint8_t((i * 17) ^ (i >> 9));
-        require(gx2_retile_mip0(desc, linear.data(), tiled.data(), tiled.size()), "synthetic texture retile failed");
-        gx2_detile_set_workers_for_test(0);
-        require(gx2_detile_mip0(desc, tiled.data(), tiled.size(), serial.data()), "serial detile failed");
-        gx2_detile_set_workers_for_test(3);
-        require(gx2_detile_mip0(desc, tiled.data(), tiled.size(), parallel.data()), "parallel detile failed");
-        require(serial == linear && parallel == linear, "serial/parallel detiling changed texture bytes");
-    }
+    for (unsigned mode : {1u, 2u, 4u})
+        for (unsigned bpp : {8u, 16u, 32u, 64u, 128u}) {
+            Gx2DetileDesc desc;
+            desc.width = 129;
+            desc.height = 130;
+            desc.pitch = 256;
+            desc.surface_height = 256;
+            desc.bits_per_element = bpp;
+            desc.tile_mode = mode;
+            const size_t size = size_t(desc.width) * desc.height * (bpp / 8);
+            std::vector<uint8_t> linear(size), serial(size), parallel(size), tiled(4u << 20);
+            for (size_t i = 0; i < size; ++i) linear[i] = uint8_t((i * 17) ^ (i >> 9));
+            require(gx2_retile_mip0(desc, linear.data(), tiled.data(), tiled.size()),
+                    "synthetic texture retile failed");
+            gx2_detile_set_workers_for_test(0);
+            require(gx2_detile_mip0(desc, tiled.data(), tiled.size(), serial.data()), "serial detile failed");
+            gx2_detile_set_workers_for_test(3);
+            require(gx2_detile_mip0(desc, tiled.data(), tiled.size(), parallel.data()), "parallel detile failed");
+            require(serial == linear && parallel == linear, "serial/parallel detiling changed texture bytes");
+        }
     gx2_detile_set_workers_for_test(0);
     std::puts("detile: serial and parallel paths match across linear/micro/macro tiling and 8-128 bit elements");
 }
@@ -329,15 +393,28 @@ int main(int argc, char** argv) {
 #else
         setenv("RBREW_QUERY_ASSUME_VISIBLE", "0", 1);
 #endif
-        if (mode == "timing") timing();
-        else if (mode == "queue") queue();
-        else if (mode == "detile") detile();
-        else if (mode == "compiler") compiler();
+        if (mode == "timing")
+            timing();
+        else if (mode == "queue")
+            queue();
+        else if (mode == "detile")
+            detile();
+        else if (mode == "compiler")
+            compiler();
         else if (mode == "uploads" || mode == "textures" || mode == "queries") {
-            if (!gx2vk::init(nullptr)) { std::puts("No compatible Vulkan device available"); return 77; }
+            if (!gx2vk::init(nullptr)) {
+                std::puts("No compatible Vulkan device available");
+                return 77;
+            }
             std::printf("Vulkan device: %s\n", gx2vk::caps().device_name.c_str());
-            if (mode == "uploads") uploads(); else if (mode == "queries") queries(); else textures();
-        } else throw std::runtime_error("unknown test mode");
+            if (mode == "uploads")
+                uploads();
+            else if (mode == "queries")
+                queries();
+            else
+                textures();
+        } else
+            throw std::runtime_error("unknown test mode");
         return 0;
     } catch (const std::exception& error) {
         std::fprintf(stderr, "FAIL: %s\n", error.what());

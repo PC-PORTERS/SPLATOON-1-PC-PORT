@@ -27,7 +27,7 @@ inline constexpr uint32_t export_not_found = 0xBAD1001Du;
 inline constexpr uint32_t invalid_parameter = 0xBAD1001Eu;
 // WUT coreinit/dynload.h; Decaf's named ModuleNotFound is a different status.
 inline constexpr uint32_t module_not_found = 0xFFFFFFFAu;
-}
+} // namespace rbrew_dynload_error
 
 // Declares a host-provided module for this guest arena, copying all names.
 // Function addresses must already have an actual HostFunc in cpu's dispatcher;
@@ -36,7 +36,7 @@ inline constexpr uint32_t module_not_found = 0xFFFFFFFAu;
 // not a guest reference: FindExport requires at least one successful Acquire.
 // Duplicate identical declarations are idempotent; conflicting ones throw.
 uint32_t rbrew_dynload_register_module(CPUState* cpu, std::string_view module_name,
-    std::span<const RbrewDynLoadExport> exports);
+                                       std::span<const RbrewDynLoadExport> exports);
 
 // Cafe ABI: Acquire(r3=name, r4=out handle); FindExport(r3=handle, r4=kind,
 // r5=exact export name, r6=out guest address). Status is returned in r3.

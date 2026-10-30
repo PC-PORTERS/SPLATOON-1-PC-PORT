@@ -60,3 +60,6 @@ __pycache__/
 # can live here without showing up in git status. Add new tools below.
 /scripts/*
 !/scripts/Setup.ps1
+!/scripts/install-hooks.sh
+!/scripts/git-hooks/
+!/scripts/git-hooks/*

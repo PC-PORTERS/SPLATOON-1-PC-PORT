@@ -8,7 +8,7 @@
 #include <cstdint>
 
 struct Gx2BlendFactors {
-    uint32_t src_color = 1, dst_color = 0, color_combine = 0;  // ONE, ZERO, ADD
+    uint32_t src_color = 1, dst_color = 0, color_combine = 0; // ONE, ZERO, ADD
     uint32_t src_alpha = 1, dst_alpha = 0, alpha_combine = 0;
 };
 
@@ -23,12 +23,21 @@ struct Gx2ColorBlendState {
         color_write = color_buffer_enable != 0;
     }
     // GX2SetBlendControl(target, cSrc, cDst, cComb, separateAlpha, aSrc, aDst, aComb)
-    void set_blend_control(uint32_t target, uint32_t src_c, uint32_t dst_c, uint32_t comb_c,
-                           uint32_t separate_alpha, uint32_t src_a, uint32_t dst_a, uint32_t comb_a) {
-        if (target != 0) return;  // only render target 0 is drawn natively so far
-        target0.src_color = src_c; target0.dst_color = dst_c; target0.color_combine = comb_c;
-        if (separate_alpha) { target0.src_alpha = src_a; target0.dst_alpha = dst_a; target0.alpha_combine = comb_a; }
-        else { target0.src_alpha = src_c; target0.dst_alpha = dst_c; target0.alpha_combine = comb_c; }
+    void set_blend_control(uint32_t target, uint32_t src_c, uint32_t dst_c, uint32_t comb_c, uint32_t separate_alpha,
+                           uint32_t src_a, uint32_t dst_a, uint32_t comb_a) {
+        if (target != 0) return; // only render target 0 is drawn natively so far
+        target0.src_color = src_c;
+        target0.dst_color = dst_c;
+        target0.color_combine = comb_c;
+        if (separate_alpha) {
+            target0.src_alpha = src_a;
+            target0.dst_alpha = dst_a;
+            target0.alpha_combine = comb_a;
+        } else {
+            target0.src_alpha = src_c;
+            target0.dst_alpha = dst_c;
+            target0.alpha_combine = comb_c;
+        }
     }
     bool blend_target0() const { return (blend_enable_mask & 1) != 0; }
 };

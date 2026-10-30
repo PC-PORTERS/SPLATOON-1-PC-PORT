@@ -32,15 +32,16 @@ namespace {
 using Clock = std::chrono::steady_clock;
 // Player animation table: 16-byte entries {name, ?, prefix, flags}; 193 slots.
 constexpr uint32_t kAnimTable = 0x100D9AC0u, kAnimCount = 193;
-constexpr uint32_t kMotionCtor = 0x026227C8u;      // allocates/initializes the motion object
-constexpr uint32_t kMotionUpdate = 0x0262304Cu;    // per-frame motion update; +0x20 current slot, +0x24 override, +0x28 controller
-constexpr uint32_t kRegisterSlot = 0x025CFB18u;    // (controller, slot, name, r6, r7, r8); appends to slot
-constexpr uint32_t kPlaySlot = 0x025D06A4u;        // (controller, slot, 1, 1, 0) with f1 = blend frames
-constexpr uint32_t kCtorRegisterReturn = 0x0262297Cu;  // the constructor's primary-controller registrations
+constexpr uint32_t kMotionCtor = 0x026227C8u; // allocates/initializes the motion object
+constexpr uint32_t kMotionUpdate =
+    0x0262304Cu; // per-frame motion update; +0x20 current slot, +0x24 override, +0x28 controller
+constexpr uint32_t kRegisterSlot = 0x025CFB18u;       // (controller, slot, name, r6, r7, r8); appends to slot
+constexpr uint32_t kPlaySlot = 0x025D06A4u;           // (controller, slot, 1, 1, 0) with f1 = blend frames
+constexpr uint32_t kCtorRegisterReturn = 0x0262297Cu; // the constructor's primary-controller registrations
 constexpr uint32_t kControllerFuncs[] = {0x025CF3A0u, kRegisterSlot, 0x025D0BF8u, 0x025CFFC4u,
-                                         kPlaySlot, 0x025D0750u, 0x025D07F8u, 0x025D08B0u};
-constexpr uint32_t kWaitHoldSlot = 57;               // WaitHold_Nrml
-constexpr unsigned kLookAroundFrames = 330;          // FSKA frame count in Player00/01_anim
+                                         kPlaySlot,   0x025D0750u,   0x025D07F8u, 0x025D08B0u};
+constexpr uint32_t kWaitHoldSlot = 57;      // WaitHold_Nrml
+constexpr unsigned kLookAroundFrames = 330; // FSKA frame count in Player00/01_anim
 constexpr double kBlendFrames = 10.0, kIdleSeconds = 5.0;
 constexpr char kLookAroundName[] = "WaitHold_Nrml_LookAround";
 constexpr unsigned kMaxLines = 60000;
@@ -51,7 +52,7 @@ std::mutex s_log_mutex, s_idle_mutex;
 unsigned s_lines = 0, s_ctor_calls = 0;
 const auto s_start = Clock::now();
 thread_local int t_in_ctor = 0, t_in_update = 0;
-thread_local std::string t_update_calls;   // controller calls of the current update, kept if the slot changed
+thread_local std::string t_update_calls; // controller calls of the current update, kept if the slot changed
 
 void line(const char* format, ...) {
     std::lock_guard lock(s_log_mutex);
@@ -59,7 +60,10 @@ void line(const char* format, ...) {
     ++s_lines;
     const double ms = std::chrono::duration<double, std::milli>(Clock::now() - s_start).count();
     std::fprintf(s_log, "%10.1f ", ms);
-    va_list args; va_start(args, format); std::vfprintf(s_log, format, args); va_end(args);
+    va_list args;
+    va_start(args, format);
+    std::vfprintf(s_log, format, args);
+    va_end(args);
     std::fputc('\n', s_log);
     if (s_lines % 64 == 0 || s_lines == kMaxLines) std::fflush(s_log);
 }
@@ -85,13 +89,17 @@ std::string anim_name(CPUState* cpu, uint32_t index) {
 std::string dump(CPUState* cpu, uint32_t address, unsigned bytes) {
     std::string out;
     char item[16];
-    for (unsigned i = 0; i < bytes; i += 4) { std::snprintf(item, sizeof(item), "%08X ", word(cpu, address + i)); out += item; }
+    for (unsigned i = 0; i < bytes; i += 4) {
+        std::snprintf(item, sizeof(item), "%08X ", word(cpu, address + i));
+        out += item;
+    }
     return out;
 }
 std::string registers(CPUState* cpu) {
     char out[400];
-    std::snprintf(out, sizeof(out), "lr=%08X r3=%08X r4=%08X r5=%08X r6=%08X r7=%08X r8=%08X f1=%g f2=%g f3=%g s4='%s' s5='%s'",
-                  cpu->lr, cpu->r[3], cpu->r[4], cpu->r[5], cpu->r[6], cpu->r[7], cpu->r[8], cpu->f[1], cpu->f[2], cpu->f[3],
+    std::snprintf(out, sizeof(out),
+                  "lr=%08X r3=%08X r4=%08X r5=%08X r6=%08X r7=%08X r8=%08X f1=%g f2=%g f3=%g s4='%s' s5='%s'", cpu->lr,
+                  cpu->r[3], cpu->r[4], cpu->r[5], cpu->r[6], cpu->r[7], cpu->r[8], cpu->f[1], cpu->f[2], cpu->f[3],
                   text(cpu, cpu->r[4]).c_str(), text(cpu, cpu->r[5]).c_str());
     return out;
 }
@@ -105,18 +113,29 @@ struct Registers {
 };
 uint32_t call_guest(CPUState* cpu, uint32_t address, std::initializer_list<uint32_t> args, double f1 = 0.0) {
     Registers saved;
-    std::memcpy(saved.r, cpu->r, sizeof(saved.r)); std::memcpy(saved.cr, cpu->cr, sizeof(saved.cr));
-    std::memcpy(saved.f, cpu->f, sizeof(saved.f)); std::memcpy(saved.ps1, cpu->ps1, sizeof(saved.ps1));
-    saved.lr = cpu->lr; saved.ctr = cpu->ctr; saved.xer = cpu->xer; saved.fpscr = cpu->fpscr;
+    std::memcpy(saved.r, cpu->r, sizeof(saved.r));
+    std::memcpy(saved.cr, cpu->cr, sizeof(saved.cr));
+    std::memcpy(saved.f, cpu->f, sizeof(saved.f));
+    std::memcpy(saved.ps1, cpu->ps1, sizeof(saved.ps1));
+    saved.lr = cpu->lr;
+    saved.ctr = cpu->ctr;
+    saved.xer = cpu->xer;
+    saved.fpscr = cpu->fpscr;
     unsigned n = 3;
     for (uint32_t value : args) cpu->r[n++] = value;
-    cpu->f[1] = f1; cpu->ps1[1] = f1;
-    cpu->lr = 0;   // never a constructor call site for the registration hook
+    cpu->f[1] = f1;
+    cpu->ps1[1] = f1;
+    cpu->lr = 0; // never a constructor call site for the registration hook
     rbrew_call(cpu, address);
     const uint32_t result = cpu->r[3];
-    std::memcpy(cpu->r, saved.r, sizeof(saved.r)); std::memcpy(cpu->cr, saved.cr, sizeof(saved.cr));
-    std::memcpy(cpu->f, saved.f, sizeof(saved.f)); std::memcpy(cpu->ps1, saved.ps1, sizeof(saved.ps1));
-    cpu->lr = saved.lr; cpu->ctr = saved.ctr; cpu->xer = saved.xer; cpu->fpscr = saved.fpscr;
+    std::memcpy(cpu->r, saved.r, sizeof(saved.r));
+    std::memcpy(cpu->cr, saved.cr, sizeof(saved.cr));
+    std::memcpy(cpu->f, saved.f, sizeof(saved.f));
+    std::memcpy(cpu->ps1, saved.ps1, sizeof(saved.ps1));
+    cpu->lr = saved.lr;
+    cpu->ctr = saved.ctr;
+    cpu->xer = saved.xer;
+    cpu->fpscr = saved.fpscr;
     return result;
 }
 
@@ -136,8 +155,8 @@ struct Idle {
     unsigned frames = 0;
     bool idle = false, playing = false, played = false;
 };
-std::unordered_map<uint32_t, WaitHoldRegistration> s_wait_hold;   // primary controller -> its slot-57 registration
-std::unordered_map<uint32_t, Idle> s_idle;                        // motion object
+std::unordered_map<uint32_t, WaitHoldRegistration> s_wait_hold; // primary controller -> its slot-57 registration
+std::unordered_map<uint32_t, Idle> s_idle;                      // motion object
 
 // Resolve an exact dictionary key in the model's already loaded resources.
 // This is the same resource order and packed handle as 02983BC4, using a
@@ -164,14 +183,15 @@ uint32_t find_skeletal_clip(CPUState* cpu, uint32_t controller, const char* name
         if (relative) {
             const uint32_t dictionary = fres + 0x28 + relative;
             if (!rbrew_memory_accessible(cpu->mem, dictionary, uint64_t(clips) * 16 + 24) ||
-                word(cpu, dictionary + 4) != clips) return missing;
+                word(cpu, dictionary + 4) != clips)
+                return missing;
             for (uint32_t clip = 0; clip < clips; ++clip) {
                 const uint32_t node = dictionary + 24 + clip * 16;
                 const uint32_t key_offset = word(cpu, node + 8);
                 if (!key_offset || text(cpu, node + 8 + key_offset) != name) continue;
                 const uint32_t data_offset = word(cpu, node + 12);
-                if (!data_offset || word(cpu, node + 12 + data_offset) != 0x46534B41u ||
-                    base_index + clip >= 0xFFFFu) return missing;
+                if (!data_offset || word(cpu, node + 12 + data_offset) != 0x46534B41u || base_index + clip >= 0xFFFFu)
+                    return missing;
                 // Skeletal handles have type 0 in the upper half. The lower
                 // half is cumulative across resource files, not file-local.
                 return base_index + clip;
@@ -194,7 +214,8 @@ bool read_slot(CPUState* cpu, uint32_t controller, Slot& slot) {
             continue;
         }
         if (uint64_t(array) + kWaitHoldSlot * 4 + 4 > UINT32_MAX ||
-            !rbrew_memory_accessible(cpu->mem, array + kWaitHoldSlot * 4, 4)) return false;
+            !rbrew_memory_accessible(cpu->mem, array + kWaitHoldSlot * 4, 4))
+            return false;
         slot[i] = word(cpu, array + kWaitHoldSlot * 4);
     }
     return true;
@@ -207,7 +228,8 @@ bool prepare_lookaround(CPUState* cpu, uint32_t controller, WaitHoldRegistration
     r.prepared = true;
     if (!read_slot(cpu, controller, r.normal) || r.normal[1] != 1 || !r.normal[0] ||
         !rbrew_memory_accessible(cpu->mem, r.normal[0], 4)) {
-        line("lookaround controller=%08X invalid original slot count=%u handles=%08X", controller, r.normal[1], r.normal[0]);
+        line("lookaround controller=%08X invalid original slot count=%u handles=%08X", controller, r.normal[1],
+             r.normal[0]);
         return false;
     }
     r.skeletal = word(cpu, r.normal[0]);
@@ -241,7 +263,10 @@ void idle_lookaround(CPUState* cpu, uint32_t motion) {
         state = Idle{};
         return;
     }
-    if (!state.idle) { state.idle = true; state.since = now; }
+    if (!state.idle) {
+        state.idle = true;
+        state.since = now;
+    }
     if (state.playing) {
         if (++state.frames < kLookAroundFrames) return;
         select_skeletal_clip(cpu, registration->second, false);
@@ -250,8 +275,7 @@ void idle_lookaround(CPUState* cpu, uint32_t motion) {
         line("lookaround motion=%08X finished", motion);
         return;
     }
-    if (state.played ||
-        std::chrono::duration<double>(now - state.since).count() < kIdleSeconds) return;
+    if (state.played || std::chrono::duration<double>(now - state.since).count() < kIdleSeconds) return;
     state.played = true;
     if (!prepare_lookaround(cpu, controller, registration->second)) {
         // This model has no such clip: keep its original animation.
@@ -260,7 +284,8 @@ void idle_lookaround(CPUState* cpu, uint32_t motion) {
     }
     select_skeletal_clip(cpu, registration->second, true);
     play_wait_hold(cpu, controller);
-    state.playing = true; state.frames = 0;
+    state.playing = true;
+    state.frames = 0;
     line("lookaround motion=%08X controller=%08X started", motion, controller);
 }
 
@@ -274,14 +299,16 @@ void motion_ctor(CPUState* cpu, uint32_t address, HostFunc original) {
     --t_in_ctor;
     const uint32_t motion = cpu->r[3];
     if (s_lookaround) {
-        std::lock_guard lock(s_idle_mutex); s_idle.erase(motion);
+        std::lock_guard lock(s_idle_mutex);
+        s_idle.erase(motion);
         const uint32_t primary = word(cpu, motion + 0x28);
         if (auto registration = s_wait_hold.find(primary); registration != s_wait_hold.end())
             prepare_lookaround(cpu, primary, registration->second);
     }
     if (!s_log || call > 8) return;
     line("ctor#%u motion=%08X owner=%08X motion[0..0x40]=%s", call, motion, owner, dump(cpu, motion, 0x40).c_str());
-    line("ctor#%u owner+6A8=%08X owner+A0=%08X owner+5C=%08X", call, word(cpu, owner + 0x6A8), word(cpu, owner + 0xA0), word(cpu, owner + 0x5C));
+    line("ctor#%u owner+6A8=%08X owner+A0=%08X owner+5C=%08X", call, word(cpu, owner + 0x6A8), word(cpu, owner + 0xA0),
+         word(cpu, owner + 0x5C));
     for (uint32_t field : {0x28u, 0x2Cu}) {
         const uint32_t controller = word(cpu, motion + field);
         line("ctor#%u controller+%X=%08X [0..0x80]=%s", call, field, controller, dump(cpu, controller, 0x80).c_str());
@@ -299,9 +326,9 @@ void motion_update(CPUState* cpu, uint32_t address, HostFunc original) {
     if (!s_log) return;
     const uint32_t after[2] = {word(cpu, motion + 0x20), word(cpu, motion + 0x24)};
     if (before[0] == after[0] && before[1] == after[1]) return;
-    line("anim motion=%08X current %u(%s)->%u(%s) override %d(%s)->%d(%s)", motion, before[0], anim_name(cpu, before[0]).c_str(),
-         after[0], anim_name(cpu, after[0]).c_str(), int32_t(before[1]), anim_name(cpu, before[1]).c_str(), int32_t(after[1]),
-         anim_name(cpu, after[1]).c_str());
+    line("anim motion=%08X current %u(%s)->%u(%s) override %d(%s)->%d(%s)", motion, before[0],
+         anim_name(cpu, before[0]).c_str(), after[0], anim_name(cpu, after[0]).c_str(), int32_t(before[1]),
+         anim_name(cpu, before[1]).c_str(), int32_t(after[1]), anim_name(cpu, after[1]).c_str());
     if (!t_update_calls.empty()) line("calls %s", t_update_calls.c_str());
 }
 
@@ -312,17 +339,23 @@ void controller(CPUState* cpu, uint32_t address, HostFunc original) {
         std::lock_guard lock(s_idle_mutex);
         s_wait_hold[cpu->r[3]] = {};
     }
-    if (!s_log || (!t_in_ctor && !t_in_update)) { original(cpu); return; }
+    if (!s_log || (!t_in_ctor && !t_in_update)) {
+        original(cpu);
+        return;
+    }
     const std::string args = registers(cpu);
     original(cpu);
-    if (t_in_ctor && s_ctor_calls <= 2) line("  ctor %08X(%s) -> r3=%08X f1=%g", address, args.c_str(), cpu->r[3], cpu->f[1]);
+    if (t_in_ctor && s_ctor_calls <= 2)
+        line("  ctor %08X(%s) -> r3=%08X f1=%g", address, args.c_str(), cpu->r[3], cpu->f[1]);
     else if (t_in_update && t_update_calls.size() < 4000) {
-        char head[64]; std::snprintf(head, sizeof(head), "\n    %08X(", address);
-        char tail[48]; std::snprintf(tail, sizeof(tail), ") -> r3=%08X", cpu->r[3]);
+        char head[64];
+        std::snprintf(head, sizeof(head), "\n    %08X(", address);
+        char tail[48];
+        std::snprintf(tail, sizeof(tail), ") -> r3=%08X", cpu->r[3]);
         t_update_calls += head + args + tail;
     }
 }
-}  // namespace
+} // namespace
 
 #ifdef RBREW_ADVANCED_TESTS
 // Advance test idle timers without sleeping or changing the production clock.
@@ -342,9 +375,11 @@ void player_anim_register() {
     if (const char* path = std::getenv("RBREW_ANIM_LOG"); path && *path) s_log = std::fopen(path, "w");
     if (!s_lookaround && !s_log) return;
     bool ok = rbrew_set_guest_hook(kMotionCtor, motion_ctor) && rbrew_set_guest_hook(kMotionUpdate, motion_update);
-    if (s_log) for (uint32_t address : kControllerFuncs) ok = rbrew_set_guest_hook(address, controller) && ok;
-    else ok = rbrew_set_guest_hook(kRegisterSlot, controller) && ok;
-    line("player animation hooks %s; idle look-around %s (direct handles v4); table %08X count %u", ok ? "armed" : "INCOMPLETE",
-         s_lookaround ? "on" : "off", kAnimTable, kAnimCount);
+    if (s_log)
+        for (uint32_t address : kControllerFuncs) ok = rbrew_set_guest_hook(address, controller) && ok;
+    else
+        ok = rbrew_set_guest_hook(kRegisterSlot, controller) && ok;
+    line("player animation hooks %s; idle look-around %s (direct handles v4); table %08X count %u",
+         ok ? "armed" : "INCOMPLETE", s_lookaround ? "on" : "off", kAnimTable, kAnimCount);
     if (s_log) std::fflush(s_log);
 }

@@ -1,0 +1,8 @@
+# Pre-commit configuration (https://pre-commit.com)
+repos:
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v19.1.7
+    hooks:
+      - id: clang-format
+        types_or: [c, c++, cuda]
+        exclude: ^(recompiler/port/third_party/|recompiler/third_party/|build/|Game/)

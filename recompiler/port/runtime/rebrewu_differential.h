@@ -20,12 +20,14 @@ struct RbrewDifferentialOptions {
 
 struct RbrewDifferentialMismatch {
     std::string component;
-    uint32_t index{}; // register index, or guest byte address for memory
+    uint32_t index{};    // register index, or guest byte address for memory
     uint64_t expected{}; // independent interpreter
     uint64_t actual{};   // generated callback
 };
 
-struct RbrewDifferentialRange { uint32_t begin{}, end{}; }; // exclusive end
+struct RbrewDifferentialRange {
+    uint32_t begin{}, end{};
+}; // exclusive end
 
 struct RbrewDifferentialReport {
     bool comparable{};
@@ -48,6 +50,5 @@ struct RbrewDifferentialReport {
     std::vector<RbrewDifferentialRange> changed_memory_ranges;
 };
 
-RbrewDifferentialReport rbrew_ppc_compare(const CPUState& initial,
-    HostFunc native_callback, uint32_t entry, uint32_t return_pc,
-    const RbrewDifferentialOptions& options = {});
+RbrewDifferentialReport rbrew_ppc_compare(const CPUState& initial, HostFunc native_callback, uint32_t entry,
+                                          uint32_t return_pc, const RbrewDifferentialOptions& options = {});

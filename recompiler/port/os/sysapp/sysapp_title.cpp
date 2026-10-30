@@ -29,7 +29,7 @@ void SYSGetSystemApplicationTitleId(CPUState* cpu) {
     cpu->r[3] = uint32_t(id >> 32);
     cpu->r[4] = uint32_t(id);
 }
-}
+} // namespace
 
 uint64_t rbrew_sysapp_title_id(uint32_t index, uint32_t product_area) {
     if (index >= sizeof(kTitles) / sizeof(kTitles[0]))

@@ -21,7 +21,7 @@ bool register_base(uint32_t opcode, uint32_t& base) {
     }
 }
 constexpr uint32_t IT_NOP = 0x10;
-}
+} // namespace
 
 Gx2StaticListState gx2_decode_static_display_list(const uint8_t* bytes, uint32_t size) {
     Gx2StaticListState out;
@@ -30,8 +30,11 @@ Gx2StaticListState gx2_decode_static_display_list(const uint8_t* bytes, uint32_t
     for (uint32_t i = 0; i < count;) {
         const uint32_t header = read_be(bytes + i * 4);
         const uint32_t type = header >> 30;
-        if (type == 2) { ++i; continue; }  // filler
-        if (type != 3) return out;         // type 0/1 never appear in GX2 lists
+        if (type == 2) {
+            ++i;
+            continue;
+        } // filler
+        if (type != 3) return out; // type 0/1 never appear in GX2 lists
         const uint32_t opcode = (header >> 8) & 0xFF;
         const uint32_t payload = ((header >> 16) & 0x3FFF) + 1;
         if (payload > count - i - 1) return out;
@@ -40,8 +43,7 @@ Gx2StaticListState gx2_decode_static_display_list(const uint8_t* bytes, uint32_t
         if (register_base(opcode, base)) {
             const uint32_t first = base + read_be(data);
             if (uint64_t(first) + (payload - 1) > GX2_LATTE_REGISTER_COUNT) return out;
-            for (uint32_t k = 1; k < payload; ++k)
-                out.writes.push_back({first + k - 1, read_be(data + k * 4)});
+            for (uint32_t k = 1; k < payload; ++k) out.writes.push_back({first + k - 1, read_be(data + k * 4)});
         } else if (opcode != IT_NOP) {
             out.other_opcodes.push_back(opcode);
         }

@@ -13,7 +13,7 @@
 #include <timeapi.h>
 #include <immintrin.h>
 #if defined(_MSC_VER)
-#pragma comment(lib, "winmm.lib")   // timeBeginPeriod
+#pragma comment(lib, "winmm.lib") // timeBeginPeriod
 #endif
 
 namespace rbrew_host_timing {
@@ -27,11 +27,13 @@ inline GlobalTimerPeriod s_global_timer_period;
 struct Timer {
     // Windows 10 1803+: private auto-reset high-resolution timer.
     HANDLE handle = CreateWaitableTimerExW(nullptr, nullptr, 0x2, TIMER_MODIFY_STATE | SYNCHRONIZE);
-    ~Timer() { if (handle) CloseHandle(handle); }
+    ~Timer() {
+        if (handle) CloseHandle(handle);
+    }
     Timer() = default;
     Timer(const Timer&) = delete;
 };
-}
+} // namespace rbrew_host_timing
 #endif
 
 inline void rbrew_host_sleep_until(std::chrono::steady_clock::time_point deadline) {
@@ -42,7 +44,8 @@ inline void rbrew_host_sleep_until(std::chrono::steady_clock::time_point deadlin
 #if defined(_WIN32)
     thread_local rbrew_host_timing::Timer timer;
     if (timer.handle) {
-        for (auto now = std::chrono::steady_clock::now(); deadline - now > kSpin; now = std::chrono::steady_clock::now()) {
+        for (auto now = std::chrono::steady_clock::now(); deadline - now > kSpin;
+             now = std::chrono::steady_clock::now()) {
             const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(deadline - now - kSpin).count();
             LARGE_INTEGER due{};
             due.QuadPart = -((ns + 99) / 100); // relative, 100 ns units

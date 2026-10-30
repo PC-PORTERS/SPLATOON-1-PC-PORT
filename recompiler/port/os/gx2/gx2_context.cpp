@@ -36,8 +36,8 @@
 #include <vector>
 
 // Definitions for shared screen-mode state (declared in screen_mode.h)
-ScreenMode g_screen_mode  = ScreenMode::TV;
-TouchState g_touch_state  = { false, 0, 0 };
+ScreenMode g_screen_mode = ScreenMode::TV;
+TouchState g_touch_state = {false, 0, 0};
 
 void gx2_draw_set_default_state(CPUState* cpu);
 
@@ -51,8 +51,8 @@ void gx2_draw_set_default_state(CPUState* cpu);
 #include "vk/gx2_imgui_overlay.h"
 // gx2_render_vk.cpp owns the Vulkan device; this branch needs no GPU types.
 
-static SDL_Window*   s_window    = nullptr;
-static bool          s_tv_enabled = true;
+static SDL_Window* s_window = nullptr;
+static bool s_tv_enabled = true;
 
 // GamePad screen resolution (hardware fixed)
 static constexpr int DRC_W = 854;
@@ -69,10 +69,11 @@ static void update_window_title() {
 }
 
 // The ImGui windows need a free cursor; the game captures it in TV mode.
-static bool imgui_wants_cursor() { return gx2_imgui::visible() || gx2_imgui::menu_open(); }
+static bool imgui_wants_cursor() {
+    return gx2_imgui::visible() || gx2_imgui::menu_open();
+}
 static void sync_overlay_mouse_mode() {
-    if (g_screen_mode == ScreenMode::TV)
-        SDL_SetRelativeMouseMode(imgui_wants_cursor() ? SDL_FALSE : SDL_TRUE);
+    if (g_screen_mode == ScreenMode::TV) SDL_SetRelativeMouseMode(imgui_wants_cursor() ? SDL_FALSE : SDL_TRUE);
 }
 
 // Switch between TV and Gamepad view, adjusting mouse capture accordingly
@@ -80,11 +81,11 @@ static void toggle_screen_mode() {
     if (g_screen_mode == ScreenMode::TV) {
         g_screen_mode = ScreenMode::Gamepad;
         SDL_SetRelativeMouseMode(SDL_FALSE); // free the cursor for touch sim
-        g_touch_state = { false, 0, 0 };
+        g_touch_state = {false, 0, 0};
     } else {
         g_screen_mode = ScreenMode::TV;
-        sync_overlay_mouse_mode();  // capture cursor for camera, unless the overlay is open
-        g_touch_state = { false, 0, 0 };
+        sync_overlay_mouse_mode(); // capture cursor for camera, unless the overlay is open
+        g_touch_state = {false, 0, 0};
     }
     update_window_title();
 }
@@ -180,7 +181,8 @@ static bool gx2_platform_open_window() {
     SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS, "permonitorv2");
     SplatoonDiagnostics::Init();
     init_game_controllers();
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK | SDL_INIT_HAPTIC | SDL_INIT_SENSOR) != 0) {
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK | SDL_INIT_HAPTIC | SDL_INIT_SENSOR) !=
+        0) {
         controller_log("SDL_Init failed: %s\n", SDL_GetError());
         return false;
     }
@@ -189,10 +191,9 @@ static bool gx2_platform_open_window() {
     // mode avoids a second refresh wait (see gx2_vk.cpp create_swapchain).
     SDL_DisplayMode desktop{};
     if (SDL_GetDesktopDisplayMode(0, &desktop) != 0 || desktop.w <= 0 || desktop.h <= 0) return false;
-    s_window = SDL_CreateWindow("Splatoon Native PC Port",
-        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        desktop.w, desktop.h, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE |
-        SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_FULLSCREEN_DESKTOP);
+    s_window = SDL_CreateWindow(
+        "Splatoon Native PC Port", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, desktop.w, desktop.h,
+        SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_FULLSCREEN_DESKTOP);
     if (!s_window) {
         RBREW_LOGF(stderr, "[gx2] SDL_CreateWindow(SDL_WINDOW_VULKAN) failed: %s\n", SDL_GetError());
         return false;
@@ -212,7 +213,10 @@ static bool gx2_platform_open_window() {
     s_window_thread = SDL_ThreadID();
     if (!std::getenv("RBREW_VK_CACHE_DIR")) {
         // Stable SPIR-V / pipeline cache next to the executable.
-        if (char* base = SDL_GetBasePath()) { gx2vk::shader_set_cache_dir(std::string(base) + "vulkan_cache"); SDL_free(base); }
+        if (char* base = SDL_GetBasePath()) {
+            gx2vk::shader_set_cache_dir(std::string(base) + "vulkan_cache");
+            SDL_free(base);
+        }
     }
 
     // Start in TV view with mouse captured for camera control.
@@ -240,7 +244,7 @@ static bool gx2_platform_open_window() {
     // Initialize the selected native renderer for the window.
     gx2_render_init();
     gx2_native_start_render_thread();
-    gx2_render_startup();   // splash + shader warm-up ahead of the first frame
+    gx2_render_startup(); // splash + shader warm-up ahead of the first frame
     return true;
 }
 #endif // HAVE_SDL2
@@ -265,7 +269,10 @@ static void GX2Shutdown(CPUState* cpu) {
     SplatoonDiagnostics::Shutdown();
     gx2_native_stop_render_thread();
     gx2_render_shutdown();
-    if (s_window) { SDL_DestroyWindow(s_window);   s_window = nullptr; }
+    if (s_window) {
+        SDL_DestroyWindow(s_window);
+        s_window = nullptr;
+    }
     SDL_Quit();
 #endif
 }
@@ -280,56 +287,40 @@ struct ContextRange {
 };
 
 constexpr ContextRange kContextRanges[] = {
-    {0x0000, 0x2000, 0x300, 6}, {0x0000, 0x2000, 0x900, 0x48},
-    {0x0000, 0x2000, 0x980, 0x48}, {0x0000, 0x2000, 0xA00, 0x48},
-    {0x0000, 0x2000, 0x310, 0xC}, {0x0000, 0x2000, 0x542, 1},
-    {0x0000, 0x2000, 0x235, 1}, {0x0000, 0x2000, 0x232, 2},
-    {0x0000, 0x2000, 0x23A, 1}, {0x0000, 0x2000, 0x256, 1},
-    {0x0000, 0x2000, 0x60C, 1}, {0x0000, 0x2000, 0x5C5, 1},
-    {0x0000, 0x2000, 0x2C8, 1}, {0x0000, 0x2000, 0x363, 1},
-    {0x0000, 0x2000, 0x404, 2},
-    {0x2C00, 0xA000, 0x000, 2}, {0x2C00, 0xA000, 0x003, 3},
-    {0x2C00, 0xA000, 0x00A, 4}, {0x2C00, 0xA000, 0x010, 0x38},
-    {0x2C00, 0xA000, 0x050, 0x34}, {0x2C00, 0xA000, 0x08E, 4},
-    {0x2C00, 0xA000, 0x094, 0x40}, {0x2C00, 0xA000, 0x100, 9},
-    {0x2C00, 0xA000, 0x10C, 3}, {0x2C00, 0xA000, 0x10F, 0x60},
-    {0x2C00, 0xA000, 0x185, 0xA}, {0x2C00, 0xA000, 0x191, 0x27},
-    {0x2C00, 0xA000, 0x1E0, 9}, {0x2C00, 0xA000, 0x200, 1},
-    {0x2C00, 0xA000, 0x202, 7}, {0x2C00, 0xA000, 0x0E0, 0x20},
-    {0x2C00, 0xA000, 0x210, 0x29}, {0x2C00, 0xA000, 0x250, 0x34},
-    {0x2C00, 0xA000, 0x290, 1}, {0x2C00, 0xA000, 0x292, 2},
-    {0x2C00, 0xA000, 0x2A1, 1}, {0x2C00, 0xA000, 0x2A5, 1},
-    {0x2C00, 0xA000, 0x2A8, 2}, {0x2C00, 0xA000, 0x2AC, 3},
-    {0x2C00, 0xA000, 0x2CA, 1}, {0x2C00, 0xA000, 0x2CC, 1},
-    {0x2C00, 0xA000, 0x2CE, 1}, {0x2C00, 0xA000, 0x300, 9},
-    {0x2C00, 0xA000, 0x30C, 1}, {0x2C00, 0xA000, 0x312, 1},
-    {0x2C00, 0xA000, 0x316, 2}, {0x2C00, 0xA000, 0x343, 2},
-    {0x2C00, 0xA000, 0x349, 3}, {0x2C00, 0xA000, 0x34C, 2},
-    {0x2C00, 0xA000, 0x351, 1}, {0x2C00, 0xA000, 0x37E, 6},
-    {0x2C00, 0xA000, 0x2B4, 3}, {0x2C00, 0xA000, 0x2B8, 3},
-    {0x2C00, 0xA000, 0x2BC, 3}, {0x2C00, 0xA000, 0x2C0, 3},
-    {0x2C00, 0xA000, 0x2C8, 1}, {0x2C00, 0xA000, 0x29B, 1},
-    {0x2C00, 0xA000, 0x08C, 1}, {0x2C00, 0xA000, 0x0D5, 1},
-    {0x2C00, 0xA000, 0x284, 0xC},
-    {0x3C00, 0xC000, 0, 0x800}, {0x5C00, 0xF880, 0, 0x60},
-    {0x5E00, 0xE000, 0, 0x70}, {0x5E00, 0xE000, 0x380, 0x70},
-    {0x5E00, 0xE000, 0x460, 0x70}, {0x5E00, 0xE000, 0x7E0, 0x70},
-    {0x5E00, 0xE000, 0x8B9, 7}, {0x5E00, 0xE000, 0x8C0, 0x70},
-    {0x5E00, 0xE000, 0x930, 0x70}, {0x5E00, 0xE000, 0xCB0, 0x70},
-    {0x5E00, 0xE000, 0xD89, 7},
-    {0x9500, 0xF000, 0, 0x36}, {0x9500, 0xF000, 0x36, 0x36},
-    {0x9500, 0xF000, 0x6C, 0x36},
+    {0x0000, 0x2000, 0x300, 6},    {0x0000, 0x2000, 0x900, 0x48}, {0x0000, 0x2000, 0x980, 0x48},
+    {0x0000, 0x2000, 0xA00, 0x48}, {0x0000, 0x2000, 0x310, 0xC},  {0x0000, 0x2000, 0x542, 1},
+    {0x0000, 0x2000, 0x235, 1},    {0x0000, 0x2000, 0x232, 2},    {0x0000, 0x2000, 0x23A, 1},
+    {0x0000, 0x2000, 0x256, 1},    {0x0000, 0x2000, 0x60C, 1},    {0x0000, 0x2000, 0x5C5, 1},
+    {0x0000, 0x2000, 0x2C8, 1},    {0x0000, 0x2000, 0x363, 1},    {0x0000, 0x2000, 0x404, 2},
+    {0x2C00, 0xA000, 0x000, 2},    {0x2C00, 0xA000, 0x003, 3},    {0x2C00, 0xA000, 0x00A, 4},
+    {0x2C00, 0xA000, 0x010, 0x38}, {0x2C00, 0xA000, 0x050, 0x34}, {0x2C00, 0xA000, 0x08E, 4},
+    {0x2C00, 0xA000, 0x094, 0x40}, {0x2C00, 0xA000, 0x100, 9},    {0x2C00, 0xA000, 0x10C, 3},
+    {0x2C00, 0xA000, 0x10F, 0x60}, {0x2C00, 0xA000, 0x185, 0xA},  {0x2C00, 0xA000, 0x191, 0x27},
+    {0x2C00, 0xA000, 0x1E0, 9},    {0x2C00, 0xA000, 0x200, 1},    {0x2C00, 0xA000, 0x202, 7},
+    {0x2C00, 0xA000, 0x0E0, 0x20}, {0x2C00, 0xA000, 0x210, 0x29}, {0x2C00, 0xA000, 0x250, 0x34},
+    {0x2C00, 0xA000, 0x290, 1},    {0x2C00, 0xA000, 0x292, 2},    {0x2C00, 0xA000, 0x2A1, 1},
+    {0x2C00, 0xA000, 0x2A5, 1},    {0x2C00, 0xA000, 0x2A8, 2},    {0x2C00, 0xA000, 0x2AC, 3},
+    {0x2C00, 0xA000, 0x2CA, 1},    {0x2C00, 0xA000, 0x2CC, 1},    {0x2C00, 0xA000, 0x2CE, 1},
+    {0x2C00, 0xA000, 0x300, 9},    {0x2C00, 0xA000, 0x30C, 1},    {0x2C00, 0xA000, 0x312, 1},
+    {0x2C00, 0xA000, 0x316, 2},    {0x2C00, 0xA000, 0x343, 2},    {0x2C00, 0xA000, 0x349, 3},
+    {0x2C00, 0xA000, 0x34C, 2},    {0x2C00, 0xA000, 0x351, 1},    {0x2C00, 0xA000, 0x37E, 6},
+    {0x2C00, 0xA000, 0x2B4, 3},    {0x2C00, 0xA000, 0x2B8, 3},    {0x2C00, 0xA000, 0x2BC, 3},
+    {0x2C00, 0xA000, 0x2C0, 3},    {0x2C00, 0xA000, 0x2C8, 1},    {0x2C00, 0xA000, 0x29B, 1},
+    {0x2C00, 0xA000, 0x08C, 1},    {0x2C00, 0xA000, 0x0D5, 1},    {0x2C00, 0xA000, 0x284, 0xC},
+    {0x3C00, 0xC000, 0, 0x800},    {0x5C00, 0xF880, 0, 0x60},     {0x5E00, 0xE000, 0, 0x70},
+    {0x5E00, 0xE000, 0x380, 0x70}, {0x5E00, 0xE000, 0x460, 0x70}, {0x5E00, 0xE000, 0x7E0, 0x70},
+    {0x5E00, 0xE000, 0x8B9, 7},    {0x5E00, 0xE000, 0x8C0, 0x70}, {0x5E00, 0xE000, 0x930, 0x70},
+    {0x5E00, 0xE000, 0xCB0, 0x70}, {0x5E00, 0xE000, 0xD89, 7},    {0x9500, 0xF000, 0, 0x36},
+    {0x9500, 0xF000, 0x36, 0x36},  {0x9500, 0xF000, 0x6C, 0x36},
 };
 
-std::array<uint32_t,3> s_active_context_state{};
+std::array<uint32_t, 3> s_active_context_state{};
 
-template<class Visitor>
-void visit_context_words(uint32_t state, Visitor&& visitor) {
+template <class Visitor> void visit_context_words(uint32_t state, Visitor&& visitor) {
     for (const auto& range : kContextRanges) {
         for (uint32_t i = 0; i < range.count; ++i) {
             const uint32_t memory_index = range.first + i;
-            visitor(range.register_base + memory_index,
-                    state + range.memory_offset + memory_index * 4);
+            visitor(range.register_base + memory_index, state + range.memory_offset + memory_index * 4);
         }
     }
 }
@@ -340,32 +331,26 @@ constexpr size_t context_register_words() {
     return words;
 }
 
-template<class ReadWord>
-void restore_context_words(ReadWord&& read_word) {
+template <class ReadWord> void restore_context_words(ReadWord&& read_word) {
     std::vector<Gx2RegisterWrite> writes;
     writes.reserve(context_register_words());
     for (const auto& range : kContextRanges) {
         for (uint32_t i = 0; i < range.count; ++i) {
             const uint32_t memory_index = range.first + i;
-            writes.push_back({range.register_base + memory_index,
-                              read_word(range.memory_offset + memory_index * 4)});
+            writes.push_back({range.register_base + memory_index, read_word(range.memory_offset + memory_index * 4)});
         }
     }
     gx2_render_apply_registers(writes.data(), writes.size());
 
     std::array<uint32_t, 0x400> uniforms{};
-    for (uint32_t i = 0; i < uniforms.size(); ++i)
-        uniforms[i] = read_word(0x3C00 + i * 4);
+    for (uint32_t i = 0; i < uniforms.size(); ++i) uniforms[i] = read_word(0x3C00 + i * 4);
     gx2_render_set_uniform_words(true, 0, uniforms.data(), uint32_t(uniforms.size()));
-    for (uint32_t i = 0; i < uniforms.size(); ++i)
-        uniforms[i] = read_word(0x3C00 + (0x400 + i) * 4);
+    for (uint32_t i = 0; i < uniforms.size(); ++i) uniforms[i] = read_word(0x3C00 + (0x400 + i) * 4);
     gx2_render_set_uniform_words(false, 0, uniforms.data(), uint32_t(uniforms.size()));
 }
 
 void restore_context_state(CPUState* cpu, uint32_t state) {
-    restore_context_words([cpu, state](uint32_t offset) {
-        return rbrew_read32(MEM, state + offset);
-    });
+    restore_context_words([cpu, state](uint32_t offset) { return rbrew_read32(MEM, state + offset); });
 }
 
 // Each range (and each uniform bank) is one contiguous guest run: store it with
@@ -385,7 +370,8 @@ void write_context_run(uint8_t* mem, uint32_t address, const uint32_t* words, ui
 void write_context_state(uint8_t* mem, uint32_t state) {
     std::array<uint32_t, 0x800> words;
     for (const auto& range : kContextRanges) {
-        for (uint32_t i = 0; i < range.count; ++i) words[i] = gx2_render_register(range.register_base + range.first + i);
+        for (uint32_t i = 0; i < range.count; ++i)
+            words[i] = gx2_render_register(range.register_base + range.first + i);
         write_context_run(mem, state + range.memory_offset + range.first * 4, words.data(), range.count);
     }
     for (const bool pixel : {true, false}) {
@@ -400,9 +386,7 @@ uint32_t read_context_snapshot_word(const uint8_t* snapshot, uint32_t offset) {
 }
 
 void restore_context_snapshot(CPUState*, const uint8_t* snapshot) {
-    restore_context_words([snapshot](uint32_t offset) {
-        return read_context_snapshot_word(snapshot, offset);
-    });
+    restore_context_words([snapshot](uint32_t offset) { return read_context_snapshot_word(snapshot, offset); });
 }
 
 void snapshot_context_state(CPUState* cpu, uint32_t state) {
@@ -420,24 +404,23 @@ void save_active_context(CPUState* cpu, uint32_t state) {
     const uint32_t list_size = rbrew_read32(MEM, state + 0x9804);
     if (!list_size) return;
 
-    const uint32_t updated_size = gx2_dl_create_snapshot(
-        cpu, state + 0x9E00, 0x300, restore_context_snapshot,
-        std::span<const uint8_t>(MEM + state, 0x9800));
+    const uint32_t updated_size = gx2_dl_create_snapshot(cpu, state + 0x9E00, 0x300, restore_context_snapshot,
+                                                         std::span<const uint8_t>(MEM + state, 0x9800));
     if (updated_size)
         rbrew_write32(MEM, state + 0x9804, updated_size);
     else
         RBREW_LOGF(stderr, "[gx2] Failed to refresh active context shadow list at %08X\n", state);
 }
-}
+} // namespace
 
 static void GX2SetContextState(CPUState* cpu) {
     if (!ARG0) return; // Native register writes are always shadowed in renderer-owned state.
-    const uint32_t core=rbrew_current_core();
-    if(core>=s_active_context_state.size()) {
-        RBREW_LOGF(stderr,"[gx2] GX2SetContextState received an invalid core id %u\n",core);
+    const uint32_t core = rbrew_current_core();
+    if (core >= s_active_context_state.size()) {
+        RBREW_LOGF(stderr, "[gx2] GX2SetContextState received an invalid core id %u\n", core);
         return;
     }
-    auto& active_context_state=s_active_context_state[core];
+    auto& active_context_state = s_active_context_state[core];
     const uint32_t state = ARG0;
     if (!rbrew_memory_accessible(MEM, state, 0xA100)) {
         RBREW_LOGF(stderr, "[gx2] GX2SetContextState received an invalid state address %08X\n", state);
@@ -446,13 +429,13 @@ static void GX2SetContextState(CPUState* cpu) {
     // The GPU shadows register writes into the active context's memory, so
     // reselecting the active context reloads its current state, not the
     // values captured when it was last switched away from.
-    if (active_context_state &&
-        rbrew_memory_accessible(MEM, active_context_state, 0xA100))
+    if (active_context_state && rbrew_memory_accessible(MEM, active_context_state, 0xA100))
         save_active_context(cpu, active_context_state);
     const uint32_t list_size = rbrew_read32(MEM, state + 0x9804);
     extern bool g_gx2_frame_trace_active;
     if (g_gx2_frame_trace_active)
-        RBREW_LOGF(stderr, "[ftrace] SetContextState core=%u active=%08X state=%08X list=%u\n", core, active_context_state, state, list_size);
+        RBREW_LOGF(stderr, "[ftrace] SetContextState core=%u active=%08X state=%08X list=%u\n", core,
+                   active_context_state, state, list_size);
     if (list_size)
         gx2_dl_call(cpu, state + 0x9E00, list_size);
     else
@@ -475,8 +458,7 @@ static void GX2DrawDone(CPUState* cpu) {
     RET = gx2_native_gpu_finish() ? 1 : 0; // original PPC returns GX2WaitTimeStamp's BOOL in r3
 #else
     static std::atomic_flag missing_gpu_reported = ATOMIC_FLAG_INIT;
-    if (!missing_gpu_reported.test_and_set())
-        RBREW_LOGF(stderr, "[gx2] GX2DrawDone cannot wait without native GL\n");
+    if (!missing_gpu_reported.test_and_set()) RBREW_LOGF(stderr, "[gx2] GX2DrawDone cannot wait without native GL\n");
     RET = 0;
 #endif
 }
@@ -498,10 +480,10 @@ static void GX2Flush(CPUState* cpu) {
 static std::atomic<uint32_t> s_swap_count{0};
 static std::atomic<uint32_t> s_flip_count{0};
 static std::atomic<uint64_t> s_last_flip{0};
-static std::atomic<uint32_t> s_pacer_flag_address{0};   // Gambit pacer object + 0x74 (bit 0: 30 FPS mode)
+static std::atomic<uint32_t> s_pacer_flag_address{0}; // Gambit pacer object + 0x74 (bit 0: 30 FPS mode)
 static std::atomic<uint64_t> s_last_vsync{0};
-static std::atomic<float>    s_last_vsync_wait_ms{0.0f};
-static std::atomic<float>    s_last_present_wait_ms{0.0f};
+static std::atomic<float> s_last_vsync_wait_ms{0.0f};
+static std::atomic<float> s_last_present_wait_ms{0.0f};
 static std::atomic<uint32_t> s_swap_interval{1};
 
 // GX2SetSwapInterval(interval): vblanks between flips (0 = flip at once).
@@ -524,7 +506,7 @@ static void pace_flip() {
     // Default: adaptive (60 FPS cap, a late frame flips at once, never held at
     // 30). The user wants a steady 60 everywhere; "auto" (hold 30 in heavy
     // scenes) and "vsync" (console-strict) stay available for testing.
-    static const int mode = [] {   // 0 off, 1 vblank-quantized, 2 adaptive, 3 auto
+    static const int mode = [] { // 0 off, 1 vblank-quantized, 2 adaptive, 3 auto
         const char* v = std::getenv("RBREW_FRAME_PACING");
         if (v && v[0] == '0') return 0;
         if (v && !std::strcmp(v, "auto")) return 3;
@@ -533,10 +515,13 @@ static void pace_flip() {
     }();
     const uint32_t interval = s_swap_interval.load(std::memory_order_relaxed);
     if (!mode || !interval) return;
-    const uint64_t cycle = uint64_t(RBREW_TIMER_CLOCK) * 1001;   // 60000 vblanks per cycle
-    const auto vblank_index = [cycle](uint64_t ticks) { return (ticks / cycle) * 60000 + (ticks % cycle) * 60000 / cycle; };
-    static uint64_t s_last_flip_index = 0, s_last_flip_ticks = 0;   // swap thread only
-    static uint8_t s_slow[30]{}; static unsigned s_slow_head = 0, s_slow_count = 0;
+    const uint64_t cycle = uint64_t(RBREW_TIMER_CLOCK) * 1001; // 60000 vblanks per cycle
+    const auto vblank_index = [cycle](uint64_t ticks) {
+        return (ticks / cycle) * 60000 + (ticks % cycle) * 60000 / cycle;
+    };
+    static uint64_t s_last_flip_index = 0, s_last_flip_ticks = 0; // swap thread only
+    static uint8_t s_slow[30]{};
+    static unsigned s_slow_head = 0, s_slow_count = 0;
     static bool s_half_rate = false;
     const uint64_t now_ticks = rbrew_system_ticks();
     const uint64_t now_index = vblank_index(now_ticks);
@@ -546,27 +531,36 @@ static void pace_flip() {
         // and the present wait (at 30 FPS the game waits longer itself; counting
         // that kept the lock on after a loading screen). Slow = missed a vblank.
         const double work_ms = double(now_ticks - s_last_flip_ticks) * 1000.0 / RBREW_TIMER_CLOCK -
-            s_last_vsync_wait_ms.load(std::memory_order_relaxed) - s_last_present_wait_ms.load(std::memory_order_relaxed);
+                               s_last_vsync_wait_ms.load(std::memory_order_relaxed) -
+                               s_last_present_wait_ms.load(std::memory_order_relaxed);
         const uint8_t slow = work_ms > 17.0 ? 1 : 0, fast = work_ms < 15.0 ? 1 : 0;
-        s_slow_count += slow - s_slow[s_slow_head];   // counts slow frames in the window
-        s_slow[s_slow_head] = slow; s_slow_head = (s_slow_head + 1) % 30;
-        static uint8_t s_fast[30]{}; static unsigned s_fast_head = 0, s_fast_count = 0;
+        s_slow_count += slow - s_slow[s_slow_head]; // counts slow frames in the window
+        s_slow[s_slow_head] = slow;
+        s_slow_head = (s_slow_head + 1) % 30;
+        static uint8_t s_fast[30]{};
+        static unsigned s_fast_head = 0, s_fast_count = 0;
         s_fast_count += fast - s_fast[s_fast_head];
-        s_fast[s_fast_head] = fast; s_fast_head = (s_fast_head + 1) % 30;
-        if (!s_half_rate && s_slow_count >= 20) s_half_rate = true;
-        else if (s_half_rate && s_fast_count >= 24) s_half_rate = false;
+        s_fast[s_fast_head] = fast;
+        s_fast_head = (s_fast_head + 1) % 30;
+        if (!s_half_rate && s_slow_count >= 20)
+            s_half_rate = true;
+        else if (s_half_rate && s_fast_count >= 24)
+            s_half_rate = false;
         if (s_half_rate) effective = std::max(effective, 2u);
     }
-    const uint64_t target_index = mode == 1 ? std::max(s_last_flip_index + effective, now_index + 1)
-                                            : s_last_flip_index + effective;
+    const uint64_t target_index =
+        mode == 1 ? std::max(s_last_flip_index + effective, now_index + 1) : s_last_flip_index + effective;
     if (s_last_flip_index && target_index > now_index) {
         Gx2PerfScope perf_scope(kPerfVsync);
         const auto wait_start = std::chrono::steady_clock::now();
         const uint64_t target = gx2_vblank_tick(target_index, RBREW_TIMER_CLOCK);
-        rbrew_host_sleep_until(rbrew_boot_time + std::chrono::nanoseconds(
-            target / RBREW_TIMER_CLOCK * 1000000000ull + target % RBREW_TIMER_CLOCK * 1000000000ull / RBREW_TIMER_CLOCK + 1u));
-        s_last_vsync_wait_ms.fetch_add(std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - wait_start).count(),
-                                       std::memory_order_relaxed);
+        rbrew_host_sleep_until(rbrew_boot_time +
+                               std::chrono::nanoseconds(target / RBREW_TIMER_CLOCK * 1000000000ull +
+                                                        target % RBREW_TIMER_CLOCK * 1000000000ull / RBREW_TIMER_CLOCK +
+                                                        1u));
+        s_last_vsync_wait_ms.fetch_add(
+            std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - wait_start).count(),
+            std::memory_order_relaxed);
         s_last_flip_index = target_index;
     } else {
         s_last_flip_index = now_index;
@@ -596,7 +590,10 @@ static void GX2WaitForVsync(CPUState* cpu) {
     // The plaza steps its game logic in fixed 2-vblank steps (its pacer's 30
     // FPS mode), so skipping this wait runs it faster than the console. Off by
     // default; RBREW_VSYNC_WAIT_LATE=0 skips it (testing).
-    static const bool wait_late = [] { const char* v = std::getenv("RBREW_VSYNC_WAIT_LATE"); return !(v && v[0] == '0'); }();
+    static const bool wait_late = [] {
+        const char* v = std::getenv("RBREW_VSYNC_WAIT_LATE");
+        return !(v && v[0] == '0');
+    }();
     const uint64_t vblank_ticks = uint64_t(RBREW_TIMER_CLOCK) * 1001 / 60000;
     const uint64_t last_flip = s_last_flip.load(std::memory_order_relaxed);
     const bool late = !wait_late && last_flip && now > last_flip && now - last_flip >= vblank_ticks &&
@@ -607,7 +604,10 @@ static void GX2WaitForVsync(CPUState* cpu) {
     // Kept by default: skipping it runs a 30 FPS-mode scene's fixed-step logic
     // too fast (the plaza now runs in the 60 FPS mode, see RBREW_PLAZA_60FPS).
     // RBREW_GAME_30FPS=0 skips the wait (testing).
-    static const bool keep_30 = [] { const char* v = std::getenv("RBREW_GAME_30FPS"); return !(v && v[0] == '0'); }();
+    static const bool keep_30 = [] {
+        const char* v = std::getenv("RBREW_GAME_30FPS");
+        return !(v && v[0] == '0');
+    }();
     const bool pacer = cpu && cpu->lr == 0x02796D7Cu;
     // The pacer's object is in r31 (callee-saved) here: remember where its
     // 30 FPS-mode flag lives so GX2SwapScanBuffers can switch the game to its
@@ -618,21 +618,26 @@ static void GX2WaitForVsync(CPUState* cpu) {
     // frames only to catch up with real time; they must not wait for two
     // vblanks, so the pacer's wait is skipped there.
     const bool plaza_catch_up = pacer && rbrew_control_defaults::active_scene_type(MEM) == 2 &&
-        rbrew_settings::g_plaza_60fps.load(std::memory_order_relaxed) && [] {
-        const char* v = std::getenv("RBREW_PLAZA_60FPS"); return !(v && (v[0] == '0' || v[0] == '1')); }();
+                                rbrew_settings::g_plaza_60fps.load(std::memory_order_relaxed) && [] {
+                                    const char* v = std::getenv("RBREW_PLAZA_60FPS");
+                                    return !(v && (v[0] == '0' || v[0] == '1'));
+                                }();
     if ((!keep_30 || plaza_catch_up) && pacer && s_flip_count.load() == s_swap_count.load()) {
         s_last_vsync_wait_ms.fetch_add(0.0f, std::memory_order_relaxed);
         return;
     }
     if (target > now && !late) {
-        rbrew_host_sleep_until(rbrew_boot_time + std::chrono::nanoseconds(
-            target / RBREW_TIMER_CLOCK * 1000000000ull + target % RBREW_TIMER_CLOCK * 1000000000ull / RBREW_TIMER_CLOCK + 1u));
+        rbrew_host_sleep_until(rbrew_boot_time +
+                               std::chrono::nanoseconds(target / RBREW_TIMER_CLOCK * 1000000000ull +
+                                                        target % RBREW_TIMER_CLOCK * 1000000000ull / RBREW_TIMER_CLOCK +
+                                                        1u));
     }
     waiter.complete(rbrew_system_ticks(), RBREW_TIMER_CLOCK);
     uint64_t previous = s_last_vsync.load(std::memory_order_relaxed);
     while (previous < waiter.observed &&
            !s_last_vsync.compare_exchange_weak(previous, waiter.observed, std::memory_order_relaxed)) {}
-    const float vsync_dur = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - vsync_start).count();
+    const float vsync_dur =
+        std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - vsync_start).count();
     s_last_vsync_wait_ms.fetch_add(vsync_dur, std::memory_order_relaxed);
 }
 
@@ -643,8 +648,14 @@ static void GX2GetSwapStatus(CPUState* cpu) {
     const uint64_t flip_time = s_last_flip.load(), vsync_time = s_last_vsync.load();
     if (ARG0) rbrew_write32(MEM, ARG0, swaps);
     if (ARG1) rbrew_write32(MEM, ARG1, flips);
-    if (ARG2) { rbrew_write32(MEM, ARG2, uint32_t(flip_time >> 32)); rbrew_write32(MEM, ARG2 + 4, uint32_t(flip_time)); }
-    if (ARG3) { rbrew_write32(MEM, ARG3, uint32_t(vsync_time >> 32)); rbrew_write32(MEM, ARG3 + 4, uint32_t(vsync_time)); }
+    if (ARG2) {
+        rbrew_write32(MEM, ARG2, uint32_t(flip_time >> 32));
+        rbrew_write32(MEM, ARG2 + 4, uint32_t(flip_time));
+    }
+    if (ARG3) {
+        rbrew_write32(MEM, ARG3, uint32_t(vsync_time >> 32));
+        rbrew_write32(MEM, ARG3 + 4, uint32_t(vsync_time));
+    }
 }
 
 // GX2CopyColorBufferToScanBuffer(colorBuffer*, scanTarget)
@@ -655,11 +666,15 @@ static void GX2CopyColorBufferToScanBuffer(CPUState* cpu) {
     // snapshot it and post the copy behind the frame's draws.
     if (ARG0 && rbrew_memory_accessible(MEM, ARG0, GX2CB_SIZEOF) && gx2_native_async_active()) {
         struct ScanCopy final : Gx2AsyncWork {
-            uint32_t address, target; uint8_t* mem; std::array<uint8_t, GX2CB_SIZEOF> descriptor;
+            uint32_t address, target;
+            uint8_t* mem;
+            std::array<uint8_t, GX2CB_SIZEOF> descriptor;
             void run() override { gx2_render_copy_to_scan(address, target, mem, descriptor.data()); }
         };
         auto* copy = new ScanCopy;
-        copy->address = ARG0; copy->target = ARG1; copy->mem = MEM;
+        copy->address = ARG0;
+        copy->target = ARG1;
+        copy->mem = MEM;
         std::copy_n(MEM + ARG0, GX2CB_SIZEOF, copy->descriptor.data());
         gx2_native_post(copy);
         return;
@@ -694,14 +709,18 @@ namespace {
 // =0: the game's own 30 FPS plaza.
 HostFunc s_plaza_sync_original = nullptr;
 void plaza_mode_sync(CPUState* cpu) {
-    static const bool adaptive = [] { const char* v = std::getenv("RBREW_PLAZA_60FPS"); return !(v && v[0] == '1'); }();
+    static const bool adaptive = [] {
+        const char* v = std::getenv("RBREW_PLAZA_60FPS");
+        return !(v && v[0] == '1');
+    }();
     using clock = std::chrono::steady_clock;
     constexpr double kStepMs = 1000.0 * 1001.0 / 60000.0;
     static clock::time_point last{};
-    static double behind_ms = 0;   // real time not yet covered by logic steps
+    static double behind_ms = 0; // real time not yet covered by logic steps
     const auto now = clock::now();
     if (last.time_since_epoch().count())
-        behind_ms = std::clamp(behind_ms + std::chrono::duration<double, std::milli>(now - last).count() - kStepMs, -kStepMs, 2 * kStepMs);
+        behind_ms = std::clamp(behind_ms + std::chrono::duration<double, std::milli>(now - last).count() - kStepMs,
+                               -kStepMs, 2 * kStepMs);
     last = now;
     const uint32_t object = cpu->r[3];
     if (object && rbrew_memory_accessible(cpu->mem, object + 0x304, 4)) {
@@ -710,7 +729,8 @@ void plaza_mode_sync(CPUState* cpu) {
         // gate owns the bit for that object while the plaza (scene kind 2) runs.
         static uint32_t s_requester = 0;
         if (request & 1u) s_requester = object;
-        const bool owned = adaptive && object == s_requester && rbrew_control_defaults::active_scene_type(cpu->mem) == 2;
+        const bool owned =
+            adaptive && object == s_requester && rbrew_control_defaults::active_scene_type(cpu->mem) == 2;
         // ESC menu "Plaza 60 FPS" off: the plaza's own 30 FPS request again.
         const bool menu_on = rbrew_settings::g_plaza_60fps.load(std::memory_order_relaxed);
         bool want_30 = owned && !menu_on;
@@ -718,7 +738,9 @@ void plaza_mode_sync(CPUState* cpu) {
             // Finish a 30 FPS frame once begun: its second (undrawn) iteration
             // runs with bit 1 of the framework flags set.
             const uint32_t flags_address = s_pacer_flag_address.load(std::memory_order_relaxed);
-            const uint32_t flags = flags_address && rbrew_memory_accessible(cpu->mem, flags_address, 4) ? rbrew_read32(cpu->mem, flags_address) : 0;
+            const uint32_t flags = flags_address && rbrew_memory_accessible(cpu->mem, flags_address, 4)
+                                       ? rbrew_read32(cpu->mem, flags_address)
+                                       : 0;
             want_30 = ((flags & 3u) == 3u) || behind_ms >= kStepMs / 2;
         }
         // Only the plaza is changed; other scenes keep their own request.
@@ -726,22 +748,32 @@ void plaza_mode_sync(CPUState* cpu) {
         const uint32_t wanted = want_30 ? (request | 1u) : (request & ~1u);
         if (plaza && wanted != request) rbrew_write32(cpu->mem, object + 0x304, wanted);
         // RBREW_PLAZA_STATS=<file> (diagnostics): calls, requests and 30 FPS frames per second.
-        static FILE* stats = [] { const char* p = std::getenv("RBREW_PLAZA_STATS"); return p && *p ? std::fopen(p, "w") : nullptr; }();
+        static FILE* stats = [] {
+            const char* p = std::getenv("RBREW_PLAZA_STATS");
+            return p && *p ? std::fopen(p, "w") : nullptr;
+        }();
         if (stats) {
             static clock::time_point second = now;
             static unsigned calls = 0, requests = 0, thirty = 0;
-            ++calls; requests += request & 1u; thirty += want_30;
+            ++calls;
+            requests += request & 1u;
+            thirty += want_30;
             if (now - second >= std::chrono::seconds(1)) {
-                std::fprintf(stats, "calls %u requests %u thirty %u behind %.1f ms\n", calls, requests, thirty, behind_ms);
+                std::fprintf(stats, "calls %u requests %u thirty %u behind %.1f ms\n", calls, requests, thirty,
+                             behind_ms);
                 std::fflush(stats);
-                calls = requests = thirty = 0; second = now;
+                calls = requests = thirty = 0;
+                second = now;
             }
         }
     }
     s_plaza_sync_original(cpu);
 }
 void install_plaza_60fps(CPUState* cpu) {
-    static const bool enabled = [] { const char* v = std::getenv("RBREW_PLAZA_60FPS"); return !(v && v[0] == '0'); }();
+    static const bool enabled = [] {
+        const char* v = std::getenv("RBREW_PLAZA_60FPS");
+        return !(v && v[0] == '0');
+    }();
     static bool installed = false;
     constexpr uint32_t kSync = 0x02A092A8u;
     if (!enabled || installed || !cpu || (kSync >> 2) >= cpu->dispatch_size || !cpu->dispatch_table[kSync >> 2]) return;
@@ -750,7 +782,7 @@ void install_plaza_60fps(CPUState* cpu) {
     cpu->dispatch_table[kSync >> 2] = plaza_mode_sync;
     std::fprintf(stderr, "[gx2] plaza 60 FPS mode sync installed\n");
 }
-}
+} // namespace
 
 // GX2SwapScanBuffers()
 // Called every frame — pump SDL events, blit game FBO to window, swap buffers.
@@ -761,8 +793,7 @@ static void GX2SwapScanBuffers(CPUState* cpu) {
     static frame_clock::time_point s_prev_swap_tp{};
     const frame_clock::time_point swap_start_tp = frame_clock::now();
     check_controller_hotplug_periodic();
-    if (s_swap_count.fetch_add(1) == 0)
-        RBREW_LOGF(stderr, "[gx2] GX2SwapScanBuffers called for the first time\n");
+    if (s_swap_count.fetch_add(1) == 0) RBREW_LOGF(stderr, "[gx2] GX2SwapScanBuffers called for the first time\n");
     rbrew_benchmark::frame.store(s_swap_count.load(), std::memory_order_relaxed);
     rbrew_benchmark::frame_draws.store(rbrew_benchmark::guest_draws.exchange(0, std::memory_order_relaxed),
                                        std::memory_order_relaxed);
@@ -772,12 +803,10 @@ static void GX2SwapScanBuffers(CPUState* cpu) {
         // Pump SDL events first
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
-            gx2_imgui::process_event(ev);                // queued for the render thread
-            if (gx2_imgui::menu_event(ev)) continue;     // ESC menu (vk/gx2_imgui_overlay.h)
+            gx2_imgui::process_event(ev);            // queued for the render thread
+            if (gx2_imgui::menu_event(ev)) continue; // ESC menu (vk/gx2_imgui_overlay.h)
             switch (ev.type) {
-            case SDL_QUIT:
-                gx2_close_requested();
-                break;
+            case SDL_QUIT: gx2_close_requested(); break;
 
             case SDL_KEYDOWN:
                 if (ev.key.repeat) break;
@@ -809,33 +838,23 @@ static void GX2SwapScanBuffers(CPUState* cpu) {
                 }
                 break;
 
-            case SDL_CONTROLLERDEVICEADDED:
-                on_controller_device_added(ev.cdevice.which);
-                break;
+            case SDL_CONTROLLERDEVICEADDED: on_controller_device_added(ev.cdevice.which); break;
 
-            case SDL_CONTROLLERDEVICEREMOVED:
-                on_controller_device_removed(ev.cdevice.which);
-                break;
+            case SDL_CONTROLLERDEVICEREMOVED: on_controller_device_removed(ev.cdevice.which); break;
 
-            case SDL_JOYDEVICEADDED:
-                on_controller_device_added(ev.jdevice.which);
-                break;
+            case SDL_JOYDEVICEADDED: on_controller_device_added(ev.jdevice.which); break;
 
-            case SDL_JOYDEVICEREMOVED:
-                on_controller_device_removed(ev.jdevice.which);
-                break;
+            case SDL_JOYDEVICEREMOVED: on_controller_device_removed(ev.jdevice.which); break;
 
             case SDL_MOUSEBUTTONDOWN:
-                if (g_screen_mode == ScreenMode::Gamepad &&
-                    ev.button.button == SDL_BUTTON_LEFT) {
+                if (g_screen_mode == ScreenMode::Gamepad && ev.button.button == SDL_BUTTON_LEFT) {
                     map_mouse_to_touch(ev.button.x, ev.button.y);
                     g_touch_state.touched = true;
                 }
                 break;
 
             case SDL_MOUSEBUTTONUP:
-                if (g_screen_mode == ScreenMode::Gamepad &&
-                    ev.button.button == SDL_BUTTON_LEFT) {
+                if (g_screen_mode == ScreenMode::Gamepad && ev.button.button == SDL_BUTTON_LEFT) {
                     g_touch_state.touched = false;
                 }
                 break;
@@ -846,8 +865,7 @@ static void GX2SwapScanBuffers(CPUState* cpu) {
                 }
                 break;
 
-            default:
-                break;
+            default: break;
             }
         }
 
@@ -855,10 +873,16 @@ static void GX2SwapScanBuffers(CPUState* cpu) {
         bool gamepad = (g_screen_mode == ScreenMode::Gamepad);
         if (gx2_native_async_active()) {
             struct Present final : Gx2AsyncWork {
-                SDL_Window* window; bool gamepad;
+                SDL_Window* window;
+                bool gamepad;
                 Present(SDL_Window* w, bool g) : window(w), gamepad(g) {}
                 void run() override {
-                    struct Done { ~Done() { s_presents_done.fetch_add(1, std::memory_order_release); s_presents_done.notify_all(); } } done;
+                    struct Done {
+                        ~Done() {
+                            s_presents_done.fetch_add(1, std::memory_order_release);
+                            s_presents_done.notify_all();
+                        }
+                    } done;
                     gx2_render_present(window, gamepad);
                 }
             };
@@ -873,12 +897,14 @@ static void GX2SwapScanBuffers(CPUState* cpu) {
             for (uint64_t done = s_presents_done.load(std::memory_order_acquire); done < posted;
                  done = s_presents_done.load(std::memory_order_acquire))
                 s_presents_done.wait(done, std::memory_order_acquire);
-            const float pres_dur = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - pres_start).count();
+            const float pres_dur =
+                std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - pres_start).count();
             s_last_present_wait_ms.store(pres_dur, std::memory_order_relaxed);
         } else {
             const auto pres_start = std::chrono::steady_clock::now();
             gx2_native_run(true, [&] { gx2_render_present(s_window, gamepad); });
-            const float pres_dur = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - pres_start).count();
+            const float pres_dur =
+                std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - pres_start).count();
             s_last_present_wait_ms.store(pres_dur, std::memory_order_relaxed);
         }
     }
@@ -892,14 +918,19 @@ static void GX2SwapScanBuffers(CPUState* cpu) {
     // FPS mode Gambit's loop (02818E7C) draws every other iteration and the
     // undrawn ones do the remaining work; drawing every iteration instead
     // left the plaza black.
-    static const bool force_60 = [] { const char* v = std::getenv("RBREW_GAME_60FPS_MODE"); return v && v[0] == '1'; }();
+    static const bool force_60 = [] {
+        const char* v = std::getenv("RBREW_GAME_60FPS_MODE");
+        return v && v[0] == '1';
+    }();
     if (force_60 && cpu) {
         const uint32_t flag = s_pacer_flag_address.load(std::memory_order_relaxed);
         if (flag && rbrew_memory_accessible(MEM, flag, 4)) {
             const uint32_t value = rbrew_read32(MEM, flag);
             if (value & 1u) {
                 static unsigned logged = 0;
-                if (logged++ < 4) std::fprintf(stderr, "[gx2] game 30 FPS mode flag %08X = %08X cleared (frame %u)\n", flag, value, s_swap_count.load());
+                if (logged++ < 4)
+                    std::fprintf(stderr, "[gx2] game 30 FPS mode flag %08X = %08X cleared (frame %u)\n", flag, value,
+                                 s_swap_count.load());
                 rbrew_write32(MEM, flag, value & ~1u);
             }
         }
@@ -911,29 +942,28 @@ static void GX2SwapScanBuffers(CPUState* cpu) {
     const auto swap_end_tp = frame_clock::now();
     // Completion-to-completion: the current present and preceding guest/vsync
     // work belong to the same interval. The first sample has no predecessor.
-    const float frame_delta_ms = s_prev_swap_tp == frame_clock::time_point{} ? 0.0f :
-        float(std::chrono::duration<double, std::milli>(swap_end_tp - s_prev_swap_tp).count());
+    const float frame_delta_ms =
+        s_prev_swap_tp == frame_clock::time_point{}
+            ? 0.0f
+            : float(std::chrono::duration<double, std::milli>(swap_end_tp - s_prev_swap_tp).count());
     s_prev_swap_tp = swap_end_tp;
-    const float cpu_duration_ms = float(std::chrono::duration<double, std::milli>(frame_clock::now() - swap_start_tp).count());
+    const float cpu_duration_ms =
+        float(std::chrono::duration<double, std::milli>(frame_clock::now() - swap_start_tp).count());
     const float vsync_wait_ms = s_last_vsync_wait_ms.exchange(0.0f, std::memory_order_relaxed);
     const float present_wait_ms = s_last_present_wait_ms.exchange(0.0f, std::memory_order_relaxed);
     const float guest_work_ms = std::max(0.0f, frame_delta_ms - (vsync_wait_ms + present_wait_ms));
 
-    SplatoonDiagnostics::RecordFrame(
-        uint32_t(s_swap_count.load()),
-        frame_delta_ms,
-        guest_work_ms,
-        present_wait_ms, vsync_wait_ms, cpu_duration_ms,
-        0, 0, 0,
-        uint8_t(g_screen_mode)
-    );
+    SplatoonDiagnostics::RecordFrame(uint32_t(s_swap_count.load()), frame_delta_ms, guest_work_ms, present_wait_ms,
+                                     vsync_wait_ms, cpu_duration_ms, 0, 0, 0, uint8_t(g_screen_mode));
 
     static FILE* benchmark_csv = [] {
         const char* path = std::getenv("RBREW_BENCHMARK_CSV");
         FILE* file = path && *path ? std::fopen(path, "w") : nullptr;
         if (file) {
             std::setvbuf(file, nullptr, _IOFBF, 65536);
-            std::fprintf(file, "Frame,Scene,FrameTime_ms,GuestWork_ms,VSyncWait_ms,PresentWait_ms,Capture,Profile,Draws,Submits\n");
+            std::fprintf(
+                file,
+                "Frame,Scene,FrameTime_ms,GuestWork_ms,VSyncWait_ms,PresentWait_ms,Capture,Profile,Draws,Submits\n");
         }
         return file;
     }();
@@ -943,10 +973,10 @@ static void GX2SwapScanBuffers(CPUState* cpu) {
         static uint64_t s_last_submissions = 0;
         const uint64_t submissions = gx2_render_vk_submissions();
         const uint64_t frame_submissions = submissions - std::exchange(s_last_submissions, submissions);
-        std::fprintf(benchmark_csv, "%u,%d,%.6f,%.6f,%.6f,%.6f,%u,%u,%u,%llu\n", benchmark_frame,
-            rbrew_control_defaults::active_scene_type(MEM), frame_delta_ms, guest_work_ms,
-            vsync_wait_ms, present_wait_ms,
-            rbrew_benchmark::captured_frame.load(std::memory_order_relaxed) == benchmark_frame,
+        std::fprintf(
+            benchmark_csv, "%u,%d,%.6f,%.6f,%.6f,%.6f,%u,%u,%u,%llu\n", benchmark_frame,
+            rbrew_control_defaults::active_scene_type(MEM), frame_delta_ms, guest_work_ms, vsync_wait_ms,
+            present_wait_ms, rbrew_benchmark::captured_frame.load(std::memory_order_relaxed) == benchmark_frame,
             unsigned(rbrew_benchmark::profiling.load(std::memory_order_relaxed)),
             rbrew_benchmark::frame_draws.load(std::memory_order_relaxed), (unsigned long long)frame_submissions);
         if (benchmark_frame % 60 == 0) std::fflush(benchmark_csv);
@@ -954,9 +984,12 @@ static void GX2SwapScanBuffers(CPUState* cpu) {
     static const bool frame_profile = std::getenv("RBREW_FRAME_PROFILE") != nullptr;
     static uint32_t s_frame_profile_counter = 0;
     if (++s_frame_profile_counter % 60 == 0 && frame_profile) {
-        std::fprintf(stderr, "[FRAME_PROFILE] Frame %5u: Delta=%.2fms (%.1f FPS) | GuestWork=%.2fms | VSyncWait=%.2fms | PresentWait=%.2fms | SwapProc=%.2fms\n",
-                     s_frame_profile_counter, frame_delta_ms, (frame_delta_ms > 0.01f ? 1000.0f / frame_delta_ms : 0.0f),
-                     guest_work_ms, vsync_wait_ms, present_wait_ms, cpu_duration_ms);
+        std::fprintf(stderr,
+                     "[FRAME_PROFILE] Frame %5u: Delta=%.2fms (%.1f FPS) | GuestWork=%.2fms | VSyncWait=%.2fms | "
+                     "PresentWait=%.2fms | SwapProc=%.2fms\n",
+                     s_frame_profile_counter, frame_delta_ms,
+                     (frame_delta_ms > 0.01f ? 1000.0f / frame_delta_ms : 0.0f), guest_work_ms, vsync_wait_ms,
+                     present_wait_ms, cpu_duration_ms);
         std::fflush(stderr);
     }
 #if defined(HAVE_SDL2)
@@ -996,21 +1029,37 @@ static void GX2SetTVEnable(CPUState* cpu) {
 }
 
 // GX2SetDRCEnable(enable)
-static void GX2SetDRCEnable(CPUState* cpu) { (void)cpu; }
+static void GX2SetDRCEnable(CPUState* cpu) {
+    (void)cpu;
+}
 
 // GX2GetSystemTVScanMode() → GX2_TV_SCAN_MODE_1080P (4)
-static void GX2GetSystemTVScanMode(CPUState* cpu) { RET = 4; }
+static void GX2GetSystemTVScanMode(CPUState* cpu) {
+    RET = 4;
+}
 
 // GX2GetSystemDRCScanMode() → GX2_DRC_SCAN_MODE_DISABLED (0)
-static void GX2GetSystemDRCScanMode(CPUState* cpu) { RET = 0; }
+static void GX2GetSystemDRCScanMode(CPUState* cpu) {
+    RET = 0;
+}
 
-static void GX2SetTVGamma(CPUState* cpu)  { (void)cpu; }
-static void GX2SetDRCScale(CPUState* cpu) { (void)cpu; }
-static void GX2GetLastFrame(CPUState* cpu){ (void)cpu; }
+static void GX2SetTVGamma(CPUState* cpu) {
+    (void)cpu;
+}
+static void GX2SetDRCScale(CPUState* cpu) {
+    (void)cpu;
+}
+static void GX2GetLastFrame(CPUState* cpu) {
+    (void)cpu;
+}
 
-static void GX2GetLastFrameGamma(CPUState* cpu) { cpu->f[1] = 2.2; }
+static void GX2GetLastFrameGamma(CPUState* cpu) {
+    cpu->f[1] = 2.2;
+}
 
-static void GX2SetDefaultState(CPUState* cpu) { gx2_draw_set_default_state(cpu); }
+static void GX2SetDefaultState(CPUState* cpu) {
+    gx2_draw_set_default_state(cpu);
+}
 
 static void GX2CalcContextStateSize(CPUState* cpu) {
     if (ARG0) rbrew_write32(MEM, ARG0, 0x1000u);
@@ -1027,16 +1076,17 @@ static void GX2SetupContextStateEx(CPUState* cpu) {
     snapshot_context_state(cpu, state);
     gx2_render_save_context_state(state);
     if ((flags & 2) == 0) {
-        const uint32_t size = gx2_dl_create_snapshot(
-            cpu, state + 0x9E00, 0x300, restore_context_snapshot,
-            std::span<const uint8_t>(MEM + state, 0x9800));
+        const uint32_t size = gx2_dl_create_snapshot(cpu, state + 0x9E00, 0x300, restore_context_snapshot,
+                                                     std::span<const uint8_t>(MEM + state, 0x9800));
         rbrew_write32(MEM, state + 0x9804, size);
     }
 }
 
 // Cafe's Latte/GPU7 compatibility revision, independent of the host GPU.
 // GFD readers use this no-argument query to validate shader file headers.
-static void GX2TempGetGPUVersion(CPUState* cpu) { RET = 2; }
+static void GX2TempGetGPUVersion(CPUState* cpu) {
+    RET = 2;
+}
 
 // ---------------------------------------------------------------------------
 // Registration
@@ -1055,7 +1105,10 @@ static void GX2TempGetGPUVersion(CPUState* cpu) { RET = 2; }
 // GX2GetContextStateDisplayList, waits for the queue first.
 // RBREW_CONTEXT_STATE_SYNC=1 restores the synchronous switch.
 static bool context_state_sync() {
-    static const bool sync = [] { const char* v = std::getenv("RBREW_CONTEXT_STATE_SYNC"); return v && v[0] == '1'; }();
+    static const bool sync = [] {
+        const char* v = std::getenv("RBREW_CONTEXT_STATE_SYNC");
+        return v && v[0] == '1';
+    }();
     return sync;
 }
 static void GX2SetContextStateCall(CPUState* cpu) {
@@ -1073,7 +1126,6 @@ static void GX2GetContextStateDisplayListCall(CPUState* cpu) {
     GX2_NATIVE_CALL(GX2GetContextStateDisplayList)(cpu);
 }
 #endif
-
 
 void gx2_context_register(CPUState* cpu) {
 #if defined(HAVE_SDL2)

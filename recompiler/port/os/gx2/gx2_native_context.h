@@ -14,10 +14,10 @@
 #include "gx2_perf.h"
 #include <string_view>
 #include <type_traits>
-void gx2_native_set_context(void* window, void* context);  // current on the caller
-void* gx2_native_window();   // window given to gx2_native_set_context
+void gx2_native_set_context(void* window, void* context); // current on the caller
+void* gx2_native_window();                                // window given to gx2_native_set_context
 void gx2_native_start_render_thread();
-void gx2_native_stop_render_thread();  // the context returns to the caller
+void gx2_native_stop_render_thread(); // the context returns to the caller
 void gx2_native_enter(bool gpu = true);
 void gx2_native_leave();
 void gx2_native_gpu_flush();
@@ -36,9 +36,11 @@ using Gx2Task = void (*)(void*);
 #if defined(HAVE_SDL2)
 void gx2_native_execute(bool gpu, Gx2Task task, void* context);
 #else
-inline void gx2_native_execute(bool, Gx2Task task, void* context) { task(context); }
+inline void gx2_native_execute(bool, Gx2Task task, void* context) {
+    task(context);
+}
 #endif
-template<class F> void gx2_native_run(bool gpu, F&& f) {
+template <class F> void gx2_native_run(bool gpu, F&& f) {
     gx2_native_execute(gpu, [](void* p) { (*static_cast<std::remove_reference_t<F>*>(p))(); }, &f);
 }
 
@@ -53,14 +55,21 @@ struct Gx2AsyncWork {
     virtual void run() = 0;
 };
 #if defined(HAVE_SDL2)
-bool gx2_native_async_active();               // this thread may post
+bool gx2_native_async_active(); // this thread may post
 bool gx2_native_queue_idle();
-void gx2_native_post(Gx2AsyncWork* work);     // takes ownership
+void gx2_native_post(Gx2AsyncWork* work); // takes ownership
 #else
 // Builds without a window (front-end unit tests) run everything on the caller.
-inline bool gx2_native_async_active() { return false; }
-inline bool gx2_native_queue_idle() { return true; }
-inline void gx2_native_post(Gx2AsyncWork* work) { work->run(); delete work; }
+inline bool gx2_native_async_active() {
+    return false;
+}
+inline bool gx2_native_queue_idle() {
+    return true;
+}
+inline void gx2_native_post(Gx2AsyncWork* work) {
+    work->run();
+    delete work;
+}
 #endif
 
 // What a GX2 entry point needs besides guest memory. None: display-list
@@ -71,10 +80,9 @@ constexpr Gx2Access gx2_access(std::string_view name) {
     if (name == "GX2InitFetchShaderEx") return Gx2Access::State;
     // GX2Invalidate posts its texture work itself; depth expansion has none.
     if (name == "GX2Invalidate" || name == "GX2ExpandDepthBuffer") return Gx2Access::None;
-    for (std::string_view free : {"GX2BeginDisplayListEx", "GX2EndDisplayList", "GX2PatchDisplayList",
-                                  "GX2WaitForVsync", "GX2DrawDone", "GX2Flush", "GX2TempGetGPUVersion",
-                                  "GX2CopyColorBufferToScanBuffer",
-                                  "GX2SwapScanBuffers"})
+    for (std::string_view free :
+         {"GX2BeginDisplayListEx", "GX2EndDisplayList", "GX2PatchDisplayList", "GX2WaitForVsync", "GX2DrawDone",
+          "GX2Flush", "GX2TempGetGPUVersion", "GX2CopyColorBufferToScanBuffer", "GX2SwapScanBuffers"})
         if (name == free) return Gx2Access::None;
     for (std::string_view query : {"GX2Calc", "GX2Init", "GX2Get"})
         if (name.substr(0, query.size()) == query) return Gx2Access::None;
@@ -84,13 +92,15 @@ constexpr Gx2Access gx2_access(std::string_view name) {
 // Command calls made while this core has an open display list are recorded
 // for replay (gx2_display_list) instead of being executed; snapshot calls
 // record themselves. Neither touches the renderer.
-template<void(*Function)(struct CPUState*), bool Command = false, bool RecordsItself = false,
-         Gx2Access Access = Gx2Access::Gpu, bool Sync = false>
+template <void (*Function)(struct CPUState*), bool Command = false, bool RecordsItself = false,
+          Gx2Access Access = Gx2Access::Gpu, bool Sync = false>
 void gx2_native_call(CPUState* cpu) {
     if constexpr (Command || RecordsItself) {
         if (Sync ? gx2_dl_list_open() : gx2_dl_recording()) {
-            if constexpr (Command) gx2_dl_record(Function, cpu);
-            else Function(cpu);
+            if constexpr (Command)
+                gx2_dl_record(Function, cpu);
+            else
+                Function(cpu);
             return;
         }
     }
@@ -102,5 +112,5 @@ void gx2_native_call(CPUState* cpu) {
         if (start) gx2_perf_function(1, reinterpret_cast<const void*>(Function), gx2_perf_now() - start);
     }
 }
-#define GX2_NATIVE_CALL(name) \
+#define GX2_NATIVE_CALL(name)                                                                                          \
     gx2_native_call<name, gx2_is_command(#name), gx2_records_itself(#name), gx2_access(#name), gx2_sync_command(#name)>

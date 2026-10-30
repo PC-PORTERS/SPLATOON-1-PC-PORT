@@ -34,23 +34,21 @@ public:
     std::optional<RpxModule> load(const std::filesystem::path& path);
 
     /// Load an RPX from a memory buffer (useful for tests / embedded scenarios).
-    std::optional<RpxModule> load(std::span<const uint8_t> bytes,
-                                  std::string module_name = "unknown");
+    std::optional<RpxModule> load(std::span<const uint8_t> bytes, std::string module_name = "unknown");
 
 private:
     bool decode_file_info(const elf::ElfImage& img, RpxModule& out);
-    bool decode_sections (const elf::ElfImage& img,
-                          std::span<const uint8_t> raw, RpxModule& out);
-    bool decode_symbols  (const elf::ElfImage& img, RpxModule& out);
-    bool decode_exports  (const elf::ElfImage& img, RpxModule& out);
-    bool decode_imports  (const elf::ElfImage& img, RpxModule& out);
-    bool decode_relocs   (const elf::ElfImage& img, RpxModule& out);
+    bool decode_sections(const elf::ElfImage& img, std::span<const uint8_t> raw, RpxModule& out);
+    bool decode_symbols(const elf::ElfImage& img, RpxModule& out);
+    bool decode_exports(const elf::ElfImage& img, RpxModule& out);
+    bool decode_imports(const elf::ElfImage& img, RpxModule& out);
+    bool decode_relocs(const elf::ElfImage& img, RpxModule& out);
 
     /// Decompress a zlib-compressed section.  Returns empty on failure.
     std::vector<uint8_t> decompress_section(const elf::RawSection& sec);
 
     diagnostics::DiagEngine& m_diag;
-    elf::ElfReader            m_reader;
+    elf::ElfReader m_reader;
 };
 
-}
+} // namespace rebrewu::rpx

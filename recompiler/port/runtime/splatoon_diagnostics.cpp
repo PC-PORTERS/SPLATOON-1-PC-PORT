@@ -39,7 +39,7 @@ static constexpr size_t kEventRingCapacity = 2048;
 
 // Static preallocated memory (ZERO dynamic allocation during gameplay)
 static FrameTelemetry s_frame_ring[kFrameRingCapacity] = {};
-static EngineEvent    s_event_ring[kEventRingCapacity] = {};
+static EngineEvent s_event_ring[kEventRingCapacity] = {};
 
 static std::atomic<uint32_t> s_frame_write_index{0};
 static std::atomic<uint32_t> s_event_write_index{0};
@@ -75,8 +75,9 @@ static std::thread s_worker_thread;
 static std::atomic<bool> s_worker_active{false};
 
 static uint64_t now_ns() {
-    return uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()).count());
+    return uint64_t(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch())
+            .count());
 }
 
 static std::string get_diagnostics_base_dir() {
@@ -115,8 +116,8 @@ static LONG WINAPI CrashUnhandledFilter(PEXCEPTION_POINTERS ep) {
         char time_str[64];
         SYSTEMTIME st;
         GetLocalTime(&st);
-        snprintf(time_str, sizeof(time_str), "%04d-%02d-%02d_%02d-%02d-%02d_crash",
-                 st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+        snprintf(time_str, sizeof(time_str), "%04d-%02d-%02d_%02d-%02d-%02d_crash", st.wYear, st.wMonth, st.wDay,
+                 st.wHour, st.wMinute, st.wSecond);
 
         std::string base = get_diagnostics_base_dir();
         std::string crash_dir = base + "\\" + time_str;
@@ -124,39 +125,32 @@ static LONG WINAPI CrashUnhandledFilter(PEXCEPTION_POINTERS ep) {
         CreateDirectoryA(crash_dir.c_str(), nullptr);
 
         std::string summary_path = crash_dir + "\\summary.txt";
-        HANDLE hFile = CreateFileA(summary_path.c_str(), GENERIC_WRITE, 0, nullptr,
-                                   CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        HANDLE hFile =
+            CreateFileA(summary_path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (hFile != INVALID_HANDLE_VALUE) {
             char buf[2048];
-            int len = snprintf(buf, sizeof(buf),
-                "============================================================\n"
-                "SPLATOON 1 PC PORT — CRASH REPORT (AUTOMATIC CAPTURE)\n"
-                "============================================================\n"
-                "Exception Code:    0x%08X\n"
-                "Fault Address:     0x%p\n"
-                "Thread ID:         %u\n"
-                "Frame Number:      %u\n"
-                "Timestamp:         %s\n\n"
-                "Registers:\n"
-                "  RIP/EIP: 0x%p\n"
-                "  RSP/ESP: 0x%p\n"
-                "  RAX/EAX: 0x%p\n"
-                "  RCX/ECX: 0x%p\n"
-                "  RDX/EDX: 0x%p\n"
-                "  RBX/EBX: 0x%p\n\n"
-                "See performance.csv and events.jsonl for pre-crash telemetry.\n",
-                (unsigned int)code,
-                ep->ExceptionRecord->ExceptionAddress,
-                (unsigned int)GetCurrentThreadId(),
-                s_frame_write_index.load(),
-                time_str,
-                (void*)ep->ContextRecord->Rip,
-                (void*)ep->ContextRecord->Rsp,
-                (void*)ep->ContextRecord->Rax,
-                (void*)ep->ContextRecord->Rcx,
-                (void*)ep->ContextRecord->Rdx,
-                (void*)ep->ContextRecord->Rbx
-            );
+            int len =
+                snprintf(buf, sizeof(buf),
+                         "============================================================\n"
+                         "SPLATOON 1 PC PORT — CRASH REPORT (AUTOMATIC CAPTURE)\n"
+                         "============================================================\n"
+                         "Exception Code:    0x%08X\n"
+                         "Fault Address:     0x%p\n"
+                         "Thread ID:         %u\n"
+                         "Frame Number:      %u\n"
+                         "Timestamp:         %s\n\n"
+                         "Registers:\n"
+                         "  RIP/EIP: 0x%p\n"
+                         "  RSP/ESP: 0x%p\n"
+                         "  RAX/EAX: 0x%p\n"
+                         "  RCX/ECX: 0x%p\n"
+                         "  RDX/EDX: 0x%p\n"
+                         "  RBX/EBX: 0x%p\n\n"
+                         "See performance.csv and events.jsonl for pre-crash telemetry.\n",
+                         (unsigned int)code, ep->ExceptionRecord->ExceptionAddress, (unsigned int)GetCurrentThreadId(),
+                         s_frame_write_index.load(), time_str, (void*)ep->ContextRecord->Rip,
+                         (void*)ep->ContextRecord->Rsp, (void*)ep->ContextRecord->Rax, (void*)ep->ContextRecord->Rcx,
+                         (void*)ep->ContextRecord->Rdx, (void*)ep->ContextRecord->Rbx);
             DWORD written = 0;
             WriteFile(hFile, buf, (DWORD)len, &written, nullptr);
             CloseHandle(hFile);
@@ -198,11 +192,11 @@ void Init() {
     const char* env_diag = std::getenv("SPLATOON_DIAGNOSTICS");
     if (env_diag && (strcmp(env_diag, "0") == 0 ||
 #if defined(_MSC_VER)
-        _stricmp(env_diag, "off") == 0
+                     _stricmp(env_diag, "off") == 0
 #else
-        strcasecmp(env_diag, "off") == 0
+                     strcasecmp(env_diag, "off") == 0
 #endif
-        )) {
+                     )) {
         s_level.store(DiagnosticLevel::Disabled);
         return;
     }
@@ -273,7 +267,8 @@ uint64_t process_resident_bytes() {
 #if defined(_WIN32)
     PROCESS_MEMORY_COUNTERS_EX counters{};
     counters.cb = sizeof(counters);
-    if (K32GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&counters), sizeof(counters)))
+    if (K32GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&counters),
+                                sizeof(counters)))
         return counters.WorkingSetSize;
 #elif defined(__linux__)
     std::ifstream status("/proc/self/status");
@@ -288,12 +283,11 @@ uint64_t process_resident_bytes() {
 #endif
     return 0;
 }
-}  // namespace
+} // namespace
 
-void RecordFrame(uint32_t frame_index, float frame_time_ms, float cpu_time_ms,
-                 float present_wait_ms, float vsync_wait_ms, float render_wait_ms,
-                 uint16_t draw_calls, uint16_t shader_compiles, uint16_t texture_uploads,
-                 uint8_t screen_mode) {
+void RecordFrame(uint32_t frame_index, float frame_time_ms, float cpu_time_ms, float present_wait_ms,
+                 float vsync_wait_ms, float render_wait_ms, uint16_t draw_calls, uint16_t shader_compiles,
+                 uint16_t texture_uploads, uint8_t screen_mode) {
     if (!IsEnabled()) return;
 
     Heartbeat();
@@ -436,9 +430,8 @@ static void WriteReportWorker(ReportSnapshot snap) {
 #endif
 
     char dir_name[128];
-    snprintf(dir_name, sizeof(dir_name), "%04d-%02d-%02d_%02d-%02d-%02d_%s",
-             tm_buf.tm_year + 1900, tm_buf.tm_mon + 1, tm_buf.tm_mday,
-             tm_buf.tm_hour, tm_buf.tm_min, tm_buf.tm_sec, snap.reason_tag.c_str());
+    snprintf(dir_name, sizeof(dir_name), "%04d-%02d-%02d_%02d-%02d-%02d_%s", tm_buf.tm_year + 1900, tm_buf.tm_mon + 1,
+             tm_buf.tm_mday, tm_buf.tm_hour, tm_buf.tm_min, tm_buf.tm_sec, snap.reason_tag.c_str());
 
     std::string base_dir = get_diagnostics_base_dir();
     std::string out_dir = base_dir + "/" + dir_name;
@@ -450,20 +443,13 @@ static void WriteReportWorker(ReportSnapshot snap) {
     // 1. performance.csv
     {
         std::ofstream csv(out_dir + "/performance.csv");
-        csv << "Timestamp_ns,Frame,FrameTime_ms,CPU_ms,PresentWait_ms,VSyncWait_ms,RenderWait_ms,DrawCalls,ShaderCompiles,TextureUploads,ScreenMode,Flags\n";
+        csv << "Timestamp_ns,Frame,FrameTime_ms,CPU_ms,PresentWait_ms,VSyncWait_ms,RenderWait_ms,DrawCalls,"
+               "ShaderCompiles,TextureUploads,ScreenMode,Flags\n";
         for (const auto& f : snap.frames) {
-            csv << f.timestamp_ns << ","
-                << f.frame_index << ","
-                << f.frame_time_ms << ","
-                << f.cpu_time_ms << ","
-                << f.present_wait_ms << ","
-                << f.vsync_wait_ms << ","
-                << f.render_wait_ms << ","
-                << f.draw_calls << ","
-                << f.shader_compiles << ","
-                << f.texture_uploads << ","
-                << int(f.screen_mode) << ","
-                << int(f.flags) << "\n";
+            csv << f.timestamp_ns << "," << f.frame_index << "," << f.frame_time_ms << "," << f.cpu_time_ms << ","
+                << f.present_wait_ms << "," << f.vsync_wait_ms << "," << f.render_wait_ms << "," << f.draw_calls << ","
+                << f.shader_compiles << "," << f.texture_uploads << "," << int(f.screen_mode) << "," << int(f.flags)
+                << "\n";
         }
     }
 
@@ -471,12 +457,8 @@ static void WriteReportWorker(ReportSnapshot snap) {
     {
         std::ofstream jsl(out_dir + "/events.jsonl");
         for (const auto& e : snap.events) {
-            jsl << "{\"ts\":" << e.timestamp_ns
-                << ",\"frame\":" << e.frame_index
-                << ",\"cat\":" << int(e.category)
-                << ",\"sev\":" << int(e.severity)
-                << ",\"code\":" << e.code
-                << ",\"msg\":\"" << e.message << "\"}\n";
+            jsl << "{\"ts\":" << e.timestamp_ns << ",\"frame\":" << e.frame_index << ",\"cat\":" << int(e.category)
+                << ",\"sev\":" << int(e.severity) << ",\"code\":" << e.code << ",\"msg\":\"" << e.message << "\"}\n";
         }
     }
 
@@ -499,8 +481,10 @@ static void WriteReportWorker(ReportSnapshot snap) {
     float p99 = ft_sorted.empty() ? 0.0f : ft_sorted[size_t(float(ft_sorted.size() - 1) * 0.99f)];
 
     std::string dominant_bottleneck = "CPU Execution";
-    if (sum_render > sum_cpu && sum_render > sum_present) dominant_bottleneck = "Render-Thread Wait / Vulkan Command Submission";
-    else if (sum_present > sum_cpu && sum_present > sum_render) dominant_bottleneck = "Present Wait / GPU Synchronization";
+    if (sum_render > sum_cpu && sum_render > sum_present)
+        dominant_bottleneck = "Render-Thread Wait / Vulkan Command Submission";
+    else if (sum_present > sum_cpu && sum_present > sum_render)
+        dominant_bottleneck = "Present Wait / GPU Synchronization";
 
     {
         std::ofstream sum(out_dir + "/summary.txt");
@@ -530,10 +514,9 @@ static void WriteReportWorker(ReportSnapshot snap) {
             first = false;
             uint64_t ts_us = f.timestamp_ns / 1000;
             uint64_t dur_us = uint64_t(f.frame_time_ms * 1000.0f);
-            tl << "{\"name\":\"Frame\",\"cat\":\"frame\",\"ph\":\"X\",\"ts\":" << ts_us
-               << ",\"dur\":" << dur_us << ",\"pid\":1,\"tid\":1,\"args\":{\"frame\":" << f.frame_index
-               << ",\"cpu_ms\":" << f.cpu_time_ms << ",\"present_ms\":" << f.present_wait_ms
-               << ",\"render_ms\":" << f.render_wait_ms << "}}";
+            tl << "{\"name\":\"Frame\",\"cat\":\"frame\",\"ph\":\"X\",\"ts\":" << ts_us << ",\"dur\":" << dur_us
+               << ",\"pid\":1,\"tid\":1,\"args\":{\"frame\":" << f.frame_index << ",\"cpu_ms\":" << f.cpu_time_ms
+               << ",\"present_ms\":" << f.present_wait_ms << ",\"render_ms\":" << f.render_wait_ms << "}}";
         }
         tl << "\n]}\n";
     }
@@ -565,7 +548,9 @@ static void WriteReportWorker(ReportSnapshot snap) {
         for (const auto& e : snap.events) {
             if (e.severity >= EventSeverity::Warning) {
                 err << "[" << e.timestamp_ns << "] [frame " << e.frame_index << "] "
-                    << (e.severity == EventSeverity::Critical ? "CRITICAL: " : (e.severity == EventSeverity::Error ? "ERROR: " : "WARN: "))
+                    << (e.severity == EventSeverity::Critical
+                            ? "CRITICAL: "
+                            : (e.severity == EventSeverity::Error ? "ERROR: " : "WARN: "))
                     << e.message << " (code " << e.code << ")\n";
             }
         }
@@ -606,9 +591,8 @@ static void WriteReportWorker(ReportSnapshot snap) {
             if (entry.is_directory()) entries.push_back(entry);
         }
         if (entries.size() > 10) {
-            std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) {
-                return a.last_write_time() < b.last_write_time();
-            });
+            std::sort(entries.begin(), entries.end(),
+                      [](const auto& a, const auto& b) { return a.last_write_time() < b.last_write_time(); });
             for (size_t i = 0; i < entries.size() - 10; ++i) {
                 std::filesystem::remove_all(entries[i].path());
             }
@@ -668,7 +652,9 @@ void ManualCapture() {
     TriggerCapture("manual_snapshot", "Manual F9 snapshot triggered by user");
 }
 
-namespace { std::atomic<bool> s_manual_recording{false}; }  // flipped from the F8 key or the Debug window
+namespace {
+std::atomic<bool> s_manual_recording{false};
+} // namespace
 
 void ToggleManualRecord() {
     const bool was_recording = s_manual_recording.load(std::memory_order_relaxed);
@@ -681,7 +667,9 @@ void ToggleManualRecord() {
     }
 }
 
-bool IsManualRecording() { return s_manual_recording.load(std::memory_order_relaxed); }
+bool IsManualRecording() {
+    return s_manual_recording.load(std::memory_order_relaxed);
+}
 
 // ---------------------------------------------------------------------------
 // Local Offline Analyzer (No Internet / Paid API Needed)
@@ -704,10 +692,14 @@ bool AnalyzeReport(const std::string& report_dir, std::string& out_summary, std:
         int col = 0;
         float ft = 0.0f, cpu = 0.0f, present = 0.0f, render = 0.0f;
         while (std::getline(ss, token, ',')) {
-            if (col == 2) ft = std::strtof(token.c_str(), nullptr);
-            else if (col == 3) cpu = std::strtof(token.c_str(), nullptr);
-            else if (col == 4) present = std::strtof(token.c_str(), nullptr);
-            else if (col == 6) render = std::strtof(token.c_str(), nullptr);
+            if (col == 2)
+                ft = std::strtof(token.c_str(), nullptr);
+            else if (col == 3)
+                cpu = std::strtof(token.c_str(), nullptr);
+            else if (col == 4)
+                present = std::strtof(token.c_str(), nullptr);
+            else if (col == 6)
+                render = std::strtof(token.c_str(), nullptr);
             col++;
         }
         if (ft > 0.0f) {
@@ -731,10 +723,14 @@ bool AnalyzeReport(const std::string& report_dir, std::string& out_summary, std:
     float p99 = frame_times[size_t(float(frame_times.size() - 1) * 0.99f)];
 
     std::string sig = "UNKNOWN";
-    if (sum_render > sum_cpu * 1.5f) sig = "SIGNATURE_RENDER_THREAD_STARVATION";
-    else if (sum_present > sum_cpu * 1.5f) sig = "SIGNATURE_PRESENT_VSYNC_STALL";
-    else if (avg_fps < 45.0f && p95 < 35.0f) sig = "SIGNATURE_SUSTAINED_LOW_FPS";
-    else if (p99 > p50 * 3.0f) sig = "SIGNATURE_FRAME_PACING_SPIKE";
+    if (sum_render > sum_cpu * 1.5f)
+        sig = "SIGNATURE_RENDER_THREAD_STARVATION";
+    else if (sum_present > sum_cpu * 1.5f)
+        sig = "SIGNATURE_PRESENT_VSYNC_STALL";
+    else if (avg_fps < 45.0f && p95 < 35.0f)
+        sig = "SIGNATURE_SUSTAINED_LOW_FPS";
+    else if (p99 > p50 * 3.0f)
+        sig = "SIGNATURE_FRAME_PACING_SPIKE";
 
     std::ostringstream ss;
     ss << "Offline Diagnostic Analysis Result:\n"

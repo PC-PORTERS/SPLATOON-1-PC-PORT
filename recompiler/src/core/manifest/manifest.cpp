@@ -11,9 +11,7 @@
 namespace rebrewu::manifest {
 namespace {
 
-
 // Text helpers
-
 
 std::string trim(std::string_view s) {
     std::size_t b = 0, e = s.size();
@@ -32,8 +30,7 @@ std::string lower(std::string s) {
 std::string strip_comment(std::string_view line) {
     for (std::size_t i = 0; i < line.size(); ++i) {
         if (line[i] == '#') return std::string(line.substr(0, i));
-        if (line[i] == '/' && i + 1 < line.size() && line[i + 1] == '/')
-            return std::string(line.substr(0, i));
+        if (line[i] == '/' && i + 1 < line.size() && line[i + 1] == '/') return std::string(line.substr(0, i));
     }
     return std::string(line);
 }
@@ -45,7 +42,7 @@ bool all_hex(std::string_view s) {
     return true;
 }
 
-bool parse_hex_u32(const std::string& raw, uint32_t& out);   // defined below
+bool parse_hex_u32(const std::string& raw, uint32_t& out); // defined below
 
 // Values are compared after normalization so that `0x02D09A00` and `0x02d09a00u`
 // hash identically: formatting is not data.
@@ -71,8 +68,7 @@ std::string normalize_value(const std::string& raw) {
         const std::string head = v.substr(0, space);
         const std::string tail = trim(v.substr(space));
         uint32_t ignored = 0;
-        if (parse_hex_u32(head, ignored) && !tail.empty() &&
-            tail.find_first_of(" \t") == std::string::npos)
+        if (parse_hex_u32(head, ignored) && !tail.empty() && tail.find_first_of(" \t") == std::string::npos)
             return normalize_atom(head) + " " + lower(tail);
     }
     return normalize_atom(v);
@@ -123,18 +119,18 @@ struct Sha256 {
 
     void compress(const uint8_t* p) {
         static constexpr uint32_t k[64] = {
-            0x428a2f98u,0x71374491u,0xb5c0fbcfu,0xe9b5dba5u,0x3956c25bu,0x59f111f1u,0x923f82a4u,0xab1c5ed5u,
-            0xd807aa98u,0x12835b01u,0x243185beu,0x550c7dc3u,0x72be5d74u,0x80deb1feu,0x9bdc06a7u,0xc19bf174u,
-            0xe49b69c1u,0xefbe4786u,0x0fc19dc6u,0x240ca1ccu,0x2de92c6fu,0x4a7484aau,0x5cb0a9dcu,0x76f988dau,
-            0x983e5152u,0xa831c66du,0xb00327c8u,0xbf597fc7u,0xc6e00bf3u,0xd5a79147u,0x06ca6351u,0x14292967u,
-            0x27b70a85u,0x2e1b2138u,0x4d2c6dfcu,0x53380d13u,0x650a7354u,0x766a0abbu,0x81c2c92eu,0x92722c85u,
-            0xa2bfe8a1u,0xa81a664bu,0xc24b8b70u,0xc76c51a3u,0xd192e819u,0xd6990624u,0xf40e3585u,0x106aa070u,
-            0x19a4c116u,0x1e376c08u,0x2748774cu,0x34b0bcb5u,0x391c0cb3u,0x4ed8aa4au,0x5b9cca4fu,0x682e6ff3u,
-            0x748f82eeu,0x78a5636fu,0x84c87814u,0x8cc70208u,0x90befffau,0xa4506cebu,0xbef9a3f7u,0xc67178f2u};
+            0x428a2f98u, 0x71374491u, 0xb5c0fbcfu, 0xe9b5dba5u, 0x3956c25bu, 0x59f111f1u, 0x923f82a4u, 0xab1c5ed5u,
+            0xd807aa98u, 0x12835b01u, 0x243185beu, 0x550c7dc3u, 0x72be5d74u, 0x80deb1feu, 0x9bdc06a7u, 0xc19bf174u,
+            0xe49b69c1u, 0xefbe4786u, 0x0fc19dc6u, 0x240ca1ccu, 0x2de92c6fu, 0x4a7484aau, 0x5cb0a9dcu, 0x76f988dau,
+            0x983e5152u, 0xa831c66du, 0xb00327c8u, 0xbf597fc7u, 0xc6e00bf3u, 0xd5a79147u, 0x06ca6351u, 0x14292967u,
+            0x27b70a85u, 0x2e1b2138u, 0x4d2c6dfcu, 0x53380d13u, 0x650a7354u, 0x766a0abbu, 0x81c2c92eu, 0x92722c85u,
+            0xa2bfe8a1u, 0xa81a664bu, 0xc24b8b70u, 0xc76c51a3u, 0xd192e819u, 0xd6990624u, 0xf40e3585u, 0x106aa070u,
+            0x19a4c116u, 0x1e376c08u, 0x2748774cu, 0x34b0bcb5u, 0x391c0cb3u, 0x4ed8aa4au, 0x5b9cca4fu, 0x682e6ff3u,
+            0x748f82eeu, 0x78a5636fu, 0x84c87814u, 0x8cc70208u, 0x90befffau, 0xa4506cebu, 0xbef9a3f7u, 0xc67178f2u};
         uint32_t w[64];
         for (unsigned i = 0; i < 16; ++i)
-            w[i] = (uint32_t(p[i * 4]) << 24) | (uint32_t(p[i * 4 + 1]) << 16) |
-                   (uint32_t(p[i * 4 + 2]) << 8) | uint32_t(p[i * 4 + 3]);
+            w[i] = (uint32_t(p[i * 4]) << 24) | (uint32_t(p[i * 4 + 1]) << 16) | (uint32_t(p[i * 4 + 2]) << 8) |
+                   uint32_t(p[i * 4 + 3]);
         for (unsigned i = 16; i < 64; ++i) {
             const uint32_t s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >> 3);
             const uint32_t s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >> 10);
@@ -149,11 +145,23 @@ struct Sha256 {
             const uint32_t s0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
             const uint32_t maj = (a & b) ^ (a & c) ^ (b & c);
             const uint32_t t2 = s0 + maj;
-            h = g; g = f; f = e; e = d + t1;
-            d = c; c = b; b = a; a = t1 + t2;
+            h = g;
+            g = f;
+            f = e;
+            e = d + t1;
+            d = c;
+            c = b;
+            b = a;
+            a = t1 + t2;
         }
-        state[0] += a; state[1] += b; state[2] += c; state[3] += d;
-        state[4] += e; state[5] += f; state[6] += g; state[7] += h;
+        state[0] += a;
+        state[1] += b;
+        state[2] += c;
+        state[3] += d;
+        state[4] += e;
+        state[5] += f;
+        state[6] += g;
+        state[7] += h;
     }
 
     void update(const uint8_t* data, std::size_t size) {
@@ -161,8 +169,13 @@ struct Sha256 {
         while (size) {
             const std::size_t take = std::min(size, sizeof(block) - used);
             std::memcpy(block + used, data, take);
-            used += take; data += take; size -= take;
-            if (used == sizeof(block)) { compress(block); used = 0; }
+            used += take;
+            data += take;
+            size -= take;
+            if (used == sizeof(block)) {
+                compress(block);
+                used = 0;
+            }
         }
     }
 
@@ -200,11 +213,10 @@ std::string to_hex(const std::array<uint8_t, 32>& digest) {
     return out;
 }
 
-}  // namespace
+} // namespace
 
 bool is_hashed_section(const std::string& name) {
-    return name == "identity" || name == "modules" ||
-           name == "imports" || name == "entries";
+    return name == "identity" || name == "modules" || name == "imports" || name == "entries";
 }
 
 std::string format_hash(uint64_t value) {
@@ -223,17 +235,20 @@ uint64_t section_hash(const std::map<std::string, std::string>& pairs) {
     std::vector<std::pair<std::string, std::string>> ordered;
     ordered.reserve(pairs.size());
     for (const auto& [key, value] : pairs) {
-        if (key == "hash") continue;   // a section never hashes its own digest
+        if (key == "hash") continue; // a section never hashes its own digest
         ordered.emplace_back(key, normalize_value(value));
     }
     std::sort(ordered.begin(), ordered.end());
     uint64_t h = 0xCBF29CE484222325ull;
-    auto mix = [&h](unsigned char byte) { h ^= byte; h *= 0x100000001B3ull; };
+    auto mix = [&h](unsigned char byte) {
+        h ^= byte;
+        h *= 0x100000001B3ull;
+    };
     for (const auto& [key, value] : ordered) {
         for (char c : key) mix(static_cast<unsigned char>(c));
-        mix(0x1f);                     // key/value separator
+        mix(0x1f); // key/value separator
         for (char c : value) mix(static_cast<unsigned char>(c));
-        mix('\n');                     // pair terminator
+        mix('\n'); // pair terminator
     }
     return h;
 }
@@ -293,8 +308,8 @@ Manifest parse_text(const std::string& text, const std::string& path) {
         }
         auto& bucket = sections[current];
         if (!bucket.emplace(key, value).second)
-            m.errors.push_back("line " + std::to_string(line_number) + ": duplicate key '" + key +
-                               "' in [" + current + "]");
+            m.errors.push_back("line " + std::to_string(line_number) + ": duplicate key '" + key + "' in [" + current +
+                               "]");
     }
 
     // Metadata and identity are plain string tables. The digest line is not
@@ -311,8 +326,7 @@ Manifest parse_text(const std::string& text, const std::string& path) {
     if (format == m.meta.end()) {
         m.warnings.push_back("missing [manifest] format = " + std::string(kFormatVersion));
     } else if (trim(format->second) != kFormatVersion) {
-        m.warnings.push_back("format '" + trim(format->second) + "' differs from '" +
-                             kFormatVersion + "'");
+        m.warnings.push_back("format '" + trim(format->second) + "' differs from '" + kFormatVersion + "'");
     }
 
     // [imports]: "module!symbol = 0xADDR"
@@ -332,10 +346,10 @@ Manifest parse_text(const std::string& text, const std::string& path) {
         if (space != std::string::npos) {
             const std::string mode = lower(trim(value.substr(space)));
             address_text = value.substr(0, space);
-            if (mode == "data") import.data = true;
+            if (mode == "data")
+                import.data = true;
             else {
-                m.errors.push_back("[imports] " + key + ": mode must be 'data', got '" +
-                                   mode + "'");
+                m.errors.push_back("[imports] " + key + ": mode must be 'data', got '" + mode + "'");
                 continue;
             }
         }
@@ -355,7 +369,8 @@ Manifest parse_text(const std::string& text, const std::string& path) {
             continue;
         }
         const std::string mode = lower(trim(value));
-        if (mode == "force") entry.force = true;
+        if (mode == "force")
+            entry.force = true;
         else if (mode != "normal")
             m.errors.push_back("[entries] " + key + ": mode must be 'normal' or 'force'");
         m.entries.push_back(entry);
@@ -365,8 +380,7 @@ Manifest parse_text(const std::string& text, const std::string& path) {
         if (a.module != b.module) return a.module < b.module;
         return a.symbol < b.symbol;
     });
-    std::sort(m.entries.begin(), m.entries.end(),
-              [](const Entry& a, const Entry& b) { return a.address < b.address; });
+    std::sort(m.entries.begin(), m.entries.end(), [](const Entry& a, const Entry& b) { return a.address < b.address; });
 
     // Per-section hashes: only the section's own pairs contribute.
     for (const auto& [name, pairs] : sections) {
@@ -408,8 +422,8 @@ bool verify_hashes(Manifest& m) {
             continue;
         }
         if (stored->second != computed) {
-            m.errors.push_back("[" + name + "] hash mismatch: file " + format_hash(stored->second) +
-                               ", content " + format_hash(computed));
+            m.errors.push_back("[" + name + "] hash mismatch: file " + format_hash(stored->second) + ", content " +
+                               format_hash(computed));
             ok = false;
         }
     }
@@ -446,8 +460,7 @@ bool seal_file(const std::string& path, std::string* error) {
     auto flush_pending = [&]() {
         if (!pending_hash) return;
         const auto computed = parsed.computed_hashes.find(current);
-        if (computed != parsed.computed_hashes.end())
-            output.push_back("hash = " + format_hash(computed->second));
+        if (computed != parsed.computed_hashes.end()) output.push_back("hash = " + format_hash(computed->second));
         pending_hash = false;
     };
 
@@ -467,8 +480,7 @@ bool seal_file(const std::string& path, std::string* error) {
             continue;
         }
         const auto equals = bare.find('=');
-        if (equals != std::string::npos &&
-            lower(trim(std::string_view(bare).substr(0, equals))) == "hash") {
+        if (equals != std::string::npos && lower(trim(std::string_view(bare).substr(0, equals))) == "hash") {
             const auto computed = parsed.computed_hashes.find(current);
             if (computed != parsed.computed_hashes.end()) {
                 output.push_back("hash = " + format_hash(computed->second));
@@ -503,14 +515,12 @@ std::string file_sha256(const std::string& path, std::string* error) {
     while (file) {
         file.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
         const std::streamsize got = file.gcount();
-        if (got > 0) sha.update(reinterpret_cast<const uint8_t*>(buffer.data()),
-                                static_cast<std::size_t>(got));
+        if (got > 0) sha.update(reinterpret_cast<const uint8_t*>(buffer.data()), static_cast<std::size_t>(got));
     }
     return to_hex(sha.finish());
 }
 
-bool verify_image(const Manifest& m, const std::string& rpx_path,
-                  std::vector<std::string>& problems) {
+bool verify_image(const Manifest& m, const std::string& rpx_path, std::vector<std::string>& problems) {
     std::error_code ec;
     const auto size = std::filesystem::file_size(rpx_path, ec);
     if (ec) {
@@ -519,13 +529,14 @@ bool verify_image(const Manifest& m, const std::string& rpx_path,
     }
     const uint32_t expected_size = m.identity_u32("image_size");
     if (expected_size && size != expected_size)
-        problems.push_back("image size mismatch: image " + std::to_string(size) +
-                           " bytes, manifest " + std::to_string(expected_size));
+        problems.push_back("image size mismatch: image " + std::to_string(size) + " bytes, manifest " +
+                           std::to_string(expected_size));
     const std::string expected_hash = lower(m.identity_string("image_sha256"));
     if (!expected_hash.empty()) {
         std::string error;
         const std::string actual = file_sha256(rpx_path, &error);
-        if (actual.empty()) problems.push_back(error.empty() ? "cannot hash image" : error);
+        if (actual.empty())
+            problems.push_back(error.empty() ? "cannot hash image" : error);
         else if (actual != expected_hash)
             problems.push_back("image sha256 mismatch: image " + actual + ", manifest " + expected_hash);
     }
@@ -589,12 +600,13 @@ std::string describe_identity(const Manifest& m) {
     return text;
 }
 
-}  // namespace
+} // namespace
 
-std::string identity_summary(const Manifest& m) { return describe_identity(m); }
+std::string identity_summary(const Manifest& m) {
+    return describe_identity(m);
+}
 
-std::vector<ImageMatch> match_image(const std::string& rpx_path,
-                                    const std::vector<std::string>& manifest_paths,
+std::vector<ImageMatch> match_image(const std::string& rpx_path, const std::vector<std::string>& manifest_paths,
                                     std::vector<std::string>* problems) {
     std::vector<ImageMatch> matches;
     std::error_code ec;
@@ -606,8 +618,7 @@ std::vector<ImageMatch> match_image(const std::string& rpx_path,
     std::string hash_error;
     const std::string image_sha = lower(file_sha256(rpx_path, &hash_error));
     if (image_sha.empty()) {
-        if (problems)
-            problems->push_back(hash_error.empty() ? "cannot hash image " + rpx_path : hash_error);
+        if (problems) problems->push_back(hash_error.empty() ? "cannot hash image " + rpx_path : hash_error);
         return matches;
     }
 
@@ -631,29 +642,32 @@ std::vector<ImageMatch> match_image(const std::string& rpx_path,
 }
 
 std::optional<Manifest> select_for_image_from(const std::string& rpx_path,
-                                              const std::vector<std::string>& manifest_paths,
-                                              std::string* error,
+                                              const std::vector<std::string>& manifest_paths, std::string* error,
                                               std::vector<std::string>* notes) {
     std::vector<std::string> problems;
     std::vector<ImageMatch> matches = match_image(rpx_path, manifest_paths, &problems);
 
     int best = 0;
     for (const ImageMatch& match : matches) {
-        if (match.exact()) best = std::max(best, 2);
-        else if (match.size_only()) best = std::max(best, 1);
+        if (match.exact())
+            best = std::max(best, 2);
+        else if (match.size_only())
+            best = std::max(best, 1);
     }
     std::vector<ImageMatch*> winners;
     for (ImageMatch& match : matches) {
-        if ((best == 2 && match.exact()) || (best == 1 && match.size_only()))
-            winners.push_back(&match);
+        if ((best == 2 && match.exact()) || (best == 1 && match.size_only())) winners.push_back(&match);
     }
 
     if (notes) {
         for (const ImageMatch& match : matches) {
             std::string line = match.manifest.path + ": " + describe_identity(match.manifest);
-            if (match.exact()) line += " [matches]";
-            else if (match.size_only()) line += " [size-only match]";
-            else line += " [does not match]";
+            if (match.exact())
+                line += " [matches]";
+            else if (match.size_only())
+                line += " [size-only match]";
+            else
+                line += " [does not match]";
             notes->push_back(std::move(line));
         }
         for (const std::string& problem : problems) notes->push_back(problem);
@@ -669,11 +683,10 @@ std::optional<Manifest> select_for_image_from(const std::string& rpx_path,
         if (best == 0) {
             *error = "no manifest describes " + rpx_path;
         } else {
-            *error = "several manifests describe " + rpx_path +
-                     "; pass --manifest <file> to choose one";
+            *error = "several manifests describe " + rpx_path + "; pass --manifest <file> to choose one";
         }
-        *error += " (image size " + std::to_string(ec ? 0 : image_size) +
-                  " bytes, sha256 " + (image_sha.empty() ? "<unavailable>" : image_sha) + ")";
+        *error += " (image size " + std::to_string(ec ? 0 : image_size) + " bytes, sha256 " +
+                  (image_sha.empty() ? "<unavailable>" : image_sha) + ")";
         if (manifest_paths.empty()) {
             *error += "\nsearched for Manifest/*.manifest under the working directory, the "
                       "executable directory and any --manifest-dir";
@@ -686,10 +699,8 @@ std::optional<Manifest> select_for_image_from(const std::string& rpx_path,
     return std::nullopt;
 }
 
-std::optional<Manifest> select_for_image(const std::string& rpx_path,
-                                         const std::vector<std::string>& roots,
-                                         std::string* error,
-                                         std::vector<std::string>* notes) {
+std::optional<Manifest> select_for_image(const std::string& rpx_path, const std::vector<std::string>& roots,
+                                         std::string* error, std::vector<std::string>* notes) {
     const std::vector<std::string> paths = discover_manifests(roots);
     if (paths.empty()) {
         if (error) {
@@ -710,9 +721,7 @@ std::vector<Import> imports_by_address(const Manifest& m) {
         return a.symbol < b.symbol;
     });
     sorted.erase(std::unique(sorted.begin(), sorted.end(),
-                             [](const Import& a, const Import& b) {
-                                 return a.address == b.address;
-                             }),
+                             [](const Import& a, const Import& b) { return a.address == b.address; }),
                  sorted.end());
     return sorted;
 }
@@ -757,17 +766,16 @@ bool write_if_changed(const std::string& path, const std::string& text, std::str
     return write_text_file(path, text, error);
 }
 
-}  // namespace
+} // namespace
 
-bool emit(const Manifest& m, const std::string& out_dir,
-          std::vector<std::string>& written, std::string* error) {
+bool emit(const Manifest& m, const std::string& out_dir, std::vector<std::string>& written, std::string* error) {
     const std::filesystem::path root(out_dir);
     // The banner cites the manifest id and file name, never the invocation
     // path, so the same manifest always yields byte-identical output.
-    const std::string banner =
-        "// AUTO-GENERATED from manifest '" + m.id + "' (" +
-        std::filesystem::path(m.path).filename().string() + ") — DO NOT EDIT\n"
-        "// Source of truth: the manifest. Regenerate rather than edit this file.\n";
+    const std::string banner = "// AUTO-GENERATED from manifest '" + m.id + "' (" +
+                               std::filesystem::path(m.path).filename().string() +
+                               ") — DO NOT EDIT\n"
+                               "// Source of truth: the manifest. Regenerate rather than edit this file.\n";
 
     // ---- address headers -------------------------------------------------
     for (const std::string& relative : header_paths(m)) {
@@ -799,16 +807,15 @@ bool emit(const Manifest& m, const std::string& out_dir,
     // PLT stub registration table
     {
         std::ostringstream out;
-        out << banner
-            << "// Registers STUB for every PLT address so no call goes unhandled.\n"
+        out << banner << "// Registers STUB for every PLT address so no call goes unhandled.\n"
             << "// Module-specific register() functions run afterwards and override\n"
             << "// the entries they implement.\n"
             << "#include \"os_common.h\"\n\n"
             << "void gambit_plt_auto_register(CPUState* cpu) {\n";
         for (const Import& import : imports_by_address(m)) {
-            if (import.data) continue;   // a data slot is not a callable thunk
-            out << "    rbrew_register_func(cpu, " << hex_address(import.address)
-                << "u, STUB);  // " << import.module << "::" << import.symbol << '\n';
+            if (import.data) continue; // a data slot is not a callable thunk
+            out << "    rbrew_register_func(cpu, " << hex_address(import.address) << "u, STUB);  // " << import.module
+                << "::" << import.symbol << '\n';
         }
         out << "}\n";
         const std::string relative = "os/gambit_plt_auto.cpp";
@@ -819,4 +826,4 @@ bool emit(const Manifest& m, const std::string& out_dir,
     return true;
 }
 
-}  // namespace rebrewu::manifest
+} // namespace rebrewu::manifest

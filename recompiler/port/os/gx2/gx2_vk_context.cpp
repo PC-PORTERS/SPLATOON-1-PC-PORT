@@ -45,16 +45,17 @@ void* s_window = nullptr;
 std::mutex s_submit;
 
 struct Item {
-    Gx2AsyncWork* work = nullptr;          // posted: owned, no waiter
-    Gx2Task run = nullptr; void* context = nullptr;  // waited task
+    Gx2AsyncWork* work = nullptr; // posted: owned, no waiter
+    Gx2Task run = nullptr;
+    void* context = nullptr; // waited task
     std::atomic<uint32_t>* core = nullptr;
     uint32_t ticket = 0;
 };
 std::mutex s_queue_mutex;
 std::vector<Item> s_queue;
-size_t s_queue_size = 0;                     // guarded by s_queue_mutex
-bool s_executing = false;                   // guarded by s_queue_mutex
-uint32_t s_next_ticket = 0;                  // guarded by s_queue_mutex
+size_t s_queue_size = 0;    // guarded by s_queue_mutex
+bool s_executing = false;   // guarded by s_queue_mutex
+uint32_t s_next_ticket = 0; // guarded by s_queue_mutex
 std::atomic<uint32_t> s_pushed{0}, s_done{0};
 std::atomic<bool> s_sleeping{false};
 std::exception_ptr s_task_error, s_async_error;
@@ -67,7 +68,7 @@ thread_local bool t_render_thread = false;
 // frame pacing is bounded separately at present).
 constexpr size_t kMaxQueued = 1u << 16;
 #if defined(RBREW_GX2_QUEUE_TESTS)
-std::atomic<void(*)()> s_idle_hook{nullptr};
+std::atomic<void (*)()> s_idle_hook{nullptr};
 #endif
 
 bool async_enabled() {
@@ -78,10 +79,11 @@ bool async_enabled() {
     return enabled;
 }
 
-bool reached(uint32_t done, uint32_t ticket) { return int32_t(done - ticket) >= 0; }
+bool reached(uint32_t done, uint32_t ticket) {
+    return int32_t(done - ticket) >= 0;
+}
 
-template<class Ready>
-void await(const std::atomic<uint32_t>& value, Ready ready, std::chrono::microseconds spin) {
+template <class Ready> void await(const std::atomic<uint32_t>& value, Ready ready, std::chrono::microseconds spin) {
     uint32_t now = value.load(std::memory_order_acquire);
     if (ready(now)) return;
     const auto until = std::chrono::steady_clock::now() + spin;
@@ -129,16 +131,19 @@ void render_thread() {
         if (batch.empty()) {
             if (s_exit.load(std::memory_order_relaxed)) break;
 #if defined(RBREW_GX2_QUEUE_TESTS)
-            if (auto hook=s_idle_hook.load(std::memory_order_acquire)) hook();
+            if (auto hook = s_idle_hook.load(std::memory_order_acquire)) hook();
 #endif
             // Spin briefly (GX2 calls come in bursts), then sleep on the
             // push counter; a poster that sees s_sleeping wakes us.
             bool queued = false;
             const auto until = std::chrono::steady_clock::now() + std::chrono::microseconds(4000);
             for (unsigned n = 1; !queued; ++n) {
-                if (s_pushed.load(std::memory_order_acquire) != seen) queued = true;
-                else if (n % 64 == 0 && std::chrono::steady_clock::now() >= until) break;
-                else _mm_pause();
+                if (s_pushed.load(std::memory_order_acquire) != seen)
+                    queued = true;
+                else if (n % 64 == 0 && std::chrono::steady_clock::now() >= until)
+                    break;
+                else
+                    _mm_pause();
             }
             if (!queued) {
                 gx2_render_query_poll();
@@ -149,20 +154,25 @@ void render_thread() {
             continue;
         }
         Gx2PerfScope busy(kPerfRenderBusy);
-        gx2_write_watch_begin_batch();  // all of `batch` was queued before this point
+        gx2_write_watch_begin_batch(); // all of `batch` was queued before this point
         for (Item& item : batch) {
             // The caller's core selects its display list, as if it ran there.
             rbrew_thread_core_slot = item.core;
             if (item.work) {
-                try { item.work->run(); }
-                catch (...) {
+                try {
+                    item.work->run();
+                } catch (...) {
                     std::lock_guard error_lock(s_async_error_mutex);
                     if (!s_async_error) s_async_error = std::current_exception();
                     s_has_async_error.store(true, std::memory_order_release);
                 }
                 delete item.work;
             } else {
-                try { item.run(item.context); } catch (...) { s_task_error = std::current_exception(); }
+                try {
+                    item.run(item.context);
+                } catch (...) {
+                    s_task_error = std::current_exception();
+                }
                 s_done.store(item.ticket, std::memory_order_release);
                 s_done.notify_all();
             }
@@ -172,7 +182,7 @@ void render_thread() {
         batch.clear();
         gx2_render_query_poll();
     }
-    s_running.store(false,std::memory_order_release);
+    s_running.store(false, std::memory_order_release);
     s_running.notify_all();
 }
 
@@ -205,10 +215,12 @@ void submit(Gx2Task run, void* context) {
         if (error) std::rethrow_exception(error);
     }
 }
-}  // namespace
+} // namespace
 
 #if defined(RBREW_GX2_QUEUE_TESTS)
-void gx2_native_idle_hook_for_test(void(*hook)()) { s_idle_hook.store(hook,std::memory_order_release); }
+void gx2_native_idle_hook_for_test(void (*hook)()) {
+    s_idle_hook.store(hook, std::memory_order_release);
+}
 #endif
 
 // The Vulkan build has no API context: `context` is ignored.
@@ -216,11 +228,14 @@ void gx2_native_set_context(void* window, void*) {
     std::lock_guard lock(s_renderer);
     s_window = window;
 }
-void* gx2_native_window() { return s_window; }
+void* gx2_native_window() {
+    return s_window;
+}
 
 void gx2_native_start_render_thread() {
     if (s_running) return;
-    s_exit = false; s_started = false;
+    s_exit = false;
+    s_started = false;
     std::thread(render_thread).detach();
     s_started.wait(false);
 }
@@ -230,12 +245,18 @@ void gx2_native_stop_render_thread() {
     gx2_native_run(true, [] { s_exit = true; });
     // Readiness for a restart means the old consumer has actually exited,
     // not merely that its stop task returned to the waiting caller.
-    while(s_running.load(std::memory_order_acquire))s_running.wait(true,std::memory_order_acquire);
+    while (s_running.load(std::memory_order_acquire)) s_running.wait(true, std::memory_order_acquire);
 }
 
 void gx2_native_execute(bool gpu, Gx2Task task, void* context) {
-    if (t_render_thread) { task(context); return; }
-    if (s_running.load(std::memory_order_acquire)) { submit(task, context); return; }
+    if (t_render_thread) {
+        task(context);
+        return;
+    }
+    if (s_running.load(std::memory_order_acquire)) {
+        submit(task, context);
+        return;
+    }
     GX2NativeScope scope(gpu);
     task(context);
 }
@@ -269,7 +290,9 @@ void gx2_native_post(Gx2AsyncWork* work) {
 // GX2Flush: submit recorded work  and poll query completion.
 void gx2_native_gpu_flush() {
     if (gx2_native_async_active()) {
-        struct Flush final : Gx2AsyncWork { void run() override { gx2_render_vk_flush(); } };
+        struct Flush final : Gx2AsyncWork {
+            void run() override { gx2_render_vk_flush(); }
+        };
         gx2_native_post(new Flush);
     } else {
         gx2_native_run(true, [] { gx2_render_vk_flush(); });
@@ -287,8 +310,16 @@ bool gx2_native_gpu_finish() {
     return completed;
 }
 
-uint64_t gx2_native_gpu_flush_count() { return s_flushes.load(std::memory_order_relaxed); }
-uint64_t gx2_native_gpu_finish_count() { return s_finishes.load(std::memory_order_relaxed); }
+uint64_t gx2_native_gpu_flush_count() {
+    return s_flushes.load(std::memory_order_relaxed);
+}
+uint64_t gx2_native_gpu_finish_count() {
+    return s_finishes.load(std::memory_order_relaxed);
+}
 
-void gx2_native_enter(bool) { s_renderer.lock(); }
-void gx2_native_leave() { s_renderer.unlock(); }
+void gx2_native_enter(bool) {
+    s_renderer.lock();
+}
+void gx2_native_leave() {
+    s_renderer.unlock();
+}

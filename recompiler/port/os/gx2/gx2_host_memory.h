@@ -13,18 +13,22 @@
 #endif
 
 struct Gx2HostMemory {
-    uint64_t total = 0, available = 0;            // system physical RAM
-    uint64_t working_set = 0, private_bytes = 0;  // this process
+    uint64_t total = 0, available = 0;           // system physical RAM
+    uint64_t working_set = 0, private_bytes = 0; // this process
 };
 
 inline Gx2HostMemory gx2_host_memory() {
     Gx2HostMemory m;
 #if defined(_WIN32)
     MEMORYSTATUSEX status{sizeof(status)};
-    if (GlobalMemoryStatusEx(&status)) { m.total = status.ullTotalPhys; m.available = status.ullAvailPhys; }
+    if (GlobalMemoryStatusEx(&status)) {
+        m.total = status.ullTotalPhys;
+        m.available = status.ullAvailPhys;
+    }
     PROCESS_MEMORY_COUNTERS_EX counters{};
     counters.cb = sizeof(counters);
-    if (K32GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&counters), sizeof(counters))) {
+    if (K32GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&counters),
+                                sizeof(counters))) {
         m.working_set = counters.WorkingSetSize;
         m.private_bytes = counters.PrivateUsage;
     }

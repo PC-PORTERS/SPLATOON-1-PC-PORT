@@ -49,7 +49,7 @@ std::atomic<bool> s_fullscreen_mirror{true};
 std::atomic<bool> s_fullscreen_requested{false};
 std::atomic<bool> s_fullscreen_value{false};
 std::atomic<bool> s_quit_requested{false};
-std::atomic<bool> s_capture_active{false};   // render thread waits for a rebinding input
+std::atomic<bool> s_capture_active{false}; // render thread waits for a rebinding input
 
 std::mutex s_event_lock;
 std::vector<SDL_Event> s_events;
@@ -83,19 +83,36 @@ void update_shader_activity() {
 enum class MenuPage { Main, Keyboard, Controller };
 MenuPage s_menu_page = MenuPage::Main;
 bool s_prev_menu_open = false;
-bool s_capture = false;          // waiting for the key/button of the selected action
+bool s_capture = false; // waiting for the key/button of the selected action
 MenuPage s_capture_page = MenuPage::Keyboard;
 int s_capture_action = 0;
 MenuPage s_focused_page = MenuPage::Keyboard;
-int s_focused_action = -1;       // binding row focused for keyboard/gamepad Clear
+int s_focused_action = -1; // binding row focused for keyboard/gamepad Clear
 double s_quit_armed_at = -1.0;
 
 const char* const kResolutionLabels[rs::kResolutionCount] = {"720p (console)", "1080p", "1440p", "Display"};
 // GamePad input, with what it does in Splatoon where it is fixed.
-const char* const kActionLabels[rs::kActionCount] = {
-    "A  (Confirm)", "B ", "X (Jump)", "Y", "L", "R  (sub weapon)", "ZL  (squid form)", "ZR  (shoot)",
-    "+  (Plus)", "-  (Minus)", "HOME", "D-pad up", "D-pad down", "D-pad left", "D-pad right",
-    "Left stick click", "Right stick click", "Move forward", "Move back", "Move left", "Move right"};
+const char* const kActionLabels[rs::kActionCount] = {"A  (Confirm)",
+                                                     "B ",
+                                                     "X (Jump)",
+                                                     "Y",
+                                                     "L",
+                                                     "R  (sub weapon)",
+                                                     "ZL  (squid form)",
+                                                     "ZR  (shoot)",
+                                                     "+  (Plus)",
+                                                     "-  (Minus)",
+                                                     "HOME",
+                                                     "D-pad up",
+                                                     "D-pad down",
+                                                     "D-pad left",
+                                                     "D-pad right",
+                                                     "Left stick click",
+                                                     "Right stick click",
+                                                     "Move forward",
+                                                     "Move back",
+                                                     "Move left",
+                                                     "Move right"};
 
 std::string key_name(int binding) {
     if (binding == rs::kUnbound) return "-";
@@ -137,18 +154,16 @@ std::string pad_name(int binding) {
 }
 
 void check_vk_result(VkResult result) {
-    if (result != VK_SUCCESS)
-        std::fprintf(stderr, "[imgui] Vulkan error %d\n", int(result));
+    if (result != VK_SUCCESS) std::fprintf(stderr, "[imgui] Vulkan error %d\n", int(result));
 }
 
-bool backend_init(SDL_Window* window, VkInstance instance, VkPhysicalDevice physical,
-                  VkDevice device, uint32_t queue_family, VkQueue queue,
-                  VkFormat format, uint32_t image_count) {
+bool backend_init(SDL_Window* window, VkInstance instance, VkPhysicalDevice physical, VkDevice device,
+                  uint32_t queue_family, VkQueue queue, VkFormat format, uint32_t image_count) {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad | ImGuiConfigFlags_DockingEnable;
-    io.IniFilename = nullptr;   // no imgui.ini next to the game; layout lives for the session
+    io.IniFilename = nullptr; // no imgui.ini next to the game; layout lives for the session
     ImGui::StyleColorsDark();
 
     if (!ImGui_ImplSDL2_InitForVulkan(window)) {
@@ -164,12 +179,11 @@ bool backend_init(SDL_Window* window, VkInstance instance, VkPhysicalDevice phys
     info.Device = device;
     info.QueueFamily = queue_family;
     info.Queue = queue;
-    info.DescriptorPoolSize = 64;   // font atlas plus headroom; the backend creates the pool
+    info.DescriptorPoolSize = 64; // font atlas plus headroom; the backend creates the pool
     info.MinImageCount = 2;
     info.ImageCount = std::max<uint32_t>(image_count, 2);
     info.UseDynamicRendering = true;
-    info.PipelineInfoMain.PipelineRenderingCreateInfo.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+    info.PipelineInfoMain.PipelineRenderingCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
     info.PipelineInfoMain.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
     info.PipelineInfoMain.PipelineRenderingCreateInfo.pColorAttachmentFormats = &format;
     info.PipelineInfoMain.PipelineRenderingCreateInfo.depthAttachmentFormat = VK_FORMAT_UNDEFINED;
@@ -264,18 +278,18 @@ bool process_capture_event(const SDL_Event& e) {
 // Menu shortcuts that ImGui's own navigation does not cover: Back goes up a
 // page (or closes), Delete/Square clears the focused binding.
 void process_nav_event(const SDL_Event& e) {
-    const bool back =
-        (e.type == SDL_KEYDOWN && !e.key.repeat && e.key.keysym.scancode == SDL_SCANCODE_BACKSPACE) ||
-        (e.type == SDL_CONTROLLERBUTTONDOWN && e.cbutton.button == SDL_CONTROLLER_BUTTON_B);
+    const bool back = (e.type == SDL_KEYDOWN && !e.key.repeat && e.key.keysym.scancode == SDL_SCANCODE_BACKSPACE) ||
+                      (e.type == SDL_CONTROLLERBUTTONDOWN && e.cbutton.button == SDL_CONTROLLER_BUTTON_B);
     if (back) {
-        if (s_menu_page != MenuPage::Main) s_menu_page = MenuPage::Main;
-        else set_menu_open(false);
+        if (s_menu_page != MenuPage::Main)
+            s_menu_page = MenuPage::Main;
+        else
+            set_menu_open(false);
         s_quit_armed_at = -1.0;
         return;
     }
-    const bool clear =
-        (e.type == SDL_KEYDOWN && !e.key.repeat && e.key.keysym.scancode == SDL_SCANCODE_DELETE) ||
-        (e.type == SDL_CONTROLLERBUTTONDOWN && e.cbutton.button == SDL_CONTROLLER_BUTTON_X);
+    const bool clear = (e.type == SDL_KEYDOWN && !e.key.repeat && e.key.keysym.scancode == SDL_SCANCODE_DELETE) ||
+                       (e.type == SDL_CONTROLLERBUTTONDOWN && e.cbutton.button == SDL_CONTROLLER_BUTTON_X);
     if (clear && s_focused_action >= 0) bind_action(s_focused_page, s_focused_action, rs::kUnbound);
 }
 
@@ -298,8 +312,7 @@ const char* present_mode_name(VkPresentModeKHR mode) {
 void build_performance_window(const diag::OverlayMetrics& metrics, VkExtent2D extent) {
     ImGui::SetNextWindowPos(ImVec2(12, 12), ImGuiCond_FirstUseEver);
     bool open = true;
-    if (!ImGui::Begin("Performance", &open,
-                      ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse)) {
+    if (!ImGui::Begin("Performance", &open, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse)) {
         ImGui::End();
         return;
     }
@@ -337,15 +350,15 @@ void build_performance_window(const diag::OverlayMetrics& metrics, VkExtent2D ex
     if (metrics.ram_usage_bytes)
         ImGui::Text("RAM     %u MB", unsigned(metrics.ram_usage_bytes / (1024 * 1024)));
     else
-        ImGui::TextDisabled("RAM     --");   // platform did not report it
+        ImGui::TextDisabled("RAM     --"); // platform did not report it
     if (ImGui::CollapsingHeader("Backend")) {
         const auto& caps = gx2vk::caps();
         ImGui::Text("Device %s", caps.device_name.c_str());
         ImGui::Text("Vulkan %u.%u.%u, %s", VK_API_VERSION_MAJOR(caps.api_version),
                     VK_API_VERSION_MINOR(caps.api_version), VK_API_VERSION_PATCH(caps.api_version),
                     present_mode_name(gx2vk::present_mode()));
-        ImGui::Text("Presents %llu, swapchain %ux%u", (unsigned long long)gx2vk::present_count(),
-                    extent.width, extent.height);
+        ImGui::Text("Presents %llu, swapchain %ux%u", (unsigned long long)gx2vk::present_count(), extent.width,
+                    extent.height);
         const auto mem = gx2vk::memory_usage();
         ImGui::Text("Memory device-local %.1f MB, host-only %.1f MB", mem.device_local / 1048576.0,
                     mem.host_only / 1048576.0);
@@ -356,8 +369,7 @@ void build_performance_window(const diag::OverlayMetrics& metrics, VkExtent2D ex
             ImGui::Text("Validation errors 0, warnings %llu", (unsigned long long)gx2vk::validation_warning_count());
         else {
             ImGui::TextColored(ImVec4(0.95f, 0.35f, 0.35f, 1.0f), "Validation errors %llu, warnings %llu",
-                               (unsigned long long)errors,
-                               (unsigned long long)gx2vk::validation_warning_count());
+                               (unsigned long long)errors, (unsigned long long)gx2vk::validation_warning_count());
             ImGui::TextWrapped("%s", gx2vk::last_validation_error().c_str());
         }
     }
@@ -369,14 +381,12 @@ void build_performance_window(const diag::OverlayMetrics& metrics, VkExtent2D ex
 // game keeps every event and the mouse stays captured.
 void build_simple_overlay(const diag::OverlayMetrics& metrics) {
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x - 12.0f,
-                                   viewport->WorkPos.y + 12.0f),
+    ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x - 12.0f, viewport->WorkPos.y + 12.0f),
                             ImGuiCond_Always, ImVec2(1.0f, 0.0f));
     ImGui::SetNextWindowBgAlpha(0.35f);
-    constexpr ImGuiWindowFlags flags =
-        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
-        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
-        ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoMove;
+    constexpr ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                                       ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+                                       ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoMove;
     if (!ImGui::Begin("##simple_fps", nullptr, flags)) {
         ImGui::End();
         return;
@@ -422,8 +432,7 @@ void build_debug_window() {
     int level = int(diag::GetLevel());
     if (ImGui::Combo("Level", &level, levels, 4)) diag::SetLevel(diag::DiagnosticLevel(level));
     if (ImGui::Button("Save snapshot now (F9)")) diag::ManualCapture();
-    if (ImGui::Button(diag::IsManualRecording() ? "Stop extended recording"
-                                                 : "Start extended recording (F8)"))
+    if (ImGui::Button(diag::IsManualRecording() ? "Stop extended recording" : "Start extended recording (F8)"))
         diag::ToggleManualRecord();
     ImGui::TextDisabled("Reports land in Diagnostics/.");
     ImGui::End();
@@ -440,8 +449,7 @@ void build_controls_page(MenuPage page) {
         ImGui::SameLine(220);
         const int binding = keyboard ? v.keys[action] : v.pad[action];
         const bool capturing = s_capture && s_capture_page == page && s_capture_action == action;
-        const std::string label =
-            capturing ? "press ..." : keyboard ? key_name(binding) : pad_name(binding);
+        const std::string label = capturing ? "press ..." : keyboard ? key_name(binding) : pad_name(binding);
         if (ImGui::Button(label.c_str(), ImVec2(180, 0))) {
             s_capture = true;
             s_capture_page = page;
@@ -465,9 +473,8 @@ void build_controls_page(MenuPage page) {
         s_menu_page = MenuPage::Main;
         s_capture = false;
     }
-    ImGui::TextDisabled("%s",
-                        keyboard ? "Enter: change    Delete: clear    Esc: close"
-                                 : "Cross: change    Square: clear    Circle: back");
+    ImGui::TextDisabled("%s", keyboard ? "Enter: change    Delete: clear    Esc: close"
+                                       : "Cross: change    Square: clear    Circle: back");
 }
 
 void build_settings_window() {
@@ -477,9 +484,9 @@ void build_settings_window() {
     ImGui::SetNextWindowPos(center, ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSize(ImVec2(560, 640), ImGuiCond_FirstUseEver);
     bool open = true;
-    if (!ImGui::Begin(s_menu_page == MenuPage::Main            ? "Settings"
-                      : s_menu_page == MenuPage::Keyboard     ? "Keyboard & mouse controls"
-                                                              : "Controller controls",
+    if (!ImGui::Begin(s_menu_page == MenuPage::Main       ? "Settings"
+                      : s_menu_page == MenuPage::Keyboard ? "Keyboard & mouse controls"
+                                                          : "Controller controls",
                       &open)) {
         ImGui::End();
         return;
@@ -551,7 +558,7 @@ void build_settings_window() {
     if (!open) set_menu_open(false);
 }
 
-}  // namespace
+} // namespace
 
 void process_event(const SDL_Event& event) {
     std::lock_guard lock(s_event_lock);
@@ -559,13 +566,11 @@ void process_event(const SDL_Event& event) {
 }
 
 bool menu_event(const SDL_Event& event) {
-    if (event.type == SDL_CONTROLLERBUTTONDOWN &&
-        event.cbutton.button == SDL_CONTROLLER_BUTTON_TOUCHPAD) {
+    if (event.type == SDL_CONTROLLERBUTTONDOWN && event.cbutton.button == SDL_CONTROLLER_BUTTON_TOUCHPAD) {
         if (!s_capture_active.load(std::memory_order_relaxed)) set_menu_open(!menu_open());
-        return true;   // in capture mode the render thread cancels it from the queued copy
+        return true; // in capture mode the render thread cancels it from the queued copy
     }
-    if (event.type == SDL_KEYDOWN && !event.key.repeat &&
-        event.key.keysym.scancode == SDL_SCANCODE_ESCAPE) {
+    if (event.type == SDL_KEYDOWN && !event.key.repeat && event.key.keysym.scancode == SDL_SCANCODE_ESCAPE) {
         if (!s_capture_active.load(std::memory_order_relaxed)) set_menu_open(!menu_open());
         return true;
     }
@@ -578,9 +583,13 @@ void set_menu_open(bool open) {
     if (!open) s_block_until_released.store(true, std::memory_order_relaxed);
 }
 
-bool menu_open() { return s_menu_open.load(std::memory_order_relaxed); }
+bool menu_open() {
+    return s_menu_open.load(std::memory_order_relaxed);
+}
 
-bool consume_menu_changed() { return s_menu_changed.exchange(false, std::memory_order_relaxed); }
+bool consume_menu_changed() {
+    return s_menu_changed.exchange(false, std::memory_order_relaxed);
+}
 
 bool menu_blocks_input(bool any_input_held) {
     if (s_menu_open.load(std::memory_order_relaxed)) return true;
@@ -595,31 +604,42 @@ bool consume_fullscreen_request(bool& fullscreen) {
     return true;
 }
 
-bool consume_quit_request() { return s_quit_requested.exchange(false, std::memory_order_relaxed); }
+bool consume_quit_request() {
+    return s_quit_requested.exchange(false, std::memory_order_relaxed);
+}
 
-void note_fullscreen(bool fullscreen) { s_fullscreen_mirror.store(fullscreen, std::memory_order_relaxed); }
+void note_fullscreen(bool fullscreen) {
+    s_fullscreen_mirror.store(fullscreen, std::memory_order_relaxed);
+}
 
 void set_visible(bool visible) {
     if (s_visible.exchange(visible, std::memory_order_relaxed) != visible)
         s_visible_changed.store(true, std::memory_order_relaxed);
 }
 
-bool visible() { return s_visible.load(std::memory_order_relaxed); }
+bool visible() {
+    return s_visible.load(std::memory_order_relaxed);
+}
 
-bool consume_visibility_changed() { return s_visible_changed.exchange(false, std::memory_order_relaxed); }
+bool consume_visibility_changed() {
+    return s_visible_changed.exchange(false, std::memory_order_relaxed);
+}
 
 void set_simple_overlay(bool visible) {
     if (s_simple_visible.exchange(visible, std::memory_order_relaxed) != visible)
         s_simple_changed.store(true, std::memory_order_relaxed);
 }
 
-bool simple_overlay() { return s_simple_visible.load(std::memory_order_relaxed); }
+bool simple_overlay() {
+    return s_simple_visible.load(std::memory_order_relaxed);
+}
 
-bool consume_simple_overlay_changed() { return s_simple_changed.exchange(false, std::memory_order_relaxed); }
+bool consume_simple_overlay_changed() {
+    return s_simple_changed.exchange(false, std::memory_order_relaxed);
+}
 
-bool ensure_ready(SDL_Window* window, VkInstance instance, VkPhysicalDevice physical,
-                  VkDevice device, uint32_t queue_family, VkQueue queue,
-                  VkFormat format, uint32_t image_count) {
+bool ensure_ready(SDL_Window* window, VkInstance instance, VkPhysicalDevice physical, VkDevice device,
+                  uint32_t queue_family, VkQueue queue, VkFormat format, uint32_t image_count) {
     if (!window) return false;
     if (s_ready && s_format == format) return true;
     // A swapchain recreation with another format needs a new pipeline.
@@ -650,7 +670,7 @@ ImDrawData* begin_frame(VkExtent2D extent) {
             process_nav_event(event);
         }
     }
-    if (!show_menu) s_capture = false;   // closed from the GX2 thread mid-capture
+    if (!show_menu) s_capture = false; // closed from the GX2 thread mid-capture
     for (const auto& event : events) ImGui_ImplSDL2_ProcessEvent(&event);
 
     ImGui_ImplVulkan_NewFrame();
@@ -687,8 +707,8 @@ ImDrawData* begin_frame(VkExtent2D extent) {
     return ImGui::GetDrawData();
 }
 
-void render_draw_data(ImDrawData* draw_data, VkCommandBuffer cb, VkImage target,
-                      VkImageView target_view, VkExtent2D extent) {
+void render_draw_data(ImDrawData* draw_data, VkCommandBuffer cb, VkImage target, VkImageView target_view,
+                      VkExtent2D extent) {
     if (!draw_data || draw_data->CmdListsCount == 0) return;
     VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
     barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -698,8 +718,8 @@ void render_draw_data(ImDrawData* draw_data, VkCommandBuffer cb, VkImage target,
     barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.image = target;
     barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                         0, 0, nullptr, 0, nullptr, 1, &barrier);
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0,
+                         nullptr, 0, nullptr, 1, &barrier);
 
     VkRenderingAttachmentInfo color{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
     color.imageView = target_view;
@@ -717,10 +737,12 @@ void render_draw_data(ImDrawData* draw_data, VkCommandBuffer cb, VkImage target,
 
     std::swap(barrier.oldLayout, barrier.newLayout);
     std::swap(barrier.srcAccessMask, barrier.dstAccessMask);
-    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         0, 0, nullptr, 0, nullptr, 1, &barrier);
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0,
+                         nullptr, 0, nullptr, 1, &barrier);
 }
 
-void shutdown() { backend_shutdown(); }
+void shutdown() {
+    backend_shutdown();
+}
 
-}  // namespace gx2_imgui
+} // namespace gx2_imgui

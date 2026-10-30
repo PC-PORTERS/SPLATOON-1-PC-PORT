@@ -17,21 +17,20 @@ namespace rebrewu::diagnostics {
 enum class Severity { Note, Warning, Error };
 
 struct DiagEntry {
-    Severity    severity{};
+    Severity severity{};
     std::string message{};
 };
 
 class DiagEngine {
 public:
-    explicit DiagEngine(bool stderr_echo = false) noexcept
-        : m_stderr_echo(stderr_echo) {}
+    explicit DiagEngine(bool stderr_echo = false) noexcept : m_stderr_echo(stderr_echo) {}
 
     void error(std::string msg);
     void warning(std::string msg);
     void note(std::string msg);
 
-    bool     has_errors()     const noexcept { return m_error_count > 0; }
-    uint32_t error_count()   const noexcept { return m_error_count; }
+    bool has_errors() const noexcept { return m_error_count > 0; }
+    uint32_t error_count() const noexcept { return m_error_count; }
     uint32_t warning_count() const noexcept { return m_warning_count; }
 
     const std::vector<DiagEntry>& entries() const noexcept { return m_entries; }
@@ -46,7 +45,7 @@ private:
     std::vector<DiagEntry> m_entries{};
     uint32_t m_error_count{0};
     uint32_t m_warning_count{0};
-    bool     m_stderr_echo{false};
+    bool m_stderr_echo{false};
 };
 
-}
+} // namespace rebrewu::diagnostics

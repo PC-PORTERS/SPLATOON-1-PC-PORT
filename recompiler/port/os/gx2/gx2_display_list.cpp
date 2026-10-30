@@ -43,8 +43,8 @@
 namespace {
 struct Command {
     Gx2CommandFn fn;
-    std::array<uint32_t, 8> r;  // r3..r10
-    std::array<double, 8> f;    // f1..f8
+    std::array<uint32_t, 8> r; // r3..r10
+    std::array<double, 8> f;   // f1..f8
     // fn == nullptr: shader constant snapshot (r[0] = is_pixel, r[1] = index).
     std::vector<uint32_t> words;
     Gx2DescriptorFn descriptor_fn = nullptr;
@@ -74,7 +74,9 @@ struct RegistryLock {
 std::array<OpenList, 4> s_open;
 std::array<std::mutex, 4> s_open_mutex;
 thread_local bool t_private_builder = false;
-unsigned builder_slot() { return t_private_builder ? 3u : unsigned(rbrew_current_core() % 3u); }
+unsigned builder_slot() {
+    return t_private_builder ? 3u : unsigned(rbrew_current_core() % 3u);
+}
 // Every GX2EndDisplayList gets a fresh id: the game records meshes one after
 // another into one scratch buffer and copies the bytes out, and each copy
 // must replay what was recorded then. Recordings not used (recorded/called)
@@ -96,51 +98,66 @@ class CommandRetirement {
     void run() {
         std::unique_lock lock(mutex);
         for (;;) {
-            changed.wait(lock, [&]{return stopping || !pending.empty();});
+            changed.wait(lock, [&] { return stopping || !pending.empty(); });
             if (pending.empty()) return;
-            auto work = std::move(pending.front());pending.pop_front();busy = true;
+            auto work = std::move(pending.front());
+            pending.pop_front();
+            busy = true;
             changed.notify_all();
             lock.unlock();
             size_t count = 0;
-            try {count = work();} catch (...) {
-                RBREW_LOGF(stderr,"[gx2] display-list maintenance failed; retaining resident commands\n");
+            try {
+                count = work();
+            } catch (...) {
+                RBREW_LOGF(stderr, "[gx2] display-list maintenance failed; retaining resident commands\n");
             }
             work = {};
             lock.lock();
-            retired += count;busy = false;changed.notify_all();
+            retired += count;
+            busy = false;
+            changed.notify_all();
         }
     }
+
 public:
     ~CommandRetirement() {
-        {std::lock_guard lock(mutex);stopping = true;}
+        {
+            std::lock_guard lock(mutex);
+            stopping = true;
+        }
         changed.notify_all();
         if (worker.joinable()) worker.join();
     }
     void retire(std::function<size_t()> work) {
         std::unique_lock lock(mutex);
-        if (!worker.joinable()) worker = std::thread([this]{run();});
-        changed.wait(lock, [&]{return pending.size() < 2;});
-        pending.push_back(std::move(work));changed.notify_all();
+        if (!worker.joinable()) worker = std::thread([this] { run(); });
+        changed.wait(lock, [&] { return pending.size() < 2; });
+        pending.push_back(std::move(work));
+        changed.notify_all();
     }
 #ifdef RBREW_GX2_QUEUE_TESTS
     std::pair<uint64_t, bool> drain_for_test() {
         std::unique_lock lock(mutex);
-        changed.wait(lock, [&]{return pending.empty() && !busy;});
+        changed.wait(lock, [&] { return pending.empty() && !busy; });
         return {retired, worker.joinable() && worker.get_id() != std::this_thread::get_id()};
     }
 #endif
 };
-CommandRetirement& command_retirement() {static CommandRetirement worker;return worker;}
+CommandRetirement& command_retirement() {
+    static CommandRetirement worker;
+    return worker;
+}
 constexpr uint64_t kNotArchived = ~uint64_t(0);
 enum RecordingFlags : uint8_t {
-    kTagged = 1,   // its id was written into its buffer (capacity >= 12)
-    kUsed = 2,     // called or republished since the last sweep
-    kMissed = 4,   // the last sweep found no reference to it
-    kDead = 8,     // unreachable: commands released, never callable again
+    kTagged = 1, // its id was written into its buffer (capacity >= 12)
+    kUsed = 2,   // called or republished since the last sweep
+    kMissed = 4, // the last sweep found no reference to it
+    kDead = 8,   // unreachable: commands released, never callable again
 };
 struct Recording {
-    Commands commands; uint64_t last_use = 0, archive_offset = kNotArchived;
-    uint32_t buffer = 0, bytes = 0;   // where it was recorded; resident size
+    Commands commands;
+    uint64_t last_use = 0, archive_offset = kNotArchived;
+    uint32_t buffer = 0, bytes = 0; // where it was recorded; resident size
     uint8_t flags = 0;
     bool archived() const { return archive_offset != kNotArchived; }
 };
@@ -150,15 +167,19 @@ struct Recording {
 class RecordingTable {
     static constexpr size_t kChunk = 4096;
     std::vector<std::unique_ptr<Recording[]>> chunks;
-    std::vector<uint32_t> dead;   // dead recordings per chunk
+    std::vector<uint32_t> dead; // dead recordings per chunk
     size_t count = 0;
+
 public:
     Recording* find(uint32_t id) {
         return id < count && chunks[id / kChunk] ? &chunks[id / kChunk][id % kChunk] : nullptr;
     }
     Recording& insert(uint32_t id, Recording recording) {
         while (count <= id) {
-            if (count % kChunk == 0) { chunks.push_back(std::make_unique<Recording[]>(kChunk)); dead.push_back(0); }
+            if (count % kChunk == 0) {
+                chunks.push_back(std::make_unique<Recording[]>(kChunk));
+                dead.push_back(0);
+            }
             ++count;
         }
         return chunks[id / kChunk][id % kChunk] = std::move(recording);
@@ -180,7 +201,7 @@ uint32_t recording_bytes(const std::vector<Command>& commands) {
     for (const Command& c : commands) bytes += c.words.size() * sizeof(uint32_t) + c.descriptor.size();
     return uint32_t(std::min<uint64_t>(bytes, UINT32_MAX));
 }
-std::unordered_map<uint32_t, uint32_t> s_lists;           // buffer address -> latest id
+std::unordered_map<uint32_t, uint32_t> s_lists; // buffer address -> latest id
 uint32_t s_next_id = 0;
 uint64_t s_use_clock = 0;
 // 2^18: at 2^16 the game's per-frame lists pushed reused lists out to the
@@ -194,63 +215,73 @@ uint64_t s_resident_bytes = 0;
 // Contains native call arguments/snapshots, never GPU command execution.
 // tmpfile is private and removed on close. If it cannot be written, keep
 // the resident payload rather than discard observable guest state.
-std::unique_ptr<std::FILE,decltype(&std::fclose)> s_archive{nullptr,&std::fclose};
+std::unique_ptr<std::FILE, decltype(&std::fclose)> s_archive{nullptr, &std::fclose};
 uint64_t s_archive_seeks = 0;
 uint64_t s_archive_end = 0;
-bool s_archive_at_end = false;   // the file position is s_archive_end (no restore read since)
+bool s_archive_at_end = false; // the file position is s_archive_end (no restore read since)
 std::mutex s_archive_mutex;
 bool s_eviction_inflight = false; // protected by s_mutex
-std::array<char,1u<<20> s_archive_buffer{};
+std::array<char, 1u << 20> s_archive_buffer{};
 struct ArchivedCommand {
     Gx2CommandFn fn;
     Gx2DescriptorFn descriptor_fn;
-    std::array<uint32_t,8> r;
-    std::array<double,8> f;
+    std::array<uint32_t, 8> r;
+    std::array<double, 8> f;
     uint32_t words, descriptor;
 };
 bool archive_seek(uint64_t offset, int origin) {
     ++s_archive_seeks;
 #ifdef _WIN32
-    return ::_fseeki64(s_archive.get(),int64_t(offset),origin)==0;
+    return ::_fseeki64(s_archive.get(), int64_t(offset), origin) == 0;
 #else
-    return ::fseeko(s_archive.get(),off_t(offset),origin)==0;
+    return ::fseeko(s_archive.get(), off_t(offset), origin) == 0;
 #endif
 }
 bool archive_commands(Recording& recording) {
-    if(recording.archived())return true; // Immutable payload already has backing.
-    if(!s_archive)return false;
-    const uint64_t offset=s_archive_end;
-    uint64_t serialized=0;
-    auto write=[&](const void* p,size_t bytes) {
-        if(bytes && std::fwrite(p,1,bytes,s_archive.get())!=bytes)return false;
-        serialized+=bytes;return true;
+    if (recording.archived()) return true; // Immutable payload already has backing.
+    if (!s_archive) return false;
+    const uint64_t offset = s_archive_end;
+    uint64_t serialized = 0;
+    auto write = [&](const void* p, size_t bytes) {
+        if (bytes && std::fwrite(p, 1, bytes, s_archive.get()) != bytes) return false;
+        serialized += bytes;
+        return true;
     };
-    const uint32_t count=uint32_t(recording.commands->size());
-    if(!write(&count,sizeof(count)))return false;
-    for(const auto& c:*recording.commands) {
-        const ArchivedCommand a{c.fn,c.descriptor_fn,c.r,c.f,uint32_t(c.words.size()),uint32_t(c.descriptor.size())};
-        if(!write(&a,sizeof(a)) || !write(c.words.data(),c.words.size()*sizeof(uint32_t)) ||
-           !write(c.descriptor.data(),c.descriptor.size()))return false;
+    const uint32_t count = uint32_t(recording.commands->size());
+    if (!write(&count, sizeof(count))) return false;
+    for (const auto& c : *recording.commands) {
+        const ArchivedCommand a{c.fn, c.descriptor_fn,          c.r,
+                                c.f,  uint32_t(c.words.size()), uint32_t(c.descriptor.size())};
+        if (!write(&a, sizeof(a)) || !write(c.words.data(), c.words.size() * sizeof(uint32_t)) ||
+            !write(c.descriptor.data(), c.descriptor.size()))
+            return false;
     }
-    recording.archive_offset=offset;
-    s_archive_end+=serialized;
+    recording.archive_offset = offset;
+    s_archive_end += serialized;
     return true;
 }
 Commands restore_commands(uint64_t offset) {
     std::lock_guard archive_lock(s_archive_mutex);
-    s_archive_at_end=false;
-    if(!s_archive || !archive_seek(offset,SEEK_SET))throw std::runtime_error("GX2 display-list archive seek failed");
-    auto read=[&](void* p,size_t bytes) {
-        if(bytes && std::fread(p,1,bytes,s_archive.get())!=bytes)
+    s_archive_at_end = false;
+    if (!s_archive || !archive_seek(offset, SEEK_SET)) throw std::runtime_error("GX2 display-list archive seek failed");
+    auto read = [&](void* p, size_t bytes) {
+        if (bytes && std::fread(p, 1, bytes, s_archive.get()) != bytes)
             throw std::runtime_error("GX2 display-list archive read failed");
     };
-    uint32_t count=0;read(&count,sizeof(count));
-    auto commands=std::make_shared<std::vector<Command>>(count);
-    for(auto& c:*commands) {
-        ArchivedCommand a{};read(&a,sizeof(a));
-        c.fn=a.fn;c.descriptor_fn=a.descriptor_fn;c.r=a.r;c.f=a.f;
-        c.words.resize(a.words);c.descriptor.resize(a.descriptor);
-        read(c.words.data(),c.words.size()*sizeof(uint32_t));read(c.descriptor.data(),c.descriptor.size());
+    uint32_t count = 0;
+    read(&count, sizeof(count));
+    auto commands = std::make_shared<std::vector<Command>>(count);
+    for (auto& c : *commands) {
+        ArchivedCommand a{};
+        read(&a, sizeof(a));
+        c.fn = a.fn;
+        c.descriptor_fn = a.descriptor_fn;
+        c.r = a.r;
+        c.f = a.f;
+        c.words.resize(a.words);
+        c.descriptor.resize(a.descriptor);
+        read(c.words.data(), c.words.size() * sizeof(uint32_t));
+        read(c.descriptor.data(), c.descriptor.size());
     }
     return commands;
 }
@@ -263,22 +294,26 @@ Commands restore_commands(uint64_t offset) {
 struct SweepPacing {
     // Measured with [.dl-hitch-bench]: 4 MiB pieces, below-normal priority and
     // 256-list free slices made the worst game-thread stall larger, not smaller.
-    uint64_t piece_bytes = uint64_t(16) << 20;   // scan read between pauses
-    bool pause_scan = true, background = false;  // 1 ms pause per piece; below-normal priority while reading
-    size_t free_slice = 1024;                    // freed lists per 1 ms pause (0: all at once)
+    uint64_t piece_bytes = uint64_t(16) << 20;  // scan read between pauses
+    bool pause_scan = true, background = false; // 1 ms pause per piece; below-normal priority while reading
+    size_t free_slice = 1024;                   // freed lists per 1 ms pause (0: all at once)
 };
 SweepPacing s_pacing;
 void release_paced(std::vector<Commands>& retired) {
     const size_t kSlice = s_pacing.free_slice ? s_pacing.free_slice : ~size_t(0);
 #if defined(_WIN32)
-    thread_local HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr, 0x2 /*HIGH_RESOLUTION*/, TIMER_MODIFY_STATE | SYNCHRONIZE);
+    thread_local HANDLE timer =
+        CreateWaitableTimerExW(nullptr, nullptr, 0x2 /*HIGH_RESOLUTION*/, TIMER_MODIFY_STATE | SYNCHRONIZE);
 #endif
     while (retired.size() > kSlice) {
         retired.resize(retired.size() - kSlice);
 #if defined(_WIN32)
-        LARGE_INTEGER due{}; due.QuadPart = -10000;   // 1 ms
-        if (timer && SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE)) WaitForSingleObject(timer, INFINITE);
-        else Sleep(1);
+        LARGE_INTEGER due{};
+        due.QuadPart = -10000; // 1 ms
+        if (timer && SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE))
+            WaitForSingleObject(timer, INFINITE);
+        else
+            Sleep(1);
 #else
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
 #endif
@@ -288,7 +323,7 @@ void release_paced(std::vector<Commands>& retired) {
 void evict_old_recordings();
 #ifdef RBREW_GX2_QUEUE_TESTS
 std::function<void()> s_test_archive_gate;
-std::function<void()> s_test_end_list_gate;   // GX2EndDisplayList, between reuse lookup and publication
+std::function<void()> s_test_end_list_gate; // GX2EndDisplayList, between reuse lookup and publication
 #endif
 
 // Identical lists share one recording. The game re-records many lists every
@@ -298,24 +333,42 @@ std::function<void()> s_test_end_list_gate;   // GX2EndDisplayList, between reus
 // same calls with the same arguments and payloads, so GX2EndDisplayList
 // republishes that recording's id (tag, s_lists) instead of storing a copy.
 // Direct-mapped by content hash: fixed size, a collision only loses a reuse.
-struct ContentSlot { uint64_t hash = 0; uint32_t id = 0; bool used = false; };
+struct ContentSlot {
+    uint64_t hash = 0;
+    uint32_t id = 0;
+    bool used = false;
+};
 constexpr size_t kContentSlots = size_t(1) << 16;
-std::array<ContentSlot, kContentSlots> s_content{};   // guarded by s_mutex
+std::array<ContentSlot, kContentSlots> s_content{}; // guarded by s_mutex
 std::atomic<uint64_t> s_content_reuses{0};
 uint64_t commands_hash(const std::vector<Command>& commands) {
     uint64_t h = 0x9E3779B97F4A7C15ull ^ commands.size();
-    auto mix = [&](uint64_t v) { h = (h ^ v) * 0x100000001B3ull; h ^= h >> 29; };
+    auto mix = [&](uint64_t v) {
+        h = (h ^ v) * 0x100000001B3ull;
+        h ^= h >> 29;
+    };
     auto bytes = [&](const void* data, size_t size) {
         const auto* p = static_cast<const uint8_t*>(data);
         mix(size);
         size_t i = 0;
-        for (; i + 8 <= size; i += 8) { uint64_t w; std::memcpy(&w, p + i, 8); mix(w); }
-        if (i < size) { uint64_t w = 0; std::memcpy(&w, p + i, size - i); mix(w); }
+        for (; i + 8 <= size; i += 8) {
+            uint64_t w;
+            std::memcpy(&w, p + i, 8);
+            mix(w);
+        }
+        if (i < size) {
+            uint64_t w = 0;
+            std::memcpy(&w, p + i, size - i);
+            mix(w);
+        }
     };
     for (const Command& c : commands) {
-        mix(reinterpret_cast<uintptr_t>(c.fn)); mix(reinterpret_cast<uintptr_t>(c.descriptor_fn));
-        bytes(c.r.data(), sizeof(c.r)); bytes(c.f.data(), sizeof(c.f));
-        bytes(c.words.data(), c.words.size() * sizeof(uint32_t)); bytes(c.descriptor.data(), c.descriptor.size());
+        mix(reinterpret_cast<uintptr_t>(c.fn));
+        mix(reinterpret_cast<uintptr_t>(c.descriptor_fn));
+        bytes(c.r.data(), sizeof(c.r));
+        bytes(c.f.data(), sizeof(c.f));
+        bytes(c.words.data(), c.words.size() * sizeof(uint32_t));
+        bytes(c.descriptor.data(), c.descriptor.size());
     }
     return h;
 }
@@ -323,7 +376,8 @@ uint64_t commands_hash(const std::vector<Command>& commands) {
 bool same_commands(const std::vector<Command>& a, const std::vector<Command>& b) {
     if (a.size() != b.size()) return false;
     for (size_t i = 0; i < a.size(); ++i) {
-        const Command& x = a[i]; const Command& y = b[i];
+        const Command& x = a[i];
+        const Command& y = b[i];
         if (x.fn != y.fn || x.descriptor_fn != y.descriptor_fn || x.r != y.r ||
             std::memcmp(x.f.data(), y.f.data(), sizeof(x.f)) != 0 || x.words != y.words || x.descriptor != y.descriptor)
             return false;
@@ -336,9 +390,10 @@ std::atomic<uint64_t> s_eviction_count{0}, s_restore_count{0}, s_eviction_ns{0};
 bool use_recording(uint32_t id, Commands& out) {
     Recording* recording = s_recordings.find(id);
     if (!recording || (recording->flags & kDead) || (!recording->commands && !recording->archived())) return false;
-    if(!recording->commands) {
-        recording->commands=restore_commands(recording->archive_offset);
-        ++s_resident_recordings; s_resident_bytes += recording->bytes;
+    if (!recording->commands) {
+        recording->commands = restore_commands(recording->archive_offset);
+        ++s_resident_recordings;
+        s_resident_bytes += recording->bytes;
         s_restore_count.fetch_add(1, std::memory_order_relaxed);
     }
     recording->last_use = ++s_use_clock;
@@ -349,94 +404,116 @@ bool use_recording(uint32_t id, Commands& out) {
 }
 
 void evict_old_recordings() {
-    if ((s_resident_recordings <= kMaxRecordings && s_resident_bytes <= kMaxResidentBytes) || s_eviction_inflight) return;
+    if ((s_resident_recordings <= kMaxRecordings && s_resident_bytes <= kMaxResidentBytes) || s_eviction_inflight)
+        return;
     struct Timed {
         std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
         ~Timed() {
-            s_eviction_ns.fetch_add(uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                std::chrono::steady_clock::now() - start).count()), std::memory_order_relaxed);
+            s_eviction_ns.fetch_add(
+                uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start)
+                             .count()),
+                std::memory_order_relaxed);
             s_eviction_count.fetch_add(1, std::memory_order_relaxed);
         }
     } timed;
     std::vector<uint64_t> uses;
     uses.reserve(s_resident_recordings);
-    for (const uint32_t id : s_tracked) if (const Recording* r = s_recordings.find(id); r && r->commands) uses.push_back(r->last_use);
+    for (const uint32_t id : s_tracked)
+        if (const Recording* r = s_recordings.find(id); r && r->commands) uses.push_back(r->last_use);
     auto median = uses.begin() + uses.size() / 2;
     std::nth_element(uses.begin(), median, uses.end());
     const uint64_t cutoff = *median;
-    struct Candidate {Recording* resident;Recording snapshot;};
-    auto cold=std::make_shared<std::vector<Candidate>>();cold->reserve(uses.size()/2);
+    struct Candidate {
+        Recording* resident;
+        Recording snapshot;
+    };
+    auto cold = std::make_shared<std::vector<Candidate>>();
+    cold->reserve(uses.size() / 2);
     // Table chunks keep entry addresses (a chunk is only released once all of
     // its recordings are dead, and a candidate has resident commands). Cold
     // live recordings go to the archive: copied guest tags may name them.
     for (const uint32_t id : s_tracked)
         if (Recording* r = s_recordings.find(id); r && r->commands && r->last_use < cutoff) cold->push_back({r, *r});
 #ifdef RBREW_GX2_QUEUE_TESTS
-    const auto gate=s_test_archive_gate;
+    const auto gate = s_test_archive_gate;
 #endif
     command_retirement().retire([cold
 #ifdef RBREW_GX2_QUEUE_TESTS
-        ,gate
+                                 ,
+                                 gate
 #endif
     ]() -> size_t {
         struct Completion {
-            ~Completion(){std::lock_guard lock(s_mutex);s_eviction_inflight=false;}
+            ~Completion() {
+                std::lock_guard lock(s_mutex);
+                s_eviction_inflight = false;
+            }
         } completion;
 #ifdef RBREW_GX2_QUEUE_TESTS
-        if(gate)gate();
+        if (gate) gate();
 #endif
-        std::vector<Commands> retired;retired.reserve(cold->size());
+        std::vector<Commands> retired;
+        retired.reserve(cold->size());
         // Never acquire the recording registry while holding the archive
         // mutex. A cold-list restore holds them in the opposite order.
-        bool ok=false;
-        uint64_t committed_end=0;
+        bool ok = false;
+        uint64_t committed_end = 0;
         {
             std::lock_guard archive_lock(s_archive_mutex);
-            if(!s_archive) {
+            if (!s_archive) {
                 s_archive.reset(std::tmpfile());
-                if(s_archive)std::setvbuf(s_archive.get(),s_archive_buffer.data(),_IOFBF,s_archive_buffer.size());
+                if (s_archive) std::setvbuf(s_archive.get(), s_archive_buffer.data(), _IOFBF, s_archive_buffer.size());
             }
-            committed_end=s_archive_end;
-            ok=s_archive!=nullptr;
+            committed_end = s_archive_end;
+            ok = s_archive != nullptr;
         }
         // Written in small locked chunks. A restore runs on the render thread
         // while it holds the registry, so it - and every guest thread waiting
         // on the registry - used to wait for the whole batch (~130k lists,
         // GBs: a 10 s stall in owner run 2026-10-17). Now it waits for one
         // chunk at most. Only this job appends; offsets are published below.
-        constexpr size_t kChunkLists=64;
-        for(size_t next=0;ok && next<cold->size();) {
+        constexpr size_t kChunkLists = 64;
+        for (size_t next = 0; ok && next < cold->size();) {
             std::lock_guard archive_lock(s_archive_mutex);
-            if(!s_archive_at_end)s_archive_at_end=ok=archive_seek(s_archive_end,SEEK_SET);
-            for(size_t n=0;ok && n<kChunkLists && next<cold->size();++n,++next)
-                ok=archive_commands((*cold)[next].snapshot);
+            if (!s_archive_at_end) s_archive_at_end = ok = archive_seek(s_archive_end, SEEK_SET);
+            for (size_t n = 0; ok && n < kChunkLists && next < cold->size(); ++n, ++next)
+                ok = archive_commands((*cold)[next].snapshot);
         }
         {
             std::lock_guard archive_lock(s_archive_mutex);
-            ok=ok && std::fflush(s_archive.get())==0;
-            if(!ok) {
-                s_archive_end=committed_end;s_archive_at_end=false;
-                if(s_archive)std::clearerr(s_archive.get());
-                static bool warned=false;
-                if(!warned){warned=true;RBREW_LOGF(stderr,"[gx2] cannot archive cold display lists; retaining their commands\n");}
+            ok = ok && std::fflush(s_archive.get()) == 0;
+            if (!ok) {
+                s_archive_end = committed_end;
+                s_archive_at_end = false;
+                if (s_archive) std::clearerr(s_archive.get());
+                static bool warned = false;
+                if (!warned) {
+                    warned = true;
+                    RBREW_LOGF(stderr, "[gx2] cannot archive cold display lists; retaining their commands\n");
+                }
             }
         }
-        if(ok) {
+        if (ok) {
             std::lock_guard lock(s_mutex);
-            for(auto& candidate:*cold) {
-                auto& resident=*candidate.resident;
-                resident.archive_offset=candidate.snapshot.archive_offset;
+            for (auto& candidate : *cold) {
+                auto& resident = *candidate.resident;
+                resident.archive_offset = candidate.snapshot.archive_offset;
                 // A list used since selection stays hot. Its immutable backing
                 // is still useful for the next eviction, without re-writing it.
-                if(resident.last_use!=candidate.snapshot.last_use || resident.commands!=candidate.snapshot.commands)continue;
-                retired.push_back(std::move(resident.commands));--s_resident_recordings;s_resident_bytes-=resident.bytes;
+                if (resident.last_use != candidate.snapshot.last_use ||
+                    resident.commands != candidate.snapshot.commands)
+                    continue;
+                retired.push_back(std::move(resident.commands));
+                --s_resident_recordings;
+                s_resident_bytes -= resident.bytes;
             }
         }
-        const size_t count=retired.size();
-        release_paced(retired);cold->clear(); // all final releases are outside s_mutex
+        const size_t count = retired.size();
+        release_paced(retired);
+        cold->clear(); // all final releases are outside s_mutex
         return count;
     });
-    s_eviction_inflight=true;
+    s_eviction_inflight = true;
 }
 // Tag written into the game buffer at GX2EndDisplayList: a type-3 NOP packet
 // (valid command data the GPU would skip) carrying a magic and the id, so a
@@ -463,12 +540,12 @@ std::unordered_set<uint32_t> s_logged;
 // consecutive sweeps to miss it (and no call in between) covers that.
 // Unreadable written pages (an unmapped overlay) make a sweep inconclusive:
 // it frees nothing.
-constexpr uint32_t kSweepLists = 65536;            // new lists between sweeps
-constexpr uint64_t kSweepBytes = uint64_t(256) << 20;   // or growth of resident bytes
-bool s_sweep_inflight = false;                     // guarded by s_mutex
+constexpr uint32_t kSweepLists = 65536;               // new lists between sweeps
+constexpr uint64_t kSweepBytes = uint64_t(256) << 20; // or growth of resident bytes
+bool s_sweep_inflight = false;                        // guarded by s_mutex
 uint32_t s_sweep_last_id = 0;
 uint64_t s_sweep_last_bytes = 0;
-const uint8_t* s_guest_mem = nullptr;              // arena of the recorded lists
+const uint8_t* s_guest_mem = nullptr; // arena of the recorded lists
 uint64_t s_scan_size = WIIU_MEM_SIZE;
 bool s_sweeps_enabled = true;
 std::atomic<uint64_t> s_sweep_count{0}, s_swept_lists{0}, s_sweep_ns{0}, s_sweep_inconclusive{0};
@@ -486,20 +563,30 @@ void mark_tags(const uint8_t* begin, size_t bytes, uint32_t limit, uint64_t* liv
 #if defined(_M_X64) || defined(__x86_64__)
     const __m128i wanted = _mm_set1_epi32(int(nop));
     for (; i + 4 <= count; i += 4) {
-        int mask = _mm_movemask_ps(_mm_castsi128_ps(_mm_cmpeq_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i*>(words + i)), wanted)));
-        while (mask) { check(i + unsigned(std::countr_zero(unsigned(mask)))); mask &= mask - 1; }
+        int mask = _mm_movemask_ps(
+            _mm_castsi128_ps(_mm_cmpeq_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i*>(words + i)), wanted)));
+        while (mask) {
+            check(i + unsigned(std::countr_zero(unsigned(mask))));
+            mask &= mask - 1;
+        }
     }
 #endif
-    for (; i < count; ++i) if (words[i] == nop) check(i);
+    for (; i < count; ++i)
+        if (words[i] == nop) check(i);
 }
 // False if the memory faulted (a protection change during the scan).
 bool mark_tags_guarded(const uint8_t* begin, size_t bytes, uint32_t limit, uint64_t* live) {
 #if defined(_WIN32)
-    __try { mark_tags(begin, bytes, limit, live); }
-    __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) { return false; }
+    __try {
+        mark_tags(begin, bytes, limit, live);
+    } __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER
+                                                                 : EXCEPTION_CONTINUE_SEARCH) {
+        return false;
+    }
     return true;
 #else
-    mark_tags(begin, bytes, limit, live); return true;
+    mark_tags(begin, bytes, limit, live);
+    return true;
 #endif
 }
 bool readable(const uint8_t* p, size_t bytes) {
@@ -507,12 +594,14 @@ bool readable(const uint8_t* p, size_t bytes) {
     for (const uint8_t* end = p + bytes; p < end;) {
         MEMORY_BASIC_INFORMATION info{};
         if (!VirtualQuery(p, &info, sizeof(info)) || info.State != MEM_COMMIT ||
-            (info.Protect & (PAGE_NOACCESS | PAGE_GUARD)) || !(info.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE)))
+            (info.Protect & (PAGE_NOACCESS | PAGE_GUARD)) ||
+            !(info.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE)))
             return false;
         p = static_cast<const uint8_t*>(info.BaseAddress) + info.RegionSize;
     }
 #endif
-    (void)p; (void)bytes;
+    (void)p;
+    (void)bytes;
     return true;
 }
 // Ids < limit named by a tag anywhere in written guest memory. False when the
@@ -531,10 +620,14 @@ std::vector<std::pair<const char*, std::chrono::steady_clock::time_point>> s_tes
 #endif
 void pause_scan() {
 #if defined(_WIN32)
-    thread_local HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr, 0x2 /*HIGH_RESOLUTION*/, TIMER_MODIFY_STATE | SYNCHRONIZE);
-    LARGE_INTEGER due{}; due.QuadPart = -10000;   // 1 ms
-    if (timer && SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE)) WaitForSingleObject(timer, INFINITE);
-    else Sleep(1);
+    thread_local HANDLE timer =
+        CreateWaitableTimerExW(nullptr, nullptr, 0x2 /*HIGH_RESOLUTION*/, TIMER_MODIFY_STATE | SYNCHRONIZE);
+    LARGE_INTEGER due{};
+    due.QuadPart = -10000; // 1 ms
+    if (timer && SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE))
+        WaitForSingleObject(timer, INFINITE);
+    else
+        Sleep(1);
 #else
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
 #endif
@@ -555,12 +648,19 @@ bool scan_live_tags(const uint8_t* mem, uint64_t size, uint32_t limit, std::vect
 #if defined(_WIN32)
     struct Background {
         const bool on = s_pacing.background;
-        Background() { if (on) SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL); }
-        ~Background() { if (on) SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_NORMAL); }
-    } background;   // restored before the sweep takes any lock again
+        Background() {
+            if (on) SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+        }
+        ~Background() {
+            if (on) SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_NORMAL);
+        }
+    } background; // restored before the sweep takes any lock again
 #endif
     for (uint64_t page = 0; page < page_count;) {
-        if (!(pages[page / 64] >> (page % 64) & 1)) { ++page; continue; }
+        if (!(pages[page / 64] >> (page % 64) & 1)) {
+            ++page;
+            continue;
+        }
         uint64_t end = page + 1;
         while (end < page_count && end - page < kPiecePages && (pages[end / 64] >> (end % 64) & 1)) ++end;
         // A tag may straddle into the next written page: read two more words
@@ -576,25 +676,40 @@ bool scan_live_tags(const uint8_t* mem, uint64_t size, uint32_t limit, std::vect
         // inconclusive, as readable() did.
         if (!mark_tags_guarded(begin, bytes, limit, live.data())) return false;
         since_pause += end - page;
-        if (since_pause >= kPiecePages) { since_pause = 0; if (s_pacing.pause_scan) pause_scan(); }
+        if (since_pause >= kPiecePages) {
+            since_pause = 0;
+            if (s_pacing.pause_scan) pause_scan();
+        }
         page = end;
     }
     return true;
 }
 void sweep_recordings(uint32_t limit) {
-    TXDIAG(txdiag::event("display_list_sweep_begin","\"limit\":%u",limit));
+    TXDIAG(txdiag::event("display_list_sweep_begin", "\"limit\":%u", limit));
     SWEEP_PHASE("start");
     const auto start = std::chrono::steady_clock::now();
     struct Completion {
-        ~Completion() { std::lock_guard lock(s_mutex); s_sweep_inflight = false; s_sweep_last_bytes = s_resident_bytes; }
+        ~Completion() {
+            std::lock_guard lock(s_mutex);
+            s_sweep_inflight = false;
+            s_sweep_last_bytes = s_resident_bytes;
+        }
     } completion;
-    const uint8_t* mem; uint64_t size;
-    { std::lock_guard lock(s_mutex); mem = s_guest_mem; size = s_scan_size; }
+    const uint8_t* mem;
+    uint64_t size;
+    {
+        std::lock_guard lock(s_mutex);
+        mem = s_guest_mem;
+        size = s_scan_size;
+    }
     std::vector<uint64_t> live;
-    if (!mem || !scan_live_tags(mem, size, limit, live)) { s_sweep_inconclusive.fetch_add(1, std::memory_order_relaxed); return; }
+    if (!mem || !scan_live_tags(mem, size, limit, live)) {
+        s_sweep_inconclusive.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
     SWEEP_PHASE("scanned");
-    std::vector<Commands> retired;   // released outside the registry lock
-    size_t scanned = 0;              // s_tracked entries present when the pass starts
+    std::vector<Commands> retired; // released outside the registry lock
+    size_t scanned = 0;            // s_tracked entries present when the pass starts
     // Both passes run in short locked chunks and let a waiting game/render
     // caller take the registry between chunks (std::mutex is not fair).
     auto yield_to_waiters = [] {
@@ -607,7 +722,7 @@ void sweep_recordings(uint32_t limit) {
 #endif
         }
     };
-    std::vector<std::pair<uint32_t, uint32_t>> latest;   // s_lists when the pass starts
+    std::vector<std::pair<uint32_t, uint32_t>> latest; // s_lists when the pass starts
     {
         std::lock_guard lock(s_mutex);
         latest.assign(s_lists.begin(), s_lists.end());
@@ -628,11 +743,16 @@ void sweep_recordings(uint32_t limit) {
             const auto it = s_lists.find(buffer);
             if (it == s_lists.end() || it->second != id) continue;
             Recording* r = s_recordings.find(id);
-            if (!r || (r->flags & kDead)) { s_lists.erase(it); continue; }
+            if (!r || (r->flags & kDead)) {
+                s_lists.erase(it);
+                continue;
+            }
             if (id < limit && (r->flags & kTagged) &&
-                !(rbrew_memory_accessible(const_cast<uint8_t*>(mem), buffer, 8) && rbrew_read32(const_cast<uint8_t*>(mem), buffer) == kTagNop &&
+                !(rbrew_memory_accessible(const_cast<uint8_t*>(mem), buffer, 8) &&
+                  rbrew_read32(const_cast<uint8_t*>(mem), buffer) == kTagNop &&
                   rbrew_read32(const_cast<uint8_t*>(mem), buffer + 4) == kTagMagic)) {
-                s_lists.erase(it); continue;
+                s_lists.erase(it);
+                continue;
             }
             if (id < limit) live[id / 64] |= 1ull << (id % 64);
         }
@@ -647,7 +767,7 @@ void sweep_recordings(uint32_t limit) {
     // Visited entries stay in s_tracked until the survivors replace it.
     std::vector<uint32_t> kept;
     kept.reserve(scanned);
-    retired.reserve(scanned);   // no reallocation of moved commands under the lock
+    retired.reserve(scanned); // no reallocation of moved commands under the lock
     constexpr size_t kChunkIds = 2048;
     for (size_t next = 0; next < scanned;) {
         yield_to_waiters();
@@ -656,13 +776,29 @@ void sweep_recordings(uint32_t limit) {
             const uint32_t id = s_tracked[next];
             Recording* r = s_recordings.find(id);
             if (!r) continue;
-            if (id >= limit) { kept.push_back(id); continue; }
+            if (id >= limit) {
+                kept.push_back(id);
+                continue;
+            }
             const bool referenced = (live[id / 64] >> (id % 64) & 1) || (r->flags & kUsed);
             r->flags &= uint8_t(~kUsed);
-            if (referenced) { r->flags &= uint8_t(~kMissed); kept.push_back(id); continue; }
-            if (!(r->flags & kMissed)) { r->flags |= kMissed; kept.push_back(id); continue; }
-            if (r->commands) { retired.push_back(std::move(r->commands)); --s_resident_recordings; s_resident_bytes -= r->bytes; }
-            r->flags = kDead; r->archive_offset = kNotArchived;
+            if (referenced) {
+                r->flags &= uint8_t(~kMissed);
+                kept.push_back(id);
+                continue;
+            }
+            if (!(r->flags & kMissed)) {
+                r->flags |= kMissed;
+                kept.push_back(id);
+                continue;
+            }
+            if (r->commands) {
+                retired.push_back(std::move(r->commands));
+                --s_resident_recordings;
+                s_resident_bytes -= r->bytes;
+            }
+            r->flags = kDead;
+            r->archive_offset = kNotArchived;
             s_recordings.note_dead(id);
             s_swept_lists.fetch_add(1, std::memory_order_relaxed);
         }
@@ -670,16 +806,18 @@ void sweep_recordings(uint32_t limit) {
     {
         std::lock_guard lock(s_mutex);
         kept.insert(kept.end(), s_tracked.begin() + std::ptrdiff_t(scanned), s_tracked.end());
-    SWEEP_PHASE("tracked");
+        SWEEP_PHASE("tracked");
         s_tracked.swap(kept);
         if (!s_eviction_inflight) s_recordings.release_dead_chunks();
     }
     release_paced(retired);
     SWEEP_PHASE("freed");
     s_sweep_count.fetch_add(1, std::memory_order_relaxed);
-    TXDIAG(txdiag::event("display_list_sweep_end","\"limit\":%u,\"swept_total\":%llu",limit,s_swept_lists.load()));
-    s_sweep_ns.fetch_add(uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count()),
-                         std::memory_order_relaxed);
+    TXDIAG(txdiag::event("display_list_sweep_end", "\"limit\":%u,\"swept_total\":%llu", limit, s_swept_lists.load()));
+    s_sweep_ns.fetch_add(
+        uint64_t(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count()),
+        std::memory_order_relaxed);
 }
 // Caller holds s_mutex.
 void maybe_sweep() {
@@ -688,14 +826,19 @@ void maybe_sweep() {
     s_sweep_inflight = true;
     s_sweep_last_id = s_next_id;
     const uint32_t limit = s_next_id;
-    command_retirement().retire([limit]() -> size_t { sweep_recordings(limit); return 0; });
+    command_retirement().retire([limit]() -> size_t {
+        sweep_recordings(limit);
+        return 0;
+    });
 }
 
 // Mirrors the core's builder state so the per-call recording check needs no lock.
 // Only the core that owns a list (or the render thread while that core waits
 // on it) opens or closes it.
 std::array<std::atomic<bool>, 4> s_open_active{};
-std::atomic<bool>& open_active() { return s_open_active[builder_slot()]; }
+std::atomic<bool>& open_active() {
+    return s_open_active[builder_slot()];
+}
 
 // Size reported by GX2EndDisplayList: the game only hands it back to
 // GX2CallDisplayList, so it stands for the recorded commands (32 bytes each,
@@ -706,7 +849,7 @@ uint32_t recorded_size(const OpenList& list) {
 }
 
 void replay(CPUState* cpu, const std::vector<Command>& commands, unsigned depth) {
-    if (depth > 16) return;  // the console has no recursion limit, but lists never nest deeply
+    if (depth > 16) return; // the console has no recursion limit, but lists never nest deeply
     CPUState call = *cpu;
     const bool perf = gx2_perf_enabled();
     // The plaza's scene list replays for ~11.6 ms in one piece while the game
@@ -714,17 +857,32 @@ void replay(CPUState* cpu, const std::vector<Command>& commands, unsigned depth)
     // they were published only between render items, so the read drained the
     // whole list (10 ms of the game thread per frame). Publish finished
     // results while a long list replays. RBREW_LIST_QUERY_POLL=0 disables it.
-    static const bool poll = [] { const char* v = std::getenv("RBREW_LIST_QUERY_POLL"); return !(v && v[0] == '0'); }();
+    static const bool poll = [] {
+        const char* v = std::getenv("RBREW_LIST_QUERY_POLL");
+        return !(v && v[0] == '0');
+    }();
     unsigned since_poll = 0;
     for (const Command& c : commands) {
-        if (poll && ++since_poll >= 128) { since_poll = 0; gx2_render_query_poll_completed(); }
-        for (unsigned i = 0; i < 8; ++i) { call.r[3 + i] = c.r[i]; call.f[1 + i] = c.f[i]; }
+        if (poll && ++since_poll >= 128) {
+            since_poll = 0;
+            gx2_render_query_poll_completed();
+        }
+        for (unsigned i = 0; i < 8; ++i) {
+            call.r[3 + i] = c.r[i];
+            call.f[1 + i] = c.f[i];
+        }
         const uint64_t start = perf ? gx2_perf_now() : 0;
-        if (c.descriptor_fn) c.descriptor_fn(&call, c.descriptor.data());
-        else if (!c.fn) gx2_render_set_uniform_words(c.r[0] != 0, c.r[1], c.words.data(), uint32_t(c.words.size()));
-        else c.fn(&call);
-        if (perf) gx2_perf_function(0, c.descriptor_fn ? reinterpret_cast<const void*>(c.descriptor_fn) :
-                                       reinterpret_cast<const void*>(c.fn), gx2_perf_now() - start);
+        if (c.descriptor_fn)
+            c.descriptor_fn(&call, c.descriptor.data());
+        else if (!c.fn)
+            gx2_render_set_uniform_words(c.r[0] != 0, c.r[1], c.words.data(), uint32_t(c.words.size()));
+        else
+            c.fn(&call);
+        if (perf)
+            gx2_perf_function(0,
+                              c.descriptor_fn ? reinterpret_cast<const void*>(c.descriptor_fn)
+                                              : reinterpret_cast<const void*>(c.fn),
+                              gx2_perf_now() - start);
     }
 }
 
@@ -739,19 +897,32 @@ struct StreamCommand final : Gx2AsyncWork {
     StreamCommand(Command&& c, uint8_t* m, uint32_t l) : command(std::move(c)), mem(m), lr(l) {}
     void run() override {
         thread_local CPUState call{};
-        call.mem = mem; call.lr = lr;
+        call.mem = mem;
+        call.lr = lr;
         t_stream_replay = true;
         const bool perf = gx2_perf_enabled();
-        for (unsigned i = 0; i < 8; ++i) { call.r[3 + i] = command.r[i]; call.f[1 + i] = command.f[i]; }
+        for (unsigned i = 0; i < 8; ++i) {
+            call.r[3 + i] = command.r[i];
+            call.f[1 + i] = command.f[i];
+        }
         try {
             const uint64_t start = perf ? gx2_perf_now() : 0;
             const Command& c = command;
-            if (c.descriptor_fn) c.descriptor_fn(&call, c.descriptor.data());
-            else if (!c.fn) gx2_render_set_uniform_words(c.r[0] != 0, c.r[1], c.words.data(), uint32_t(c.words.size()));
-            else c.fn(&call);
-            if (perf) gx2_perf_function(0, c.descriptor_fn ? reinterpret_cast<const void*>(c.descriptor_fn) :
-                                           reinterpret_cast<const void*>(c.fn), gx2_perf_now() - start);
-        } catch (...) { t_stream_replay = false; throw; }
+            if (c.descriptor_fn)
+                c.descriptor_fn(&call, c.descriptor.data());
+            else if (!c.fn)
+                gx2_render_set_uniform_words(c.r[0] != 0, c.r[1], c.words.data(), uint32_t(c.words.size()));
+            else
+                c.fn(&call);
+            if (perf)
+                gx2_perf_function(0,
+                                  c.descriptor_fn ? reinterpret_cast<const void*>(c.descriptor_fn)
+                                                  : reinterpret_cast<const void*>(c.fn),
+                                  gx2_perf_now() - start);
+        } catch (...) {
+            t_stream_replay = false;
+            throw;
+        }
         t_stream_replay = false;
     }
 };
@@ -768,9 +939,15 @@ struct ListCall final : Gx2AsyncWork {
     void run() override {
         Gx2PerfScope perf_scope(kPerfDisplayList);
         thread_local CPUState call{};
-        call.mem = mem; call.lr = lr;
+        call.mem = mem;
+        call.lr = lr;
         t_stream_replay = true;
-        try { replay(&call, *commands, 1); } catch (...) { t_stream_replay = false; throw; }
+        try {
+            replay(&call, *commands, 1);
+        } catch (...) {
+            t_stream_replay = false;
+            throw;
+        }
         t_stream_replay = false;
     }
 };
@@ -805,8 +982,8 @@ bool find_recording(uint8_t* mem, uint32_t list, uint32_t size, Commands& out) {
     // The NOP tag names the recording these bytes hold - in the buffer
     // it was recorded into or in a copy of it.
     bool found = false;
-    if (size >= 12 && rbrew_memory_accessible(mem, list, 12) &&
-        rbrew_read32(mem, list) == kTagNop && rbrew_read32(mem, list + 4) == kTagMagic)
+    if (size >= 12 && rbrew_memory_accessible(mem, list, 12) && rbrew_read32(mem, list) == kTagNop &&
+        rbrew_read32(mem, list + 4) == kTagMagic)
         found = use_recording(rbrew_read32(mem, list + 8), out);
     if (!found)
         if (auto it = s_lists.find(list); it != s_lists.end()) found = use_recording(it->second, out);
@@ -822,32 +999,37 @@ void call_display_list(CPUState* cpu, const char* api) {
         RegistryLock lock;
         // The NOP tag names the recording these bytes hold - in the buffer
         // it was recorded into or in a copy of it.
-        if (size >= 12 && rbrew_memory_accessible(MEM, list, 12) &&
-            rbrew_read32(MEM, list) == kTagNop && rbrew_read32(MEM, list + 4) == kTagMagic)
+        if (size >= 12 && rbrew_memory_accessible(MEM, list, 12) && rbrew_read32(MEM, list) == kTagNop &&
+            rbrew_read32(MEM, list + 4) == kTagMagic)
             found = use_recording(rbrew_read32(MEM, list + 8), recorded);
         if (!found)
             if (auto it = s_lists.find(list); it != s_lists.end()) found = use_recording(it->second, recorded);
     }
     if (found) {
-        ++t_depth; replay(cpu, *recorded, t_depth); --t_depth;
+        ++t_depth;
+        replay(cpu, *recorded, t_depth);
+        --t_depth;
         return;
     }
     if (!list || !size || !rbrew_memory_accessible(MEM, list, size)) return;
     const auto state = gx2_decode_static_display_list(MEM + list, size);
-    TXDIAG(if(txdiag::sample("unrecorded_list",uint64_t(list)<<32|size))
-        txdiag::event("unrecorded_display_list","\"address\":%u,\"size\":%u,\"decoded\":%s,\"register_writes\":%zu,\"other_packets\":%zu,\"lr\":%u",list,size,state.ok?"true":"false",state.writes.size(),state.other_opcodes.size(),cpu->lr));
+    TXDIAG(if (txdiag::sample("unrecorded_list", uint64_t(list) << 32 | size)) txdiag::event(
+        "unrecorded_display_list",
+        "\"address\":%u,\"size\":%u,\"decoded\":%s,\"register_writes\":%zu,\"other_packets\":%zu,\"lr\":%u", list, size,
+        state.ok ? "true" : "false", state.writes.size(), state.other_opcodes.size(), cpu->lr));
     {
         std::lock_guard lock(s_mutex);
         if (s_logged.insert(list).second)
-            RBREW_LOGF(stderr, "[gx2] %s unrecorded list=%08X size=%u decoded=%d writes=%zu other_packets=%zu "
-                "words=%08X %08X %08X %08X lr=%08X\n",
-                api, list, size, int(state.ok), state.writes.size(), state.other_opcodes.size(),
-                rbrew_read32(MEM, list), rbrew_read32(MEM, list + 4), rbrew_read32(MEM, list + 8),
-                rbrew_read32(MEM, list + 12), cpu->lr);
+            RBREW_LOGF(stderr,
+                       "[gx2] %s unrecorded list=%08X size=%u decoded=%d writes=%zu other_packets=%zu "
+                       "words=%08X %08X %08X %08X lr=%08X\n",
+                       api, list, size, int(state.ok), state.writes.size(), state.other_opcodes.size(),
+                       rbrew_read32(MEM, list), rbrew_read32(MEM, list + 4), rbrew_read32(MEM, list + 8),
+                       rbrew_read32(MEM, list + 12), cpu->lr);
     }
     if (state.ok) gx2_render_apply_registers(state.writes.data(), state.writes.size());
 }
-}
+} // namespace
 
 #ifdef RBREW_GX2_QUEUE_TESTS
 void gx2_dl_test_with_recordings_locked(const std::function<void()>& action) {
@@ -858,22 +1040,34 @@ std::pair<uint64_t, bool> gx2_dl_test_drain_retired_commands() {
     return command_retirement().drain_for_test();
 }
 void gx2_dl_test_archive_gate(std::function<void()> gate) {
-    std::lock_guard lock(s_mutex);s_test_archive_gate = std::move(gate);
+    std::lock_guard lock(s_mutex);
+    s_test_archive_gate = std::move(gate);
 }
-void gx2_dl_test_end_list_gate(std::function<void()> gate) { s_test_end_list_gate = std::move(gate); }
-std::vector<std::pair<const char*, std::chrono::steady_clock::time_point>> gx2_dl_test_take_sweep_phases() { return std::exchange(s_test_sweep_phases, {}); }
+void gx2_dl_test_end_list_gate(std::function<void()> gate) {
+    s_test_end_list_gate = std::move(gate);
+}
+std::vector<std::pair<const char*, std::chrono::steady_clock::time_point>> gx2_dl_test_take_sweep_phases() {
+    return std::exchange(s_test_sweep_phases, {});
+}
 void gx2_dl_test_sweep_pacing(uint64_t piece_bytes, bool pause_scan, bool background, size_t free_slice) {
     s_pacing = SweepPacing{piece_bytes, pause_scan, background, free_slice};
 }
 // Sweeps for tests: enable/disable automatic ones, the guest extent to scan
 // (test arenas have no write watch), and one synchronous sweep.
 void gx2_dl_test_configure_sweeps(bool automatic, uint64_t scan_size) {
-    std::lock_guard lock(s_mutex);s_sweeps_enabled = automatic;s_scan_size = scan_size ? scan_size : WIIU_MEM_SIZE;
+    std::lock_guard lock(s_mutex);
+    s_sweeps_enabled = automatic;
+    s_scan_size = scan_size ? scan_size : WIIU_MEM_SIZE;
 }
 void gx2_dl_test_sweep_now() {
     command_retirement().drain_for_test();
     uint32_t limit;
-    { std::lock_guard lock(s_mutex); if (s_sweep_inflight) return; s_sweep_inflight = true; limit = s_next_id; }
+    {
+        std::lock_guard lock(s_mutex);
+        if (s_sweep_inflight) return;
+        s_sweep_inflight = true;
+        limit = s_next_id;
+    }
     sweep_recordings(limit);
 }
 // Whether a recording can still be called (resident or archived, not freed).
@@ -890,19 +1084,23 @@ bool gx2_dl_test_recording_alive(uint32_t id) {
 // Ids are never reused, so entries of freed recordings are just unused.
 struct ListQueries {
     std::vector<uint32_t> begins;
-    std::vector<std::pair<uint32_t, uint32_t>> calls;   // list, size
+    std::vector<std::pair<uint32_t, uint32_t>> calls; // list, size
 };
 std::mutex s_list_queries_mutex;
 std::unordered_map<uint32_t, std::shared_ptr<const ListQueries>> s_list_queries;
 std::atomic<bool> s_any_list_queries{false};
-static bool is_list_call(Gx2CommandFn fn) { return fn == s_list_call_fns[0] || fn == s_list_call_fns[1]; }
+static bool is_list_call(Gx2CommandFn fn) {
+    return fn == s_list_call_fns[0] || fn == s_list_call_fns[1];
+}
 static std::shared_ptr<const ListQueries> scan_list_queries(const std::vector<Command>& commands) {
     const Gx2CommandFn begin = gx2_query_begin_command();
     ListQueries found;
     for (const Command& c : commands) {
         if (!c.fn) continue;
-        if (c.fn == begin) found.begins.push_back(c.r[1]);
-        else if (is_list_call(c.fn)) found.calls.emplace_back(c.r[0], c.r[1]);
+        if (c.fn == begin)
+            found.begins.push_back(c.r[1]);
+        else if (is_list_call(c.fn))
+            found.calls.emplace_back(c.r[0], c.r[1]);
     }
     if (found.begins.empty() && found.calls.empty()) return nullptr;
     return std::make_shared<const ListQueries>(std::move(found));
@@ -910,8 +1108,8 @@ static std::shared_ptr<const ListQueries> scan_list_queries(const std::vector<Co
 static void count_list_queries(uint8_t* mem, uint32_t list, uint32_t size, unsigned depth) {
     if (depth > 8 || !list) return;
     uint32_t id = UINT32_MAX;
-    if (size >= 12 && rbrew_memory_accessible(mem, list, 12) &&
-        rbrew_read32(mem, list) == kTagNop && rbrew_read32(mem, list + 4) == kTagMagic)
+    if (size >= 12 && rbrew_memory_accessible(mem, list, 12) && rbrew_read32(mem, list) == kTagNop &&
+        rbrew_read32(mem, list + 4) == kTagMagic)
         id = rbrew_read32(mem, list + 8);
     else {
         RegistryLock lock;
@@ -956,29 +1154,41 @@ void gx2_dl_record(Gx2CommandFn fn, const CPUState* cpu) {
         !gx2_dl_list_open())
         count_list_queries(cpu->mem, cpu->r[3], cpu->r[4], 0);
     Command c{fn, {}, {}, {}};
-    for (unsigned i = 0; i < 8; ++i) { c.r[i] = cpu->r[3 + i]; c.f[i] = cpu->f[1 + i]; }
+    for (unsigned i = 0; i < 8; ++i) {
+        c.r[i] = cpu->r[3 + i];
+        c.f[i] = cpu->f[1 + i];
+    }
     push_command(std::move(c), cpu->mem, cpu->lr);
 }
 
 void gx2_dl_record_uniform_words(bool is_pixel, uint32_t index, std::vector<uint32_t> words) {
     Command c{nullptr, {}, {}, std::move(words)};
-    c.r[0] = is_pixel; c.r[1] = index;
+    c.r[0] = is_pixel;
+    c.r[1] = index;
     push_command(std::move(c), nullptr, 0);
 }
 
 void gx2_dl_record_descriptor(Gx2DescriptorFn fn, const CPUState* cpu, uint32_t bytes) {
-    const uint32_t address=cpu->r[3];
-    if (!address || !rbrew_memory_accessible(cpu->mem,address,bytes)) return;
+    const uint32_t address = cpu->r[3];
+    if (!address || !rbrew_memory_accessible(cpu->mem, address, bytes)) return;
     Command c{};
-    c.descriptor_fn=fn;
-    for (unsigned i=0;i<8;++i) { c.r[i]=cpu->r[3+i]; c.f[i]=cpu->f[1+i]; }
-    c.descriptor.assign(cpu->mem+address,cpu->mem+address+bytes);
+    c.descriptor_fn = fn;
+    for (unsigned i = 0; i < 8; ++i) {
+        c.r[i] = cpu->r[3 + i];
+        c.f[i] = cpu->f[1 + i];
+    }
+    c.descriptor.assign(cpu->mem + address, cpu->mem + address + bytes);
     push_command(std::move(c), cpu->mem, cpu->lr);
 }
 
-void gx2_dl_record_snapshot(Gx2DescriptorFn fn,const CPUState* cpu,std::span<const uint8_t> bytes) {
-    Command c{nullptr,{},{},{}};c.descriptor_fn=fn;c.descriptor.assign(bytes.begin(),bytes.end());
-    for(unsigned i=0;i<8;++i){c.r[i]=cpu->r[3+i];c.f[i]=cpu->f[1+i];}
+void gx2_dl_record_snapshot(Gx2DescriptorFn fn, const CPUState* cpu, std::span<const uint8_t> bytes) {
+    Command c{nullptr, {}, {}, {}};
+    c.descriptor_fn = fn;
+    c.descriptor.assign(bytes.begin(), bytes.end());
+    for (unsigned i = 0; i < 8; ++i) {
+        c.r[i] = cpu->r[3 + i];
+        c.f[i] = cpu->f[1 + i];
+    }
     push_command(std::move(c), cpu->mem, cpu->lr);
 }
 
@@ -988,7 +1198,9 @@ static void GX2BeginDisplayListEx(CPUState* cpu) {
     std::lock_guard lock(s_open_mutex[core]);
     OpenList& list = s_open[core];
     // The builder's command vector is reused (cleared, capacity kept).
-    list.active = true; list.buffer = ARG0; list.capacity = ARG1 & ~3u;
+    list.active = true;
+    list.buffer = ARG0;
+    list.capacity = ARG1 & ~3u;
     list.commands.clear();
     s_open_active[core].store(true, std::memory_order_release);
 }
@@ -998,7 +1210,10 @@ static void GX2EndDisplayList(CPUState* cpu) {
     const auto core = builder_slot();
     std::lock_guard builder_lock(s_open_mutex[core]);
     OpenList& list = s_open[core];
-    if (!list.active) { RET = 0; return; }
+    if (!list.active) {
+        RET = 0;
+        return;
+    }
     RET = recorded_size(list);
     // An identical resident recording is reused (see s_content). Hash and
     // compare outside the registry lock: the candidate's commands are held
@@ -1007,15 +1222,22 @@ static void GX2EndDisplayList(CPUState* cpu) {
     // Large lists are rebuilt every frame (the plaza: 94% of ~13,300 commands
     // per frame are new) and were never reused; hashing them for reuse cost
     // ~2% of the game thread. RBREW_DL_HASH_ALL=1 hashes every list again.
-    static const bool hash_all = [] { const char* v = std::getenv("RBREW_DL_HASH_ALL"); return v && v[0] == '1'; }();
+    static const bool hash_all = [] {
+        const char* v = std::getenv("RBREW_DL_HASH_ALL");
+        return v && v[0] == '1';
+    }();
     const bool hashable = hash_all || list.commands.size() <= 512;
     const uint64_t hash = hashable ? commands_hash(list.commands) : 0;
-    Commands candidate; uint32_t candidate_id = 0;
+    Commands candidate;
+    uint32_t candidate_id = 0;
     if (hashable) {
         RegistryLock lock;
         const auto& slot = s_content[hash & (kContentSlots - 1)];
         if (slot.used && slot.hash == hash)
-            if (const Recording* r = s_recordings.find(slot.id); r && r->commands) { candidate = r->commands; candidate_id = slot.id; }
+            if (const Recording* r = s_recordings.find(slot.id); r && r->commands) {
+                candidate = r->commands;
+                candidate_id = slot.id;
+            }
     }
     const bool reuse = candidate && same_commands(*candidate, list.commands);
 #ifdef RBREW_GX2_QUEUE_TESTS
@@ -1030,12 +1252,14 @@ static void GX2EndDisplayList(CPUState* cpu) {
     if (!reuse) {
         commands = std::make_shared<std::vector<Command>>();
         commands->reserve(list.commands.size());
-        commands->insert(commands->end(), std::make_move_iterator(list.commands.begin()), std::make_move_iterator(list.commands.end()));
+        commands->insert(commands->end(), std::make_move_iterator(list.commands.begin()),
+                         std::make_move_iterator(list.commands.end()));
     }
     const uint32_t buffer = list.buffer, capacity = list.capacity;
-    list.active = false; list.buffer = list.capacity = 0;
+    list.active = false;
+    list.buffer = list.capacity = 0;
     list.commands.clear();
-    if (list.commands.capacity() > 4096) std::vector<Command>().swap(list.commands);   // an unusually long list
+    if (list.commands.capacity() > 4096) std::vector<Command>().swap(list.commands); // an unusually long list
     const bool tagged = capacity >= 12 && rbrew_memory_accessible(MEM, buffer, 12);
     RegistryLock lock;
     s_guest_mem = MEM;
@@ -1069,19 +1293,28 @@ static void GX2EndDisplayList(CPUState* cpu) {
     s_lists[buffer] = id;
     // RBREW_DL_STATS=1 (diagnostics): new versus reused recordings and their
     // commands, every 300 frames.
-    static const bool stats = [] { const char* v = std::getenv("RBREW_DL_STATS"); return v && v[0] == '1'; }();
+    static const bool stats = [] {
+        const char* v = std::getenv("RBREW_DL_STATS");
+        return v && v[0] == '1';
+    }();
     if (stats) {
         static uint64_t ended = 0, reused_lists = 0, new_commands = 0, reused_commands = 0, largest = 0;
         static uint32_t last_frame = 0;
         const Recording* r = s_recordings.find(id);
         const uint64_t n = r && r->commands ? r->commands->size() : 0;
-        ++ended; largest = std::max(largest, n);
-        if (reused && id == candidate_id) { ++reused_lists; reused_commands += n; } else new_commands += n;
+        ++ended;
+        largest = std::max(largest, n);
+        if (reused && id == candidate_id) {
+            ++reused_lists;
+            reused_commands += n;
+        } else
+            new_commands += n;
         const uint32_t frame = rbrew_benchmark::frame.load(std::memory_order_relaxed);
         if (frame / 300 != last_frame / 300) {
-            std::fprintf(stderr, "[dlstats] frame %u lists %llu reused %llu new_cmds %llu reused_cmds %llu largest %llu\n", frame,
-                         (unsigned long long)ended, (unsigned long long)reused_lists, (unsigned long long)new_commands,
-                         (unsigned long long)reused_commands, (unsigned long long)largest);
+            std::fprintf(
+                stderr, "[dlstats] frame %u lists %llu reused %llu new_cmds %llu reused_cmds %llu largest %llu\n",
+                frame, (unsigned long long)ended, (unsigned long long)reused_lists, (unsigned long long)new_commands,
+                (unsigned long long)reused_commands, (unsigned long long)largest);
             ended = reused_lists = new_commands = reused_commands = largest = 0;
         }
         last_frame = frame;
@@ -1104,10 +1337,17 @@ namespace {
 // bytes equal a resident earlier snapshot of the same buffer reuses that
 // recording: replaying it runs the same function on the same bytes. Snapshot
 // functions read only those bytes, never the recorded argument registers.
-struct SnapshotSlot { uint64_t hash = 0; uint32_t id = 0; Gx2DescriptorFn fn = nullptr; };
+struct SnapshotSlot {
+    uint64_t hash = 0;
+    uint32_t id = 0;
+    Gx2DescriptorFn fn = nullptr;
+};
 constexpr size_t kSnapshotSlots = 16;
-struct SnapshotSlots { std::array<SnapshotSlot, kSnapshotSlots> slots{}; size_t next = 0; };
-std::unordered_map<uint32_t, SnapshotSlots> s_snapshots;  // by list buffer, guarded by s_mutex
+struct SnapshotSlots {
+    std::array<SnapshotSlot, kSnapshotSlots> slots{};
+    size_t next = 0;
+};
+std::unordered_map<uint32_t, SnapshotSlots> s_snapshots; // by list buffer, guarded by s_mutex
 uint64_t s_snapshot_reuses = 0;
 
 uint64_t snapshot_hash(std::span<const uint8_t> bytes) {
@@ -1115,8 +1355,10 @@ uint64_t snapshot_hash(std::span<const uint8_t> bytes) {
     size_t i = 0;
     for (; i + 32 <= bytes.size(); i += 32)
         for (unsigned lane = 0; lane < 4; ++lane) {
-            uint64_t w; std::memcpy(&w, bytes.data() + i + lane * 8, 8);
-            h[lane] = (h[lane] ^ w) * 0x100000001B3ull; h[lane] ^= h[lane] >> 31;
+            uint64_t w;
+            std::memcpy(&w, bytes.data() + i + lane * 8, 8);
+            h[lane] = (h[lane] ^ w) * 0x100000001B3ull;
+            h[lane] ^= h[lane] >> 31;
         }
     uint64_t r = bytes.size();
     for (unsigned lane = 0; lane < 4; ++lane) r = (r ^ h[lane]) * 0x9E3779B97F4A7C15ull;
@@ -1133,7 +1375,7 @@ bool reuse_snapshot(uint8_t* mem, uint32_t buffer, uint32_t capacity, Gx2Descrip
     for (const auto& slot : slots->second.slots) {
         if (slot.fn != fn || slot.hash != hash) continue;
         Recording* recording = s_recordings.find(slot.id);
-        if (!recording || !recording->commands) continue;  // archived: record afresh
+        if (!recording || !recording->commands) continue; // archived: record afresh
         const auto& commands = *recording->commands;
         if (commands.size() != 1 || commands[0].descriptor_fn != fn || commands[0].fn ||
             commands[0].descriptor.size() != snapshot.size() ||
@@ -1147,7 +1389,7 @@ bool reuse_snapshot(uint8_t* mem, uint32_t buffer, uint32_t capacity, Gx2Descrip
             rbrew_write32(mem, buffer + 4, kTagMagic);
             rbrew_write32(mem, buffer + 8, slot.id);
         }
-        size = std::min<uint32_t>(32u, capacity & ~3u);  // recorded_size() of one command
+        size = std::min<uint32_t>(32u, capacity & ~3u); // recorded_size() of one command
         ++s_snapshot_reuses;
         return true;
     }
@@ -1158,7 +1400,7 @@ void remember_snapshot(uint32_t buffer, Gx2DescriptorFn fn, uint64_t hash, uint3
     slots.slots[slots.next] = {hash, id, fn};
     slots.next = (slots.next + 1) % kSnapshotSlots;
 }
-}
+} // namespace
 
 // [mem] diagnostics: lists recorded so far and those with resident commands.
 std::pair<uint64_t, uint64_t> gx2_dl_recording_counts() {
@@ -1171,10 +1413,14 @@ std::pair<uint64_t, uint64_t> gx2_dl_recording_counts() {
 // inconclusive sweeps; then the current resident bytes.
 std::array<uint64_t, 9> gx2_dl_maintenance_counts() {
     uint64_t resident_bytes;
-    { std::lock_guard lock(s_mutex); resident_bytes = s_resident_bytes; }
+    {
+        std::lock_guard lock(s_mutex);
+        resident_bytes = s_resident_bytes;
+    }
     const auto get = [](const std::atomic<uint64_t>& v) { return v.load(std::memory_order_relaxed); };
-    return {get(s_eviction_count), get(s_restore_count), get(s_eviction_ns), get(s_content_reuses), get(s_sweep_count),
-            get(s_swept_lists), get(s_sweep_ns), get(s_sweep_inconclusive), resident_bytes};
+    return {get(s_eviction_count), get(s_restore_count),      get(s_eviction_ns),
+            get(s_content_reuses), get(s_sweep_count),        get(s_swept_lists),
+            get(s_sweep_ns),       get(s_sweep_inconclusive), resident_bytes};
 }
 
 uint64_t gx2_dl_snapshot_reuse_count() {
@@ -1182,10 +1428,9 @@ uint64_t gx2_dl_snapshot_reuse_count() {
     return s_snapshot_reuses;
 }
 
-uint32_t gx2_dl_create_snapshot(CPUState* cpu, uint32_t buffer, uint32_t capacity,
-                                Gx2DescriptorFn fn, std::span<const uint8_t> snapshot) {
-    if (!cpu || !fn || !buffer || capacity < 12 || snapshot.empty() || gx2_dl_list_open())
-        return 0;
+uint32_t gx2_dl_create_snapshot(CPUState* cpu, uint32_t buffer, uint32_t capacity, Gx2DescriptorFn fn,
+                                std::span<const uint8_t> snapshot) {
+    if (!cpu || !fn || !buffer || capacity < 12 || snapshot.empty() || gx2_dl_list_open()) return 0;
 
     const uint64_t hash = snapshot_hash(snapshot);
     {
@@ -1215,9 +1460,19 @@ uint32_t gx2_dl_create_snapshot(CPUState* cpu, uint32_t buffer, uint32_t capacit
 // BOOL GX2GetCurrentDisplayList(void** buffer, u32* bytes) - gx2.rpl 02004160
 static void GX2GetCurrentDisplayList(CPUState* cpu) {
     const auto core = builder_slot();
-    bool active; uint32_t buffer, capacity;  // not the recorded commands
-    { std::lock_guard lock(s_open_mutex[core]); const OpenList& list = s_open[core]; active = list.active; buffer = list.buffer; capacity = list.capacity; }
-    if (!active) { RET = 0; return; }
+    bool active;
+    uint32_t buffer, capacity; // not the recorded commands
+    {
+        std::lock_guard lock(s_open_mutex[core]);
+        const OpenList& list = s_open[core];
+        active = list.active;
+        buffer = list.buffer;
+        capacity = list.capacity;
+    }
+    if (!active) {
+        RET = 0;
+        return;
+    }
     if (ARG0) rbrew_write32(MEM, ARG0, buffer);
     if (ARG1) rbrew_write32(MEM, ARG1, capacity);
     RET = 1;
@@ -1231,18 +1486,32 @@ static void GX2GetCurrentDisplayList(CPUState* cpu) {
 static void GX2PatchDisplayList(CPUState* cpu) {
     const uint32_t list = ARG0, type = ARG1, offset = ARG2 & ~3u, shader = ARG3;
     // Per type: field tested for zero, program field, fallback (GX2R buffer).
-    struct Field { uint32_t test, program, fallback; };
-    static constexpr Field fields[7] = {{}, {0x0C, 0x0C, 0x0C}, {0xD4, 0xD4, 0x130}, {0x50, 0x58, 0xBC},
-                                        {0x50, 0x50, 0xAC}, {0xA8, 0xA8, 0xE4}, {0x34, 0x34, 0x80}};
+    struct Field {
+        uint32_t test, program, fallback;
+    };
+    static constexpr Field fields[7] = {{},
+                                        {0x0C, 0x0C, 0x0C},
+                                        {0xD4, 0xD4, 0x130},
+                                        {0x50, 0x58, 0xBC},
+                                        {0x50, 0x50, 0xAC},
+                                        {0xA8, 0xA8, 0xE4},
+                                        {0x34, 0x34, 0x80}};
     if (type == 0 || type > 6 || !shader || !rbrew_memory_accessible(MEM, shader, fields[type].fallback + 4) ||
-        !rbrew_memory_accessible(MEM, list + offset + 8, 4)) return;
+        !rbrew_memory_accessible(MEM, list + offset + 8, 4))
+        return;
     const Field& f = fields[type];
     const uint32_t program = rbrew_read32(MEM, shader + (rbrew_read32(MEM, shader + f.test) ? f.program : f.fallback));
     rbrew_write32(MEM, list + offset + 8, program >> 8);
 }
 
-static void GX2CallDisplayList(CPUState* cpu) { rbrew_benchmark::guest_draws.fetch_add(1, std::memory_order_relaxed); call_display_list(cpu, "GX2CallDisplayList"); }
-static void GX2DirectCallDisplayList(CPUState* cpu) { rbrew_benchmark::guest_draws.fetch_add(1, std::memory_order_relaxed); call_display_list(cpu, "GX2DirectCallDisplayList"); }
+static void GX2CallDisplayList(CPUState* cpu) {
+    rbrew_benchmark::guest_draws.fetch_add(1, std::memory_order_relaxed);
+    call_display_list(cpu, "GX2CallDisplayList");
+}
+static void GX2DirectCallDisplayList(CPUState* cpu) {
+    rbrew_benchmark::guest_draws.fetch_add(1, std::memory_order_relaxed);
+    call_display_list(cpu, "GX2DirectCallDisplayList");
+}
 
 void gx2_display_list_register(CPUState* cpu) {
 #if defined(HAVE_SDL2)
@@ -1250,7 +1519,8 @@ void gx2_display_list_register(CPUState* cpu) {
 #else
 #define REG(name) rbrew_register_func(cpu, ADDR_##name, gx2_command_call<name, gx2_is_command(#name)>)
 #endif
-    s_list_call_fns[0] = GX2CallDisplayList; s_list_call_fns[1] = GX2DirectCallDisplayList;
+    s_list_call_fns[0] = GX2CallDisplayList;
+    s_list_call_fns[1] = GX2DirectCallDisplayList;
     REG(GX2BeginDisplayListEx);
     REG(GX2EndDisplayList);
     REG(GX2GetCurrentDisplayList);

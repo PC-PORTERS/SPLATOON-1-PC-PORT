@@ -31,13 +31,12 @@ inline std::vector<Input> read_inputs(std::istream& stream) {
         if (line.empty() || line[0] == '#') continue;
         Input input;
         std::istringstream row(line);
-        if (!(row >> std::dec >> input.frame >> std::hex >> input.buttons >> std::dec
-                  >> input.lx >> input.ly >> input.rx >> input.ry
-                  >> input.touched >> input.x >> input.y) ||
-            (!inputs.empty() && input.frame <= inputs.back().frame) ||
-            input.touched > 1 || input.x >= 854 || input.y >= 480 ||
-            !(input.lx >= -1 && input.lx <= 1 && input.ly >= -1 && input.ly <= 1 &&
-              input.rx >= -1 && input.rx <= 1 && input.ry >= -1 && input.ry <= 1)) {
+        if (!(row >> std::dec >> input.frame >> std::hex >> input.buttons >> std::dec >> input.lx >> input.ly >>
+              input.rx >> input.ry >> input.touched >> input.x >> input.y) ||
+            (!inputs.empty() && input.frame <= inputs.back().frame) || input.touched > 1 || input.x >= 854 ||
+            input.y >= 480 ||
+            !(input.lx >= -1 && input.lx <= 1 && input.ly >= -1 && input.ly <= 1 && input.rx >= -1 && input.rx <= 1 &&
+              input.ry >= -1 && input.ry <= 1)) {
             std::fprintf(stderr, "[benchmark] invalid input script; automation disabled\n");
             return {};
         }
@@ -47,7 +46,7 @@ inline std::vector<Input> read_inputs(std::istream& stream) {
 }
 inline const Input* input_at(const std::vector<Input>& inputs, uint32_t index) {
     const auto it = std::upper_bound(inputs.begin(), inputs.end(), index,
-        [](uint32_t f, const Input& input) { return f < input.frame; });
+                                     [](uint32_t f, const Input& input) { return f < input.frame; });
     return it == inputs.begin() ? nullptr : &*std::prev(it);
 }
 inline bool scripted_input(Input& input) {
@@ -64,7 +63,10 @@ inline bool scripted_input(Input& input) {
         if (!error && stamp != modified) {
             std::ifstream file(path);
             auto updated = read_inputs(file);
-            if (!updated.empty()) { inputs = std::move(updated); modified = stamp; }
+            if (!updated.empty()) {
+                inputs = std::move(updated);
+                modified = stamp;
+            }
         }
     }
     if (inputs.empty()) return false;
@@ -86,17 +88,19 @@ inline bool scripted_input(Input& input) {
 struct Pad {
     uint32_t buttons = 0;
     float lx = 0, ly = 0, rx = 0, ry = 0;
-    unsigned touched = 0, x = 0, y = 0;   // GamePad pixels, 854x480
-    float gyro[3] = {};                   // rad/s, as SDL reports it
-    float dt = 0;                         // motion seconds since the last poll
+    unsigned touched = 0, x = 0, y = 0; // GamePad pixels, 854x480
+    float gyro[3] = {};                 // rad/s, as SDL reports it
+    float dt = 0;                       // motion seconds since the last poll
 };
 inline bool same_pad(const Pad& a, const Pad& b) {
     return a.buttons == b.buttons && a.lx == b.lx && a.ly == b.ly && a.rx == b.rx && a.ry == b.ry &&
-           a.touched == b.touched && a.x == b.x && a.y == b.y && a.gyro[0] == b.gyro[0] &&
-           a.gyro[1] == b.gyro[1] && a.gyro[2] == b.gyro[2] && a.dt == b.dt;
+           a.touched == b.touched && a.x == b.x && a.y == b.y && a.gyro[0] == b.gyro[0] && a.gyro[1] == b.gyro[1] &&
+           a.gyro[2] == b.gyro[2] && a.dt == b.dt;
 }
 // The recorded game sees the printed values, so a replay is bit-identical.
-inline float quantize(float v) { return float(std::round(double(v) * 10000.0) / 10000.0); }
+inline float quantize(float v) {
+    return float(std::round(double(v) * 10000.0) / 10000.0);
+}
 inline void quantize(Pad& pad) {
     for (float* v : {&pad.lx, &pad.ly, &pad.rx, &pad.ry, &pad.gyro[0], &pad.gyro[1], &pad.gyro[2], &pad.dt})
         *v = quantize(*v);
@@ -105,10 +109,10 @@ inline void quantize(Pad& pad) {
 // The live scene and how many loading screens ended in it, updated once per
 // frame identically while recording and replaying.
 struct LiveState {
-    int kind = -1, id = -1;          // last stable scene
-    uint32_t rises = 0, low = 0;     // loading screens ended; frames below the threshold
+    int kind = -1, id = -1;      // last stable scene
+    uint32_t rises = 0, low = 0; // loading screens ended; frames below the threshold
 };
-constexpr uint32_t kLoadingDraws = 200;   // loading screens draw 8-36, scenes thousands
+constexpr uint32_t kLoadingDraws = 200; // loading screens draw 8-36, scenes thousands
 inline const LiveState& live_state(int kind, int id) {
     static LiveState state;
     static uint32_t last = UINT32_MAX;
@@ -116,9 +120,12 @@ inline const LiveState& live_state(int kind, int id) {
     if (now == last) return state;
     last = now;
     if (kind >= 0 && (kind != state.kind || id != state.id)) {
-        state.kind = kind; state.id = id; state.rises = 0;
+        state.kind = kind;
+        state.id = id;
+        state.rises = 0;
     }
-    if (frame_draws.load(std::memory_order_relaxed) < kLoadingDraws) ++state.low;
+    if (frame_draws.load(std::memory_order_relaxed) < kLoadingDraws)
+        ++state.low;
     else {
         if (state.low >= 10) ++state.rises;
         state.low = 0;
@@ -132,13 +139,19 @@ inline FILE* record_file() {
         const char* replay = std::getenv("RBREW_INPUT_REPLAY");
         if (!path || !*path || (replay && *replay)) return static_cast<FILE*>(nullptr);
         FILE* f = std::fopen(path, "w");
-        if (f) std::fputs("# rbrew input recording 1: frame buttons lx ly rx ry touched x y gx gy gz dt | @ frame kind id | % frame n kind id\n", f);
-        else std::fprintf(stderr, "[record] cannot write %s\n", path);
+        if (f)
+            std::fputs("# rbrew input recording 1: frame buttons lx ly rx ry touched x y gx gy gz dt | @ frame kind id "
+                       "| % frame n kind id\n",
+                       f);
+        else
+            std::fprintf(stderr, "[record] cannot write %s\n", path);
         return f;
     }();
     return file;
 }
-inline bool recording() { return record_file() != nullptr; }
+inline bool recording() {
+    return record_file() != nullptr;
+}
 
 // The first poll of a frame is recorded; later polls of that frame reuse it.
 inline void record_input(Pad& pad, int scene, int scene_id) {
@@ -150,7 +163,11 @@ inline void record_input(Pad& pad, int scene, int scene_id) {
     static int last_scene = -1, last_id = -1;
     static uint32_t last_rises = 0;
     const uint32_t now = frame.load(std::memory_order_relaxed);
-    if (now == last_frame) { pad = held; pad.dt = 0; return; }
+    if (now == last_frame) {
+        pad = held;
+        pad.dt = 0;
+        return;
+    }
     const LiveState& live = live_state(scene, scene_id);
     last_frame = now;
     quantize(pad);
@@ -167,17 +184,16 @@ inline void record_input(Pad& pad, int scene, int scene_id) {
     if (!any || !same_pad(pad, written)) {
         any = true;
         written = pad;
-        std::fprintf(f, "%u %x %.4f %.4f %.4f %.4f %u %u %u %.4f %.4f %.4f %.4f\n", now, pad.buttons,
-                     pad.lx, pad.ly, pad.rx, pad.ry, pad.touched, pad.x, pad.y,
-                     pad.gyro[0], pad.gyro[1], pad.gyro[2], pad.dt);
+        std::fprintf(f, "%u %x %.4f %.4f %.4f %.4f %u %u %u %.4f %.4f %.4f %.4f\n", now, pad.buttons, pad.lx, pad.ly,
+                     pad.rx, pad.ry, pad.touched, pad.x, pad.y, pad.gyro[0], pad.gyro[1], pad.gyro[2], pad.dt);
     }
     std::fflush(f);
 }
 
 struct SceneMark {
     uint32_t frame = 0;
-    int kind = -1, id = -1;   // id -1: match the kind only
-    uint32_t rise = 0;        // 0: the scene became active; n: its n-th loading screen ended
+    int kind = -1, id = -1; // id -1: match the kind only
+    uint32_t rise = 0;      // 0: the scene became active; n: its n-th loading screen ended
     bool matches(int live_kind, int live_id) const { return live_kind == kind && (id < 0 || live_id == id); }
 };
 struct Replay {
@@ -191,21 +207,24 @@ inline bool read_replay(std::istream& stream, Replay& replay) {
         if (line.empty() || line[0] == '#') continue;
         std::istringstream row(line);
         if (line[0] == '@') {
-            char at_sign; SceneMark mark;
+            char at_sign;
+            SceneMark mark;
             if (!(row >> at_sign >> mark.frame >> mark.kind)) return false;
             if (!(row >> mark.id)) mark.id = -1;
             replay.scenes.push_back(mark);
             continue;
         }
         if (line[0] == '%') {
-            char percent; SceneMark mark;
+            char percent;
+            SceneMark mark;
             if (!(row >> percent >> mark.frame >> mark.rise >> mark.kind >> mark.id) || !mark.rise) return false;
             replay.scenes.push_back(mark);
             continue;
         }
-        uint32_t at; Pad pad;
-        if (!(row >> std::dec >> at >> std::hex >> pad.buttons >> std::dec >> pad.lx >> pad.ly >> pad.rx >> pad.ry
-                  >> pad.touched >> pad.x >> pad.y >> pad.gyro[0] >> pad.gyro[1] >> pad.gyro[2] >> pad.dt) ||
+        uint32_t at;
+        Pad pad;
+        if (!(row >> std::dec >> at >> std::hex >> pad.buttons >> std::dec >> pad.lx >> pad.ly >> pad.rx >> pad.ry >>
+              pad.touched >> pad.x >> pad.y >> pad.gyro[0] >> pad.gyro[1] >> pad.gyro[2] >> pad.dt) ||
             (!replay.pads.empty() && at <= replay.pads.back().first) || pad.touched > 1 || pad.x >= 854 || pad.y >= 480)
             return false;
         replay.pads.emplace_back(at, pad);
@@ -215,7 +234,10 @@ inline bool read_replay(std::istream& stream, Replay& replay) {
 
 inline std::atomic<bool> replay_running{false};
 inline bool replaying() {
-    static const bool on = [] { const char* p = std::getenv("RBREW_INPUT_REPLAY"); return p && *p; }();
+    static const bool on = [] {
+        const char* p = std::getenv("RBREW_INPUT_REPLAY");
+        return p && *p;
+    }();
     return on;
 }
 // Fills pad for this frame and returns true while the replay drives the
@@ -232,7 +254,8 @@ inline bool replay_input(Pad& pad, int scene, int scene_id, bool physical_input)
             std::fprintf(stderr, "[replay] cannot read %s; controller input only\n", std::getenv("RBREW_INPUT_REPLAY"));
             done = true;
         } else {
-            std::fprintf(stderr, "[replay] %zu inputs, %zu scene/load marks\n", replay.pads.size(), replay.scenes.size());
+            std::fprintf(stderr, "[replay] %zu inputs, %zu scene/load marks\n", replay.pads.size(),
+                         replay.scenes.size());
             replay_running.store(true);
         }
     }
@@ -247,35 +270,46 @@ inline bool replay_input(Pad& pad, int scene, int scene_id, bool physical_input)
     // Input held over several frames: a controller reports one stray full
     // deflection while it initializes, which must not end the replay.
     static uint32_t input_frames = 0, last_input_frame = UINT32_MAX;
-    if (!physical_input) input_frames = 0;
-    else if (now != last_input_frame && ++input_frames >= 6) return finish("player input");
+    if (!physical_input)
+        input_frames = 0;
+    else if (now != last_input_frame && ++input_frames >= 6)
+        return finish("player input");
     last_input_frame = now;
-    static int64_t offset = 0;   // live frame - recorded frame
+    static int64_t offset = 0; // live frame - recorded frame
     static size_t next_scene = 0;
     static SceneMark recorded_scene;
     static uint32_t last_frame = UINT32_MAX, hold_since = 0;
     static bool holding = false;
     static Pad held;
-    if (now == last_frame) { pad = held; pad.dt = 0; return true; }
+    if (now == last_frame) {
+        pad = held;
+        pad.dt = 0;
+        return true;
+    }
     last_frame = now;
     const LiveState& state = live_state(scene, scene_id);
     int64_t at = int64_t(now) - offset;
     bool hold = false;
     while (next_scene < replay.scenes.size()) {
         const SceneMark& mark = replay.scenes[next_scene];
-        const bool live = mark.rise ? mark.matches(state.kind, state.id) && state.rises >= mark.rise
-                                    : mark.matches(scene, scene_id);
+        const bool live =
+            mark.rise ? mark.matches(state.kind, state.id) && state.rises >= mark.rise : mark.matches(scene, scene_id);
         if (int64_t(mark.frame) <= at) {
             if (live) {
                 if (!mark.rise) recorded_scene = mark;
-                ++next_scene; holding = false; continue;
+                ++next_scene;
+                holding = false;
+                continue;
             }
             // Still loading: stay at the mark until the scene is up.
             offset = int64_t(now) - mark.frame;
             at = mark.frame;
             hold = true;
-            if (!holding) { holding = true; hold_since = now; }
-            else if (now - hold_since > 3600) return finish("the game did not reach the recorded scene or load within 60 s");
+            if (!holding) {
+                holding = true;
+                hold_since = now;
+            } else if (now - hold_since > 3600)
+                return finish("the game did not reach the recorded scene or load within 60 s");
             break;
         }
         if (live && (mark.rise || !recorded_scene.matches(scene, scene_id))) {
@@ -292,11 +326,12 @@ inline bool replay_input(Pad& pad, int scene, int scene_id, bool physical_input)
         return finish("recording finished");
     pad = Pad{};
     if (!hold) {
-        const auto it = std::upper_bound(replay.pads.begin(), replay.pads.end(), at,
-            [](int64_t f, const std::pair<uint32_t, Pad>& p) { return f < int64_t(p.first); });
+        const auto it =
+            std::upper_bound(replay.pads.begin(), replay.pads.end(), at,
+                             [](int64_t f, const std::pair<uint32_t, Pad>& p) { return f < int64_t(p.first); });
         if (it != replay.pads.begin()) pad = std::prev(it)->second;
     }
     held = pad;
     return true;
 }
-}
+} // namespace rbrew_benchmark
