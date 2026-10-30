@@ -53,6 +53,7 @@
 #define NOMINMAX
 #include <windows.h>
 #endif
+#include "../../runtime/host_sleep.h"
 
 using namespace gx2r;
 
@@ -1388,7 +1389,7 @@ struct TranslateJob {
     // Waits for the result and hands it over (the caller frees the source).
     char* take(R700TranslationInfo& out, R700TranslationReads& out_reads) {
         if (!done.load(std::memory_order_acquire)) {
-            const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(2);
+            const auto until = std::chrono::steady_clock::now() + rbrew_host_spin_budget(std::chrono::milliseconds(2));
             for (unsigned n = 1; !done.load(std::memory_order_acquire); ++n) {
                 if (n % 64 == 0 && std::chrono::steady_clock::now() >= until) {
                     while (!done.load(std::memory_order_acquire)) done.wait(0, std::memory_order_acquire);
@@ -1433,7 +1434,7 @@ private:
             }
             if (job) { job->run(); continue; }
             // Misses come in bursts: stay awake briefly before sleeping.
-            const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(2);
+            const auto until = std::chrono::steady_clock::now() + rbrew_host_spin_budget(std::chrono::milliseconds(2));
             bool posted = false;
             for (unsigned n = 1; !posted; ++n) {
                 if (posted_.load(std::memory_order_acquire) != seen) posted = true;

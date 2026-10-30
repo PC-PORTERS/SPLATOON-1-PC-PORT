@@ -8,6 +8,7 @@
 #include "os/gx2/gx2_detile.h"
 #include "os/gx2/vk/gx2_compile_queue.h"
 #include "os/gx2/vk/gx2_render_vk_state.h"
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -197,6 +198,72 @@ void queue() {
     require(observed == 1524, "render queue lost a task");
     std::puts("render queue: sleep/wake, asynchronous FIFO and concurrent producers passed");
 }
+// Fixed integer work, so every run does identical work and only contention
+// changes its wall time.
+uint64_t busy_work(uint64_t seed, unsigned iterations) {
+    for (unsigned i = 0; i < iterations; ++i) { seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17; }
+    return seed;
+}
+// A small-CPU frame model: the game thread computes in chunks, posts bursts of
+// render work and waits for the queue at the end of the frame (the plaza's
+// occlusion read), while another guest thread works and sleeps. Restrict CPUs
+// with RBREW_BENCH_AFFINITY=<hex mask>; compare RBREW_HOST_SPIN=full.
+#if defined(_WIN32)
+void contention() {
+    if (const char* mask = std::getenv("RBREW_BENCH_AFFINITY"))
+        require(SetProcessAffinityMask(GetCurrentProcess(), DWORD_PTR(std::strtoull(mask, nullptr, 16))) != 0,
+                "SetProcessAffinityMask failed");
+    const unsigned frames = 120, warmup = 10;
+    gx2_native_start_render_thread();
+    std::atomic<bool> stop{false};
+    std::atomic<uint64_t> worker_steps{0}, sink{0}, worker_sink{0};
+    std::thread worker([&] {
+        uint64_t seed = 7;
+        while (!stop.load(std::memory_order_relaxed)) {
+            seed = busy_work(seed, 1000000);
+            worker_steps.fetch_add(1, std::memory_order_relaxed);
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        worker_sink = seed;
+    });
+    struct Replay final : Gx2AsyncWork {
+        std::atomic<uint64_t>& sink; uint64_t seed;
+        Replay(std::atomic<uint64_t>& sink, uint64_t seed) : sink(sink), seed(seed) {}
+        void run() override { sink.fetch_add(busy_work(seed, 12000), std::memory_order_relaxed); }
+    };
+    std::vector<double> times;
+    uint64_t seed = 1, steps_start = 0;
+    auto process_cpu = [] {
+        FILETIME created{}, exited{}, kernel{}, user{};
+        GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user);
+        auto ticks = [](FILETIME t) { return (uint64_t(t.dwHighDateTime) << 32) | t.dwLowDateTime; };
+        return double(ticks(kernel) + ticks(user)) * 1e-7;
+    };
+    double cpu_start = 0;
+    auto run_start = std::chrono::steady_clock::now();
+    for (unsigned f = 0; f < frames + warmup; ++f) {
+        if (f == warmup) { steps_start = worker_steps.load(); cpu_start = process_cpu(); run_start = std::chrono::steady_clock::now(); }
+        const auto start = std::chrono::steady_clock::now();
+        for (unsigned chunk = 0; chunk < 8; ++chunk) {
+            seed = busy_work(seed, 1000000);
+            for (unsigned i = 0; i < 40; ++i) gx2_native_post(new Replay(sink, seed + i));
+        }
+        gx2_native_run(true, [] {});
+        if (f >= warmup) times.push_back(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count());
+    }
+    const double wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - run_start).count();
+    const double cpu = process_cpu() - cpu_start;
+    const uint64_t steps = worker_steps.load() - steps_start;
+    stop = true;
+    worker.join();
+    gx2_native_stop_render_thread();
+    std::sort(times.begin(), times.end());
+    std::printf("{\"case\":\"contention\",\"frame_ms_p50\":%.3f,\"frame_ms_p95\":%.3f,\"frame_ms_max\":%.3f,"
+                "\"worker_steps_per_s\":%.1f,\"process_cpu_per_frame_ms\":%.3f,\"checksum\":%llu}\n",
+                times[times.size() / 2], times[times.size() * 95 / 100], times.back(), steps / wall,
+                cpu * 1000 / frames, (unsigned long long)((sink.load() + seed) & 0xffff));
+}
+#endif
 void queries() {
     Renderer renderer;
     std::vector<uint8_t> mem(65536);
@@ -331,6 +398,9 @@ int main(int argc, char** argv) {
 #endif
         if (mode == "timing") timing();
         else if (mode == "queue") queue();
+#if defined(_WIN32)
+        else if (mode == "contention") contention();
+#endif
         else if (mode == "detile") detile();
         else if (mode == "compiler") compiler();
         else if (mode == "uploads" || mode == "textures" || mode == "queries") {

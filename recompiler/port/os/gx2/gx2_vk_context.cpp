@@ -17,6 +17,7 @@
 #include "gx2_render.h"
 #include "gx2_write_watch.h"
 #include "../os_common.h"
+#include "../../runtime/host_sleep.h"
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -134,7 +135,7 @@ void render_thread() {
             // Spin briefly (GX2 calls come in bursts), then sleep on the
             // push counter; a poster that sees s_sleeping wakes us.
             bool queued = false;
-            const auto until = std::chrono::steady_clock::now() + std::chrono::microseconds(4000);
+            const auto until = std::chrono::steady_clock::now() + rbrew_host_spin_budget(std::chrono::microseconds(4000));
             for (unsigned n = 1; !queued; ++n) {
                 if (s_pushed.load(std::memory_order_acquire) != seen) queued = true;
                 else if (n % 64 == 0 && std::chrono::steady_clock::now() >= until) break;
@@ -187,7 +188,8 @@ void submit(Gx2Task run, void* context) {
         ++s_queue_size;
     }
     wake_render_thread();
-    await(s_done, [ticket](uint32_t done) { return reached(done, ticket); }, std::chrono::microseconds(4000));
+    await(s_done, [ticket](uint32_t done) { return reached(done, ticket); },
+          rbrew_host_spin_budget(std::chrono::microseconds(4000)));
     if (start) {
         const uint64_t ns = gx2_perf_now() - start;
         t_gx2_perf_wait_ns += ns;
