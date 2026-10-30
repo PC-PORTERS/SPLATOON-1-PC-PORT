@@ -69,6 +69,13 @@ uint32_t original_address(const Gx2DetileDesc& d, uint32_t x, uint32_t y) {
 void detile(bool benchmark) {
     // Reference bytes use the original uncached AddrLib entry points, so a
     // shared mistake in retile/detile cannot satisfy this comparison.
+    std::vector<uint8_t> tiled(2u<<20);
+    for (size_t i=0;i<tiled.size();++i) tiled[i]=uint8_t((i*13)^(i>>9));
+    std::vector<uint8_t> roundtrip(tiled.size(),0xa5);
+    std::vector<uint8_t> before(tiled.size());
+    std::vector<uint8_t> expected, actual;
+    std::vector<uint32_t> addrs(35 * 39);
+
     for (uint32_t mode = 0; mode <= 16; ++mode)
     for (uint32_t bits : {8u,16u,32u,64u,128u})
     for (uint32_t slice : {0u,1u,4u,7u})
@@ -78,13 +85,15 @@ void detile(bool benchmark) {
         d.tile_mode=mode; d.bits_per_element=bits; d.slice=slice; d.is_depth=depth;
         d.swizzle=((slice+bits)&7)<<8;
         const size_t bytes=bits/8, count=size_t(d.width)*d.height*bytes;
-        std::vector<uint8_t> tiled(2u<<20), expected(count), actual(count), roundtrip(tiled.size(),0xa5);
-        for (size_t i=0;i<tiled.size();++i) tiled[i]=uint8_t((i*13)^(i>>9));
+        expected.resize(count);
+        actual.resize(count);
+        std::memset(roundtrip.data(),0xa5,roundtrip.size());
         size_t required=0;
         for (uint32_t y=0;y<d.height;++y) for (uint32_t x=0;x<d.width;++x) {
             const auto address=original_address(d,x,y);
             require(size_t(address)+bytes<=tiled.size(),"bad authored source bounds");
             required=std::max(required,size_t(address)+bytes);
+            addrs[size_t(y)*d.width+x]=address;
             std::memcpy(expected.data()+(size_t(y)*d.width+x)*bytes,tiled.data()+address,bytes);
         }
         require(gx2_detile_mip0(d,tiled.data(),tiled.size(),actual.data()),"detile rejected valid layout");
@@ -92,8 +101,8 @@ void detile(bool benchmark) {
         require(gx2_retile_mip0(d,expected.data(),roundtrip.data(),roundtrip.size()),"retile rejected valid layout");
         require(gx2_retile_mip0(d,expected.data(),roundtrip.data(),required),"retile rejected a valid partial final tile");
         for(uint32_t y=0;y<d.height;++y) for(uint32_t x=0;x<d.width;++x)
-            require(!std::memcmp(roundtrip.data()+original_address(d,x,y),expected.data()+(size_t(y)*d.width+x)*bytes,bytes),"retile differs from original AddrLib");
-        const auto before=roundtrip;
+            require(!std::memcmp(roundtrip.data()+addrs[size_t(y)*d.width+x],expected.data()+(size_t(y)*d.width+x)*bytes,bytes),"retile differs from original AddrLib");
+        std::memcpy(before.data(),roundtrip.data(),roundtrip.size());
         require(!gx2_retile_mip0(d,expected.data(),roundtrip.data(),required-1),"retile accepted an undersized destination");
         require(roundtrip==before,"failed retile modified destination bytes");
     }
