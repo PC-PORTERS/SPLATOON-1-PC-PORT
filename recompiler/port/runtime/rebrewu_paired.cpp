@@ -320,6 +320,6 @@ extern "C" void rbrew_trap(CPUState* cpu, uint32_t w, uint32_t pc) {
     if (!hit) return;
     char text[96];
     std::snprintf(text, sizeof text, "guest trap %08X at %08X (lr=%08X)", w, pc, cpu->lr);
-    RBREW_LOGF(stderr, "[rbrew] %s\n", text);
+    RBREW_LOG_INFO("rbrew", "%s\n", text);
     throw std::runtime_error(text);
 }

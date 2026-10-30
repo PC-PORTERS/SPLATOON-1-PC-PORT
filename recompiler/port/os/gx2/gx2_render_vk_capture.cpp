@@ -240,7 +240,7 @@ void gx2r_trace_glitch_frames(unsigned frames) {
     if (s_glitch_trace_frames || arms >= 6) return;
     ++arms;
     s_glitch_trace_frames = frames;
-    RBREW_LOGF(stderr, "[ftrace] ---- arming %u glitch-trace frames (#%u)\n", frames, arms);
+    RBREW_LOG_DEBUG("ftrace", "---- arming %u glitch-trace frames (#%u)\n", frames, arms);
 }
 void gx2r_capture_frame_copy() {
     ++s_capture_frame;
@@ -253,7 +253,7 @@ void gx2r_capture_frame_copy() {
     // No guest state or render state is changed.
     static const std::string trigger = [] {
         const char* p = rbrew_diagnostic_env("RBREW_CAPTURE_TRIGGER");
-        RBREW_LOGF(stderr, "[capture] trigger path='%s'\n", p ? p : "(unset)");
+        RBREW_LOG_INFO("capture", "trigger path='%s'\n", p ? p : "(unset)");
         return std::string(p ? p : "");
     }();
     if (!trigger.empty()) {
@@ -290,11 +290,11 @@ void gx2r_capture_frame_copy() {
                     for (unsigned suffix = 1; std::filesystem::exists(path, error); ++suffix)
                         path = directory / (stem + "_" + std::to_string(suffix) + ".ppm");
                     capture_next_present(path.string());
-                    RBREW_LOGF(stderr, "[capture] trigger armed presented TV image (no draw trace)\n");
+                    RBREW_LOG_INFO("capture", "trigger armed presented TV image (no draw trace)\n");
                 } else if (trace_mode) {
                     s_trigger_frame = 0;
                     s_glitch_trace_frames = 1;
-                    RBREW_LOGF(stderr, "[capture] trigger armed trace for one frame\n");
+                    RBREW_LOG_INFO("capture", "trigger armed trace for one frame\n");
                 } else {
                     s_trigger_frame = s_capture_frame;
                     s_trigger_first = first;
@@ -302,18 +302,17 @@ void gx2r_capture_frame_copy() {
                     s_trigger_tv = tv_mode;
                     s_trigger_tv_captured = false;
                     if (tv_mode)
-                        RBREW_LOGF(stderr, "[capture] trigger armed frame %u TV composite\n", s_trigger_frame);
+                        RBREW_LOG_INFO("capture", "trigger armed frame %u TV composite\n", s_trigger_frame);
                     else
-                        RBREW_LOGF(stderr, "[capture] trigger armed frame %u draws %u:%u\n", s_trigger_frame, first,
-                                   last);
+                        RBREW_LOG_INFO("capture", "trigger armed frame %u draws %u:%u\n", s_trigger_frame, first, last);
                 }
             } else if (!valid)
-                RBREW_LOGF(stderr, "[capture] invalid trigger draw range\n");
+                RBREW_LOG_ERROR("capture", "invalid trigger draw range\n");
         } else {
             static bool reported = false;
             if (!reported && std::filesystem::exists(trigger)) {
                 reported = true;
-                RBREW_LOGF(stderr, "[capture] trigger fopen failed path='%s'\n", trigger.c_str());
+                RBREW_LOG_ERROR("capture", "trigger fopen failed path='%s'\n", trigger.c_str());
             }
         }
     }
@@ -336,13 +335,13 @@ void gx2r_frame_trace_scan(uint32_t cb_addr, uint32_t scan_target) {
         if (s_trace_copy) {
             g_gx2_frame_trace_active = s_tv_copies == s_trace_copy;
             if (s_tv_copies == s_trace_copy || s_tv_copies == s_trace_copy + 1)
-                RBREW_LOGF(stderr, "[ftrace] ---- TV copy %u cb=%08X\n", s_tv_copies, cb_addr);
+                RBREW_LOG_DEBUG("ftrace", "---- TV copy %u cb=%08X\n", s_tv_copies, cb_addr);
         }
         if (s_glitch_trace_frames) {
             --s_glitch_trace_frames;
             g_gx2_frame_trace_active = true;
-            RBREW_LOGF(stderr, "[ftrace] ---- glitch trace TV copy %u (left=%u) cb=%08X\n", s_tv_copies,
-                       s_glitch_trace_frames, cb_addr);
+            RBREW_LOG_DEBUG("ftrace", "---- glitch trace TV copy %u (left=%u) cb=%08X\n", s_tv_copies,
+                            s_glitch_trace_frames, cb_addr);
         }
     }
 }
@@ -417,7 +416,7 @@ bool gx2r_capture_draw_if_armed(bool indexed, uint32_t prim, uint32_t count, uin
     if (path.empty()) return false;
     FILE* f = std::fopen(path.c_str(), "wb");
     if (!f) {
-        RBREW_LOGF(stderr, "[capture] cannot write %s\n", path.c_str());
+        RBREW_LOG_ERROR("capture", "cannot write %s\n", path.c_str());
         return false;
     }
     std::fwrite(kCaptureMagic, 1, sizeof(kCaptureMagic), f);
@@ -621,8 +620,8 @@ bool gx2r_capture_draw_if_armed(bool indexed, uint32_t prim, uint32_t count, uin
         region(index_addr, uint64_t(count) *
                                ((index_type == GX2_INDEX_TYPE_U32_BE || index_type == GX2_INDEX_TYPE_U32_LE) ? 4 : 2));
     std::fclose(f);
-    RBREW_LOGF(stderr, "[capture] frame %u draw %u -> %s (%u regions, %u textures, fbo %ux%u)\n", s_capture_frame, draw,
-               path.c_str(), regions, texture_count, m.fbo_width, m.fbo_height);
+    RBREW_LOG_INFO("capture", "frame %u draw %u -> %s (%u regions, %u textures, fbo %ux%u)\n", s_capture_frame, draw,
+                   path.c_str(), regions, texture_count, m.fbo_width, m.fbo_height);
     return true;
 #endif
 }

@@ -69,7 +69,7 @@ static bool map_overlay(void* user, uint32_t base, uint32_t size, bool enable) {
             VirtualProtect(p, size, PAGE_NOACCESS, &old_protection);
             throw;
         }
-        RBREW_LOGF(stderr, "[MEM] OverlayArena mapped: base=%08X size=%08X\n", base, size);
+        RBREW_LOG_INFO("MEM", "OverlayArena mapped: base=%08X size=%08X\n", base, size);
         return true;
     }
     // Cafe unmaps the aperture; its backing storage survives a later remap.
@@ -103,8 +103,7 @@ static void start_hang_sampler(const CPUState* cpu) {
             if (table[i]) hosts.push_back({reinterpret_cast<uintptr_t>(table[i]), i << 2});
         std::sort(hosts.begin(), hosts.end());
         const DWORD self = GetCurrentThreadId(), pid = GetCurrentProcessId();
-        RBREW_LOGF(stderr, "[hang] module base=%p (map preferred base 0x140000000)\n",
-                   (void*)GetModuleHandleW(nullptr));
+        RBREW_LOG_INFO("hang", "module base=%p (map preferred base 0x140000000)\n", (void*)GetModuleHandleW(nullptr));
         for (int round = 0; round < 12; ++round) {
             HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
             THREADENTRY32 entry{};
@@ -123,9 +122,9 @@ static void start_hang_sampler(const CPUState* cpu) {
                         auto it = std::upper_bound(hosts.begin(), hosts.end(), std::make_pair(rip, UINT32_MAX));
                         if (it != hosts.begin()) {
                             --it;
-                            RBREW_LOGF(stderr, "[hang] round=%d tid=%lu rip=%p nearest guest fn %08X +0x%llX\n", round,
-                                       entry.th32ThreadID, (void*)rip, it->second,
-                                       (unsigned long long)(rip - it->first));
+                            RBREW_LOG_INFO("hang", "round=%d tid=%lu rip=%p nearest guest fn %08X +0x%llX\n", round,
+                                           entry.th32ThreadID, (void*)rip, it->second,
+                                           (unsigned long long)(rip - it->first));
                         }
                     }
                 }
@@ -186,7 +185,7 @@ static void start_profiler() {
     std::thread([start, seconds, path, trigger] {
         if (!trigger.empty())
             while (GetFileAttributesA(trigger.c_str()) == INVALID_FILE_ATTRIBUTES) Sleep(250);
-        RBREW_LOGF(stderr, "[profile] sampling %u s -> %s\n", seconds, path.c_str());
+        RBREW_LOG_INFO("profile", "sampling %u s -> %s\n", seconds, path.c_str());
         Sleep(start * 1000);
         rbrew_benchmark::profiling.store(true, std::memory_order_relaxed);
         const uint32_t first_frame = rbrew_benchmark::frame.load(std::memory_order_relaxed);
@@ -275,8 +274,8 @@ static void start_profiler() {
             for (const auto& [key, n] : hits) std::fprintf(f, "%lu %u %s\n", key.first, n, key.second.c_str());
             fclose(f);
         } else
-            RBREW_LOGF(stderr, "[profile] cannot write %s\n", path.c_str());
-        RBREW_LOGF(stderr, "[profile] finished %u rounds\n", rounds);
+            RBREW_LOG_ERROR("profile", "cannot write %s\n", path.c_str());
+        RBREW_LOG_INFO("profile", "finished %u rounds\n", rounds);
         rbrew_benchmark::profiling.store(false, std::memory_order_relaxed);
     }).detach();
 }
@@ -313,7 +312,7 @@ static bool map_overlay(void* user, uint32_t base, uint32_t size, bool enable) {
         mprotect(p, size, enable ? PROT_NONE : (PROT_READ | PROT_WRITE));
         throw;
     }
-    if (enable) RBREW_LOGF(stderr, "[MEM] OverlayArena mapped: base=%08X size=%08X\n", base, size);
+    if (enable) RBREW_LOG_INFO("MEM", "OverlayArena mapped: base=%08X size=%08X\n", base, size);
     return true;
 }
 static void free_arena(uint8_t* p, size_t sz) {
@@ -336,8 +335,8 @@ uint32_t g_blank_import_addr[kBlankLoggerSlots];
 std::atomic<bool> g_blank_import_seen[kBlankLoggerSlots];
 template <size_t I> void blank_import_trampoline(CPUState* cpu) {
     if (!g_blank_import_seen[I].exchange(true))
-        RBREW_LOGF(stderr, "[IMPORT] first call to blank import %08X lr=%08X r3=%08X\n", g_blank_import_addr[I],
-                   cpu->lr, cpu->r[3]);
+        RBREW_LOG_INFO("IMPORT", "first call to blank import %08X lr=%08X r3=%08X\n", g_blank_import_addr[I], cpu->lr,
+                       cpu->r[3]);
 }
 template <size_t... I> constexpr std::array<HostFunc, sizeof...(I)> make_blank_loggers(std::index_sequence<I...>) {
     return {&blank_import_trampoline<I>...};
@@ -414,22 +413,20 @@ int main(int argc, char** argv) {
     // ESC-menu options (settings.ini); start-only values reach the environment here.
     rbrew_settings::load();
     rbrew::discord_rpc_init();
-    RBREW_LOGF(stderr, "[BOOT] Splatoon launch runtime; RPX header entry=0x%08X\n",
-               rebrewu_generated::Gambit_entry_point);
-    RBREW_LOGF(stderr, "[FS] RBREW_CONTENT_DIR=%s\n",
-               getenv("RBREW_CONTENT_DIR") ? getenv("RBREW_CONTENT_DIR") : "./content");
+    RBREW_LOG_INFO("BOOT", "Splatoon launch runtime; RPX header entry=0x%08X\n", rebrewu_generated::Gambit_entry_point);
+    RBREW_LOG_INFO("FS", "RBREW_CONTENT_DIR=%s\n",
+                   getenv("RBREW_CONTENT_DIR") ? getenv("RBREW_CONTENT_DIR") : "./content");
 
     // 1. Allocate the shared native layout, including application heap memory
     const size_t arena_sz = WIIU_MEM_SIZE;
     uint8_t* arena = alloc_arena(arena_sz);
     if (!arena) {
-        RBREW_LOGF(stderr, "[gambit] Failed to allocate %zu MB guest arena\n", arena_sz >> 20);
+        RBREW_LOG_ERROR("gambit", "Failed to allocate %zu MB guest arena\n", arena_sz >> 20);
         return 1;
     }
     // VirtualAlloc and anonymous mmap already return zero-filled pages. Keep
     // unused arena pages lazy rather than touching every reserved guest byte.
-    RBREW_LOGF(stderr, "[MEM] Guest arena: %p – %p (%zu MB)\n", (void*)arena, (void*)(arena + arena_sz),
-               arena_sz >> 20);
+    RBREW_LOG_INFO("MEM", "Guest arena: %p – %p (%zu MB)\n", (void*)arena, (void*)(arena + arena_sz), arena_sz >> 20);
 #if defined(_WIN32)
     {
         // Owner request: use the RAM this machine has. Ask Windows to keep a
@@ -445,12 +442,13 @@ int main(int argc, char** argv) {
             const bool ok =
                 SetProcessWorkingSetSizeEx(GetCurrentProcess(), SIZE_T(min_ws), SIZE_T(max_ws),
                                            QUOTA_LIMITS_HARDWS_MIN_DISABLE | QUOTA_LIMITS_HARDWS_MAX_DISABLE) != 0;
-            RBREW_LOGF(stderr,
-                       "[MEM] System RAM %llu MB, free %llu MB | guest reserved %zu MB, committed %llu MB | "
-                       "working set min %llu MB max %llu MB (%s)\n",
-                       (unsigned long long)(status.ullTotalPhys >> 20), (unsigned long long)(status.ullAvailPhys >> 20),
-                       arena_sz >> 20, (unsigned long long)(committed >> 20), (unsigned long long)(min_ws >> 20),
-                       (unsigned long long)(max_ws >> 20), ok ? "set" : "refused");
+            RBREW_LOG_INFO_BEGIN("MEM",
+                                 "System RAM %llu MB, free %llu MB | guest reserved %zu MB, committed %llu MB | "
+                                 "working set min %llu MB max %llu MB (%s)\n",
+                                 (unsigned long long)(status.ullTotalPhys >> 20),
+                                 (unsigned long long)(status.ullAvailPhys >> 20), arena_sz >> 20,
+                                 (unsigned long long)(committed >> 20), (unsigned long long)(min_ws >> 20),
+                                 (unsigned long long)(max_ws >> 20), ok ? "set" : "refused");
         }
     }
 #endif
@@ -460,7 +458,7 @@ int main(int argc, char** argv) {
     const uint32_t DISPATCH_LEN = DISPATCH_MAX >> 2;
     HostFunc* dispatch_table = (HostFunc*)calloc(DISPATCH_LEN, sizeof(HostFunc));
     if (!dispatch_table) {
-        RBREW_LOGF(stderr, "[gambit] Failed to allocate dispatch table\n");
+        RBREW_LOG_ERROR("gambit", "Failed to allocate dispatch table\n");
         free_arena(arena, arena_sz);
         return 1;
     }
@@ -507,12 +505,12 @@ int main(int argc, char** argv) {
         if (const char* value = getenv("RBREW_COUNTRY_REGISTRATION"); value && *value)
             uc_profile.country_registration = rbrew_parse_native_uc_scalar(value, 255);
         rbrew_uc_configure_profile(&cpu_reg, uc_profile);
-        RBREW_LOGF(stderr, "[UC] Native profile: language=%u country_registration=%u\n", uc_profile.language,
-                   uc_profile.country_registration);
-        RBREW_LOGF(stderr, "[MCP] Native profile: console=0x%X title_regions=0x%X metadata=%s\n",
-                   regions.console_region, regions.title_regions, metadata.string().c_str());
+        RBREW_LOG_INFO("UC", "Native profile: language=%u country_registration=%u\n", uc_profile.language,
+                       uc_profile.country_registration);
+        RBREW_LOG_INFO("MCP", "Native profile: console=0x%X title_regions=0x%X metadata=%s\n", regions.console_region,
+                       regions.title_regions, metadata.string().c_str());
     } catch (const std::exception& error) {
-        RBREW_LOGF(stderr, "[MCP] Native profile setup failed: %s\n", error.what());
+        RBREW_LOG_ERROR("MCP", "Native profile setup failed: %s\n", error.what());
         delete overlay_mapping;
         free(dispatch_table);
         free_arena(arena, arena_sz);
@@ -550,7 +548,7 @@ int main(int argc, char** argv) {
     player_anim_register();
     erreula_register(&cpu_reg);
 
-    RBREW_LOGF(stderr, "[IMPORT] OS modules and game dispatch registered\n");
+    RBREW_LOG_INFO("IMPORT", "OS modules and game dispatch registered\n");
     if (const char* report = rbrew_diagnostic_env("RBREW_STUB_REPORT"); report && *report) {
         // PLT trampolines occupy 0x02D051A0..0x02D0E098 in Gambit.
         // Each blank slot is rebound to a logging trampoline with the same
@@ -564,7 +562,7 @@ int main(int argc, char** argv) {
                     ++blank;
                 }
             fclose(out);
-            RBREW_LOGF(stderr, "[IMPORT] %u PLT imports still bound to the blank STUB -> %s\n", blank, report);
+            RBREW_LOG_INFO("IMPORT", "%u PLT imports still bound to the blank STUB -> %s\n", blank, report);
         }
     }
 
@@ -573,7 +571,7 @@ int main(int argc, char** argv) {
 
     // 5. Copy data sections into arena
     Gambit_data_init(arena);
-    RBREW_LOGF(stderr, "[RPX] Bundled generated data sections loaded\n");
+    RBREW_LOG_INFO("RPX", "Bundled generated data sections loaded\n");
 
     // 5a. Re-apply the dimport function-pointer patch.
     //
@@ -587,7 +585,7 @@ int main(int argc, char** argv) {
     // address 0, the game gets a garbage allocation pointer, corrupts the heap,
     // and the GHS runtime calls raise(6) → OSPanic("ind_sgnl.c:105 unhandled signal 6").
     coreinit_dimport_repatch(&cpu_reg);
-    RBREW_LOGF(stderr, "[gambit] Dimport function pointers re-patched\n");
+    RBREW_LOG_INFO("gambit", "Dimport function pointers re-patched\n");
 
     // 5b. Pre-seed the game's custom heap allocator at 0x101D2554.
     //
@@ -651,8 +649,8 @@ int main(int argc, char** argv) {
         rbrew_write32(arena, ALLOC_BASE + 0x34u, HEAP_END);   // tracked high bound
         rbrew_write32(arena, ALLOC_BASE + 0x3Cu, EXTENT_HDR); // ptr to extent header
 
-        RBREW_LOGF(stderr, "[gambit] Heap pre-seeded: free=[0x%08X,0x%08X) %u MB\n", FREE_NODE, HEAP_END,
-                   (HEAP_END - FREE_NODE) >> 20);
+        RBREW_LOG_INFO("gambit", "Heap pre-seeded: free=[0x%08X,0x%08X) %u MB\n", FREE_NODE, HEAP_END,
+                       (HEAP_END - FREE_NODE) >> 20);
     }
 
     // 6. Set up initial guest CPU state
@@ -670,12 +668,12 @@ int main(int argc, char** argv) {
 #ifdef RBREW_ENABLE_PPC_FALLBACK
     if (const char* opt = getenv("RBREW_PPC_FALLBACK"); opt && strcmp(opt, "1") == 0) {
         if (!Gambit_ppc_image_init(&cpu, GAMBIT_PPC_IMAGE_PATH)) {
-            RBREW_LOGF(stderr, "[hybrid] cannot initialize relocated executable image\n");
+            RBREW_LOG_ERROR("hybrid", "cannot initialize relocated executable image\n");
             return 1;
         }
         cpu.ppc_fallback_enabled = true;
-        RBREW_LOGF(stderr, "[hybrid] bounded integer/control prototype enabled; executable ranges=%u\n",
-                   cpu.guest_code_range_count);
+        RBREW_LOG_INFO("hybrid", "bounded integer/control prototype enabled; executable ranges=%u\n",
+                       cpu.guest_code_range_count);
     }
 #endif
     cpu.r[1] = STACK_TOP - 8; // r1 = stack pointer (8-byte aligned)
@@ -695,9 +693,9 @@ int main(int argc, char** argv) {
     {
         const uint32_t CTOR_TABLE = 0x101BFA54u;
         const uint32_t CTOR_DONE_FLAG = 0x101CC020u;
-        RBREW_LOGF(stderr, "[PPC] Running constructor table at 0x%08X\n", CTOR_TABLE);
+        RBREW_LOG_INFO("PPC", "Running constructor table at 0x%08X\n", CTOR_TABLE);
         uint32_t n_ctors = rbrew_run_constructors(&cpu, CTOR_TABLE, CTOR_DONE_FLAG);
-        RBREW_LOGF(stderr, "[gambit] Ran %u static constructors\n", n_ctors);
+        RBREW_LOG_INFO("gambit", "Ran %u static constructors\n", n_ctors);
     }
 
     // 7b. Clear the GHS thread-local allocator SDA variable (0x101C98F0).
@@ -711,13 +709,13 @@ int main(int argc, char** argv) {
     // Clearing the handle forces fn_02801A78 to take the simple fallback path
     // (L_028019F4 → MEMAllocFromDefaultHeap), which works correctly.
     rbrew_write32(arena, 0x101C98F0u, 0u);
-    RBREW_LOGF(stderr, "[gambit] GHS TLS allocator handle cleared\n");
+    RBREW_LOG_INFO("gambit", "GHS TLS allocator handle cleared\n");
 
     // The loader invokes the module entry; all application callbacks and loops
     // remain guest-owned. A genuine return ends this host launch with its result.
-    RBREW_LOGF(stderr, "[gambit] Entering RPX entry point 0x%08X\n", rebrewu_generated::Gambit_entry_point);
+    RBREW_LOG_INFO("gambit", "Entering RPX entry point 0x%08X\n", rebrewu_generated::Gambit_entry_point);
     int result = rbrew_run_entry(&cpu, rebrewu_generated::Gambit_entry_point, 0u, 0u);
-    RBREW_LOGF(stderr, "[gambit] RPX entry returned %d\n", result);
+    RBREW_LOG_INFO("gambit", "RPX entry returned %d\n", result);
 
     // Arena and dispatch are process-owned: guest workers may still reference
     // them until process termination. Do not free them underneath live workers.

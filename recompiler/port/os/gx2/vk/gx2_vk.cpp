@@ -71,11 +71,11 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(VkDebugUtilsMessageSeverityFlagBit
     // Bounded: the first messages of each class, then powers of two.
     if (count <= 32 || (count & (count - 1)) == 0)
 #ifdef RBREW_ADVANCED_TESTS
-        std::fprintf(stderr, "[vk] %s #%llu: %s\n", error ? "VALIDATION ERROR" : "validation warning",
-                     static_cast<unsigned long long>(count), data && data->pMessage ? data->pMessage : "");
+        RBREW_LOG_INFO("vk", "%s #%llu: %s\n", error ? "VALIDATION ERROR" : "validation warning",
+                       static_cast<unsigned long long>(count), data && data->pMessage ? data->pMessage : "");
 #else
-        RBREW_LOGF(stderr, "[vk] %s #%llu: %s\n", error ? "VALIDATION ERROR" : "validation warning",
-                   static_cast<unsigned long long>(count), data && data->pMessage ? data->pMessage : "");
+        RBREW_LOG_INFO("vk", "%s #%llu: %s\n", error ? "VALIDATION ERROR" : "validation warning",
+                       static_cast<unsigned long long>(count), data && data->pMessage ? data->pMessage : "");
 #endif
     return VK_FALSE;
 }
@@ -371,7 +371,7 @@ bool create_swapchain() {
     else if (has(VK_PRESENT_MODE_IMMEDIATE_KHR))
         mode = VK_PRESENT_MODE_IMMEDIATE_KHR;
     if (mode == VK_PRESENT_MODE_FIFO_KHR)
-        RBREW_LOGF(stderr, "[vk] WARNING: only FIFO presentation is available; presentation adds a refresh wait\n");
+        RBREW_LOG_WARN("vk", "WARNING: only FIFO presentation is available; presentation adds a refresh wait\n");
     uint32_t images = std::max(3u, capabilities.minImageCount);
     if (capabilities.maxImageCount) images = std::min(images, capabilities.maxImageCount);
     VkSwapchainCreateInfoKHR info{VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
@@ -412,11 +412,11 @@ bool create_swapchain() {
     static bool reported = false;
     if (!reported) {
         reported = true;
-        RBREW_LOGF(stderr, "[vk] swapchain %ux%u format=%d images=%u present mode=%s\n", extent.width, extent.height,
-                   int(chosen.format), count,
-                   mode == VK_PRESENT_MODE_MAILBOX_KHR     ? "MAILBOX"
-                   : mode == VK_PRESENT_MODE_IMMEDIATE_KHR ? "IMMEDIATE"
-                                                           : "FIFO");
+        RBREW_LOG_INFO("vk", "swapchain %ux%u format=%d images=%u present mode=%s\n", extent.width, extent.height,
+                       int(chosen.format), count,
+                       mode == VK_PRESENT_MODE_MAILBOX_KHR     ? "MAILBOX"
+                       : mode == VK_PRESENT_MODE_IMMEDIATE_KHR ? "IMMEDIATE"
+                                                               : "FIFO");
     }
     return true;
 }
@@ -1090,12 +1090,12 @@ bool init(SDL_Window* window, bool native_depth) {
     s_format_properties.clear();
     s_window = window;
     if (volkInitialize() != VK_SUCCESS) {
-        RBREW_LOGF(stderr, "[vk] FATAL: the Vulkan loader (vulkan-1.dll) is not available\n");
+        RBREW_LOG_FATAL("vk", "FATAL: the Vulkan loader (vulkan-1.dll) is not available\n");
         return false;
     }
     if (volkGetInstanceVersion() < VK_API_VERSION_1_3) {
-        RBREW_LOGF(stderr, "[vk] FATAL: Vulkan 1.3 is required (loader reports %u.%u)\n",
-                   VK_API_VERSION_MAJOR(volkGetInstanceVersion()), VK_API_VERSION_MINOR(volkGetInstanceVersion()));
+        RBREW_LOG_FATAL("vk", "FATAL: Vulkan 1.3 is required (loader reports %u.%u)\n",
+                        VK_API_VERSION_MAJOR(volkGetInstanceVersion()), VK_API_VERSION_MINOR(volkGetInstanceVersion()));
         return false;
     }
     std::vector<const char*> extensions;
@@ -1137,8 +1137,8 @@ bool init(SDL_Window* window, bool native_depth) {
         if (found)
             layers.push_back("VK_LAYER_KHRONOS_validation");
         else
-            RBREW_LOGF(stderr, "[vk] RBREW_VK_VALIDATION requested but VK_LAYER_KHRONOS_validation is not installed "
-                               "(set VK_ADD_LAYER_PATH)\n");
+            RBREW_LOG_INFO_BEGIN("vk", "RBREW_VK_VALIDATION requested but VK_LAYER_KHRONOS_validation is not installed "
+                                       "(set VK_ADD_LAYER_PATH)\n");
     }
     if (s_debug_utils) extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
     VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
@@ -1158,7 +1158,7 @@ bool init(SDL_Window* window, bool native_depth) {
     if (!layers.empty() && sync_validation) info.pNext = &features;
     VkResult result = vkCreateInstance(&info, nullptr, &s_instance);
     if (result != VK_SUCCESS) {
-        RBREW_LOGF(stderr, "[vk] FATAL: vkCreateInstance failed (%d)\n", int(result));
+        RBREW_LOG_FATAL("vk", "FATAL: vkCreateInstance failed (%d)\n", int(result));
         return false;
     }
     volkLoadInstance(s_instance);
@@ -1179,7 +1179,7 @@ bool init(SDL_Window* window, bool native_depth) {
         if (s_caps.validation) vkCreateDebugUtilsMessengerEXT(s_instance, &messenger, nullptr, &s_messenger);
     }
     if (window && !SDL_Vulkan_CreateSurface(window, s_instance, &s_surface)) {
-        RBREW_LOGF(stderr, "[vk] FATAL: SDL_Vulkan_CreateSurface failed: %s\n", SDL_GetError());
+        RBREW_LOG_FATAL("vk", "FATAL: SDL_Vulkan_CreateSurface failed: %s\n", SDL_GetError());
         return false;
     }
 
@@ -1214,7 +1214,7 @@ bool init(SDL_Window* window, bool native_depth) {
         }
     }
     if (!s_physical) {
-        RBREW_LOGF(stderr, "[vk] FATAL: no Vulkan 1.3 device with a graphics/present queue\n");
+        RBREW_LOG_FATAL("vk", "FATAL: no Vulkan 1.3 device with a graphics/present queue\n");
         return false;
     }
     VkPhysicalDeviceProperties props{};
@@ -1317,8 +1317,8 @@ bool init(SDL_Window* window, bool native_depth) {
     };
     for (const auto& r : required) {
         if (!r.value) {
-            RBREW_LOGF(stderr, "[vk] FATAL: required device feature %s is not supported by %s\n", r.name,
-                       props.deviceName);
+            RBREW_LOG_FATAL("vk", "FATAL: required device feature %s is not supported by %s\n", r.name,
+                            props.deviceName);
             return false;
         }
     }
@@ -1417,7 +1417,7 @@ bool init(SDL_Window* window, bool native_depth) {
     device_info.ppEnabledExtensionNames = enable.data();
     result = vkCreateDevice(s_physical, &device_info, nullptr, &s_device);
     if (result != VK_SUCCESS) {
-        RBREW_LOGF(stderr, "[vk] FATAL: vkCreateDevice failed (%d)\n", int(result));
+        RBREW_LOG_FATAL("vk", "FATAL: vkCreateDevice failed (%d)\n", int(result));
         return false;
     }
     volkLoadDevice(s_device);
@@ -1454,10 +1454,10 @@ bool init(SDL_Window* window, bool native_depth) {
                                                                     VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
                                                                     VK_FORMAT_FEATURE_TRANSFER_SRC_BIT);
     if (!s_caps.vertex_divisor)
-        RBREW_LOGF(stderr,
-                   "[vk] WARNING: no vertex attribute divisor support; instanced fetch divisors > 1 are unavailable\n");
+        RBREW_LOG_WARN("vk",
+                       "WARNING: no vertex attribute divisor support; instanced fetch divisors > 1 are unavailable\n");
     if (!s_caps.precise_occlusion)
-        RBREW_LOGF(stderr, "[vk] WARNING: occlusionQueryPrecise is unavailable; GX2 sample counts are not exact\n");
+        RBREW_LOG_WARN("vk", "WARNING: occlusionQueryPrecise is unavailable; GX2 sample counts are not exact\n");
 
     VkSemaphoreTypeCreateInfo timeline_type{VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO};
     timeline_type.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
@@ -1469,19 +1469,20 @@ bool init(SDL_Window* window, bool native_depth) {
     pool.queueFamilyIndex = s_queue_family;
     vkCreateCommandPool(s_device, &pool, nullptr, &s_command_pool);
     s_ready = true;
-    RBREW_LOGF(stderr,
-               "[vk] device %s, Vulkan %u.%u.%u, validation=%s, push descriptors=%u, border=%d list restart=%d xfb=%d "
-               "divisor=%d provoking=%d\n",
-               props.deviceName, VK_API_VERSION_MAJOR(props.apiVersion), VK_API_VERSION_MINOR(props.apiVersion),
-               VK_API_VERSION_PATCH(props.apiVersion),
-               s_caps.sync_validation ? "sync"
-               : s_caps.validation    ? "on"
-                                      : "off",
-               s_caps.push_descriptor ? s_caps.max_push_descriptors : 0, int(s_caps.custom_border_color),
-               int(s_caps.list_restart), int(s_caps.transform_feedback), int(s_caps.vertex_divisor),
-               int(s_caps.provoking_vertex_last));
+    RBREW_LOG_INFO_BEGIN(
+        "vk",
+        "device %s, Vulkan %u.%u.%u, validation=%s, push descriptors=%u, border=%d list restart=%d xfb=%d "
+        "divisor=%d provoking=%d\n",
+        props.deviceName, VK_API_VERSION_MAJOR(props.apiVersion), VK_API_VERSION_MINOR(props.apiVersion),
+        VK_API_VERSION_PATCH(props.apiVersion),
+        s_caps.sync_validation ? "sync"
+        : s_caps.validation    ? "on"
+                               : "off",
+        s_caps.push_descriptor ? s_caps.max_push_descriptors : 0, int(s_caps.custom_border_color),
+        int(s_caps.list_restart), int(s_caps.transform_feedback), int(s_caps.vertex_divisor),
+        int(s_caps.provoking_vertex_last));
     if (s_surface && !create_swapchain())
-        RBREW_LOGF(stderr, "[vk] swapchain creation deferred (window not yet visible)\n");
+        RBREW_LOG_WARN("vk", "swapchain creation deferred (window not yet visible)\n");
     return true;
 }
 
@@ -1687,7 +1688,7 @@ bool sync_mapped(const Allocation& a, VkDeviceSize offset, VkDeviceSize bytes, b
     const auto range = memory_detail::mapped_range(a, s_caps.limits.nonCoherentAtomSize, offset, bytes);
     const auto result = invalidate ? vkInvalidateMappedMemoryRanges(s_device, 1, &range)
                                    : vkFlushMappedMemoryRanges(s_device, 1, &range);
-    if (result != VK_SUCCESS) RBREW_LOGF(stderr, "[vk] mapped memory synchronization failed (%d)\n", int(result));
+    if (result != VK_SUCCESS) RBREW_LOG_ERROR("vk", "mapped memory synchronization failed (%d)\n", int(result));
     return result == VK_SUCCESS;
 }
 } // namespace
@@ -1768,7 +1769,7 @@ bool wait_serial(uint64_t serial, uint64_t timeout_ns) {
                txdiag::event("wait_failed", "\"waiting_for\":%llu,\"result\":%d", serial, int(result)));
     poll_completed();
     if (result == VK_ERROR_DEVICE_LOST)
-        RBREW_LOGF(stderr, "[vk] FATAL: device lost while waiting for submission %llu\n", (unsigned long long)serial);
+        RBREW_LOG_FATAL("vk", "FATAL: device lost while waiting for submission %llu\n", (unsigned long long)serial);
     return result == VK_SUCCESS;
 }
 
@@ -1862,7 +1863,7 @@ uint64_t submit_with(const VkSemaphore* wait, VkPipelineStageFlags2 wait_stage, 
     if (!s_upload_flushes.empty()) {
         const auto flushed =
             vkFlushMappedMemoryRanges(s_device, uint32_t(s_upload_flushes.size()), s_upload_flushes.data());
-        if (flushed != VK_SUCCESS) RBREW_LOGF(stderr, "[vk] upload flush failed (%d)\n", int(flushed));
+        if (flushed != VK_SUCCESS) RBREW_LOG_ERROR("vk", "upload flush failed (%d)\n", int(flushed));
         s_upload_flushes.clear();
     }
     const VkResult result = vkQueueSubmit2(s_queue, 1, &submit, VK_NULL_HANDLE);
@@ -1870,7 +1871,7 @@ uint64_t submit_with(const VkSemaphore* wait, VkPipelineStageFlags2 wait_stage, 
            txdiag::journal().completed = s_completed; if (result != VK_SUCCESS || txdiag::sample("submit", 0))
                txdiag::event("submit", "\"submitted\":%llu,\"command_buffers\":%u,\"result\":%d", serial, cb_count,
                              int(result)));
-    if (result != VK_SUCCESS) RBREW_LOGF(stderr, "[vk] FATAL: vkQueueSubmit2 failed (%d)\n", int(result));
+    if (result != VK_SUCCESS) RBREW_LOG_FATAL("vk", "FATAL: vkQueueSubmit2 failed (%d)\n", int(result));
     s_pending_commands.push_back({s_current, serial});
     s_current = VK_NULL_HANDLE;
     s_recorded = false;
@@ -2010,7 +2011,7 @@ Span upload(VkDeviceSize bytes, VkDeviceSize alignment) {
                                              VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                                          MemoryUse::Upload);
             if (!chunk.buffer.buffer || !chunk.buffer.memory.mapped) {
-                RBREW_LOGF(stderr, "[vk] FATAL: cannot allocate a host-visible upload chunk\n");
+                RBREW_LOG_FATAL("vk", "FATAL: cannot allocate a host-visible upload chunk\n");
                 return {};
             }
             s_chunks.push_back(std::move(chunk));
@@ -2210,8 +2211,8 @@ bool create_image(Image& image, const ImageDesc& desc) {
     if (vkCreateImage(s_device, &info, nullptr, &image.image) != VK_SUCCESS) {
         TXDIAG(txdiag::event("image_create_failed", "\"format\":%u,\"width\":%u,\"height\":%u", uint32_t(desc.format),
                              desc.width, desc.height));
-        RBREW_LOGF(stderr, "[vk] vkCreateImage failed (format %d %ux%ux%u levels %u layers %u)\n", int(desc.format),
-                   desc.width, desc.height, desc.depth, desc.levels, desc.layers);
+        RBREW_LOG_ERROR("vk", "vkCreateImage failed (format %d %ux%ux%u levels %u layers %u)\n", int(desc.format),
+                        desc.width, desc.height, desc.depth, desc.levels, desc.layers);
         image.image = VK_NULL_HANDLE;
         return false;
     }
@@ -2230,7 +2231,7 @@ bool create_image(Image& image, const ImageDesc& desc) {
         vkBindImageMemory(s_device, image.image, image.memory.memory, image.memory.offset) != VK_SUCCESS) {
         TXDIAG(txdiag::event("image_memory_failed", "\"image\":%llu,\"memory\":%llu", txdiag::handle(image.image),
                              txdiag::handle(image.memory.memory)));
-        RBREW_LOGF(stderr, "[vk] FATAL: out of device memory for a %ux%u image\n", desc.width, desc.height);
+        RBREW_LOG_FATAL("vk", "FATAL: out of device memory for a %ux%u image\n", desc.width, desc.height);
         vkDestroyImage(s_device, image.image, nullptr);
         image.image = VK_NULL_HANDLE;
         free_now(image.memory);
@@ -2353,7 +2354,7 @@ VkImageView image_view(Image& image, const ViewDesc& desc) {
         TXDIAG(txdiag::event("view_create_failed", "\"image_id\":%llu,\"format\":%u,\"type\":%u",
                              txdiag::resource_id("image", txdiag::handle(image.image)), uint32_t(format),
                              uint32_t(desc.type)));
-        RBREW_LOGF(stderr, "[vk] vkCreateImageView failed (format %d type %d)\n", int(format), int(desc.type));
+        RBREW_LOG_ERROR("vk", "vkCreateImageView failed (format %d type %d)\n", int(format), int(desc.type));
         return VK_NULL_HANDLE;
     }
     image.views.push_back({key, view});

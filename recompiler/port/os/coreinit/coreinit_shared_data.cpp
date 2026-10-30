@@ -65,13 +65,13 @@ static void load_shared_fonts(uint8_t* mem) {
         auto path = std::filesystem::path(root) / "sys/title/0005001b/10042400/content" / names[i];
         std::ifstream in(path, std::ios::binary);
         if (!in) {
-            RBREW_LOGF(stderr, "[coreinit] shared font missing: %s\n", path.string().c_str());
+            RBREW_LOG_ERROR("coreinit", "shared font missing: %s\n", path.string().c_str());
             continue;
         }
         fonts[i].assign(std::istreambuf_iterator<char>(in), {});
     }
     if (!rbrew_shared_data_build(mem + RBREW_SHARED_DATA_BASE, RBREW_SHARED_DATA_SIZE, RBREW_SHARED_DATA_BASE, fonts))
-        RBREW_LOGF(stderr, "[coreinit] shared fonts do not fit the shared-data area\n");
+        RBREW_LOG_INFO("coreinit", "shared fonts do not fit the shared-data area\n");
 }
 
 static void OSGetSharedData(CPUState* cpu) {

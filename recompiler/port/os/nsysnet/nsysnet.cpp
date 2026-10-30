@@ -159,7 +159,7 @@ static void socket_lib_init(CPUState* cpu) {
     WSADATA wd;
     WSAStartup(MAKEWORD(2, 2), &wd);
 #endif
-    RBREW_LOGF(stderr, "[nsysnet] socket_lib_init\n");
+    RBREW_LOG_INFO("nsysnet", "socket_lib_init\n");
     RET = 0;
 }
 
@@ -440,7 +440,7 @@ static void gethostbyname_(CPUState* cpu) {
 
     struct hostent* he = gethostbyname(hostname);
     if (!he || he->h_addrtype != AF_INET || !he->h_addr_list || !he->h_addr_list[0]) {
-        RBREW_LOGF(stderr, "[nsysnet] gethostbyname(\"%s\"): failed\n", hostname);
+        RBREW_LOG_ERROR("nsysnet", "gethostbyname(\"%s\"): failed\n", hostname);
         RET = 0;
         return;
     }
@@ -467,8 +467,8 @@ static void gethostbyname_(CPUState* cpu) {
     rbrew_write32(MEM, HE_BASE + 0x0Cu, 4u);              // h_length
     rbrew_write32(MEM, HE_BASE + 0x10u, HE_ADDRLIST_ARR); // h_addr_list
 
-    RBREW_LOGF(stderr, "[nsysnet] gethostbyname(\"%s\") → %u.%u.%u.%u\n", hostname, MEM[HE_ADDR], MEM[HE_ADDR + 1],
-               MEM[HE_ADDR + 2], MEM[HE_ADDR + 3]);
+    RBREW_LOG_INFO("nsysnet", "gethostbyname(\"%s\") → %u.%u.%u.%u\n", hostname, MEM[HE_ADDR], MEM[HE_ADDR + 1],
+                   MEM[HE_ADDR + 2], MEM[HE_ADDR + 3]);
 
     RET = HE_BASE;
 }
@@ -523,7 +523,7 @@ static void getaddrinfo_(CPUState* cpu) {
     struct addrinfo* res = nullptr;
     int rc = getaddrinfo(*hostname ? hostname : nullptr, *servname ? servname : nullptr, &hints_h, &res);
     if (rc != 0 || !res) {
-        RBREW_LOGF(stderr, "[nsysnet] getaddrinfo(\"%s\",\"%s\"): %s\n", hostname, servname, gai_strerror(rc));
+        RBREW_LOG_INFO("nsysnet", "getaddrinfo(\"%s\",\"%s\"): %s\n", hostname, servname, gai_strerror(rc));
         RET = (uint32_t)(rc ? rc : -1);
         return;
     }
@@ -574,8 +574,8 @@ static void getaddrinfo_(CPUState* cpu) {
     // Write *res = first entry
     if (ARG3) rbrew_write32(MEM, ARG3, AI_BASE);
 
-    RBREW_LOGF(stderr, "[nsysnet] getaddrinfo(\"%s\",\"%s\") → %u entr%s\n", hostname, servname, count,
-               count == 1 ? "y" : "ies");
+    RBREW_LOG_INFO("nsysnet", "getaddrinfo(\"%s\",\"%s\") → %u entr%s\n", hostname, servname, count,
+                   count == 1 ? "y" : "ies");
     RET = 0;
 }
 

@@ -139,7 +139,7 @@ void gx2_render_wait_cache_writes(uint32_t timeout_ms);
 // Guest file writes use C streams: flush them, let queued shader-cache files
 // finish (bounded), then end the process without destructors.
 [[noreturn]] static void gx2_close_requested() {
-    RBREW_LOGF(stderr, "[gx2] Window close requested\n");
+    RBREW_LOG_INFO("gx2", "Window close requested\n");
     gx2_render_wait_cache_writes(2000);
     std::fflush(nullptr);
     TXDIAG(txdiag::finish());
@@ -195,7 +195,7 @@ static bool gx2_platform_open_window() {
         "Splatoon Native PC Port", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, desktop.w, desktop.h,
         SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_FULLSCREEN_DESKTOP);
     if (!s_window) {
-        RBREW_LOGF(stderr, "[gx2] SDL_CreateWindow(SDL_WINDOW_VULKAN) failed: %s\n", SDL_GetError());
+        RBREW_LOG_ERROR("gx2", "SDL_CreateWindow(SDL_WINDOW_VULKAN) failed: %s\n", SDL_GetError());
         return false;
     }
 #if defined(_WIN32)
@@ -258,7 +258,7 @@ static void GX2Init(CPUState* cpu) {
         gx2_platform_open_window();
     }
 #else
-    RBREW_LOGF(stderr, "[gx2] GX2Init called (SDL2 not available, stub)\n");
+    RBREW_LOG_ERROR("gx2", "GX2Init called (SDL2 not available, stub)\n");
 #endif
     RET = 1;
 }
@@ -409,7 +409,7 @@ void save_active_context(CPUState* cpu, uint32_t state) {
     if (updated_size)
         rbrew_write32(MEM, state + 0x9804, updated_size);
     else
-        RBREW_LOGF(stderr, "[gx2] Failed to refresh active context shadow list at %08X\n", state);
+        RBREW_LOG_ERROR("gx2", "Failed to refresh active context shadow list at %08X\n", state);
 }
 } // namespace
 
@@ -417,13 +417,13 @@ static void GX2SetContextState(CPUState* cpu) {
     if (!ARG0) return; // Native register writes are always shadowed in renderer-owned state.
     const uint32_t core = rbrew_current_core();
     if (core >= s_active_context_state.size()) {
-        RBREW_LOGF(stderr, "[gx2] GX2SetContextState received an invalid core id %u\n", core);
+        RBREW_LOG_ERROR("gx2", "GX2SetContextState received an invalid core id %u\n", core);
         return;
     }
     auto& active_context_state = s_active_context_state[core];
     const uint32_t state = ARG0;
     if (!rbrew_memory_accessible(MEM, state, 0xA100)) {
-        RBREW_LOGF(stderr, "[gx2] GX2SetContextState received an invalid state address %08X\n", state);
+        RBREW_LOG_ERROR("gx2", "GX2SetContextState received an invalid state address %08X\n", state);
         return;
     }
     // The GPU shadows register writes into the active context's memory, so
@@ -434,8 +434,8 @@ static void GX2SetContextState(CPUState* cpu) {
     const uint32_t list_size = rbrew_read32(MEM, state + 0x9804);
     extern bool g_gx2_frame_trace_active;
     if (g_gx2_frame_trace_active)
-        RBREW_LOGF(stderr, "[ftrace] SetContextState core=%u active=%08X state=%08X list=%u\n", core,
-                   active_context_state, state, list_size);
+        RBREW_LOG_DEBUG("ftrace", "SetContextState core=%u active=%08X state=%08X list=%u\n", core,
+                        active_context_state, state, list_size);
     if (list_size)
         gx2_dl_call(cpu, state + 0x9E00, list_size);
     else
@@ -458,7 +458,7 @@ static void GX2DrawDone(CPUState* cpu) {
     RET = gx2_native_gpu_finish() ? 1 : 0; // original PPC returns GX2WaitTimeStamp's BOOL in r3
 #else
     static std::atomic_flag missing_gpu_reported = ATOMIC_FLAG_INIT;
-    if (!missing_gpu_reported.test_and_set()) RBREW_LOGF(stderr, "[gx2] GX2DrawDone cannot wait without native GL\n");
+    if (!missing_gpu_reported.test_and_set()) RBREW_LOG_ERROR("gx2", "GX2DrawDone cannot wait without native GL\n");
     RET = 0;
 #endif
 }
@@ -780,7 +780,7 @@ void install_plaza_60fps(CPUState* cpu) {
     installed = true;
     s_plaza_sync_original = cpu->dispatch_table[kSync >> 2];
     cpu->dispatch_table[kSync >> 2] = plaza_mode_sync;
-    std::fprintf(stderr, "[gx2] plaza 60 FPS mode sync installed\n");
+    RBREW_LOG_INFO("gx2", "plaza 60 FPS mode sync installed\n");
 }
 } // namespace
 
@@ -793,7 +793,7 @@ static void GX2SwapScanBuffers(CPUState* cpu) {
     static frame_clock::time_point s_prev_swap_tp{};
     const frame_clock::time_point swap_start_tp = frame_clock::now();
     check_controller_hotplug_periodic();
-    if (s_swap_count.fetch_add(1) == 0) RBREW_LOGF(stderr, "[gx2] GX2SwapScanBuffers called for the first time\n");
+    if (s_swap_count.fetch_add(1) == 0) RBREW_LOG_INFO("gx2", "GX2SwapScanBuffers called for the first time\n");
     rbrew_benchmark::frame.store(s_swap_count.load(), std::memory_order_relaxed);
     rbrew_benchmark::frame_draws.store(rbrew_benchmark::guest_draws.exchange(0, std::memory_order_relaxed),
                                        std::memory_order_relaxed);
@@ -929,8 +929,8 @@ static void GX2SwapScanBuffers(CPUState* cpu) {
             if (value & 1u) {
                 static unsigned logged = 0;
                 if (logged++ < 4)
-                    std::fprintf(stderr, "[gx2] game 30 FPS mode flag %08X = %08X cleared (frame %u)\n", flag, value,
-                                 s_swap_count.load());
+                    RBREW_LOG_INFO("gx2", "game 30 FPS mode flag %08X = %08X cleared (frame %u)\n", flag, value,
+                                   s_swap_count.load());
                 rbrew_write32(MEM, flag, value & ~1u);
             }
         }
@@ -984,12 +984,12 @@ static void GX2SwapScanBuffers(CPUState* cpu) {
     static const bool frame_profile = std::getenv("RBREW_FRAME_PROFILE") != nullptr;
     static uint32_t s_frame_profile_counter = 0;
     if (++s_frame_profile_counter % 60 == 0 && frame_profile) {
-        std::fprintf(stderr,
-                     "[FRAME_PROFILE] Frame %5u: Delta=%.2fms (%.1f FPS) | GuestWork=%.2fms | VSyncWait=%.2fms | "
-                     "PresentWait=%.2fms | SwapProc=%.2fms\n",
-                     s_frame_profile_counter, frame_delta_ms,
-                     (frame_delta_ms > 0.01f ? 1000.0f / frame_delta_ms : 0.0f), guest_work_ms, vsync_wait_ms,
-                     present_wait_ms, cpu_duration_ms);
+        RBREW_LOG_INFO_BEGIN("FRAME_PROFILE",
+                             "Frame %5u: Delta=%.2fms (%.1f FPS) | GuestWork=%.2fms | VSyncWait=%.2fms | "
+                             "PresentWait=%.2fms | SwapProc=%.2fms\n",
+                             s_frame_profile_counter, frame_delta_ms,
+                             (frame_delta_ms > 0.01f ? 1000.0f / frame_delta_ms : 0.0f), guest_work_ms, vsync_wait_ms,
+                             present_wait_ms, cpu_duration_ms);
         std::fflush(stderr);
     }
 #if defined(HAVE_SDL2)
@@ -1067,7 +1067,7 @@ static void GX2CalcContextStateSize(CPUState* cpu) {
 
 static void GX2SetupContextStateEx(CPUState* cpu) {
     if (!ARG0 || !rbrew_memory_accessible(MEM, ARG0, 0xA100)) {
-        RBREW_LOGF(stderr, "[gx2] GX2SetupContextStateEx received an invalid state address %08X\n", ARG0);
+        RBREW_LOG_ERROR("gx2", "GX2SetupContextStateEx received an invalid state address %08X\n", ARG0);
         return;
     }
     const uint32_t state = ARG0;

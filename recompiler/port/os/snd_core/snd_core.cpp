@@ -523,7 +523,7 @@ int snd_core_list_playback_devices() {
     const auto result = ma_context_get_devices(&context, &devices, &count, nullptr, nullptr);
     if (result == MA_SUCCESS)
         for (ma_uint32 i = 0; i < count; ++i)
-            RBREW_PRINT("%u default=%u %s\n", i, unsigned(devices[i].isDefault), devices[i].name);
+            RBREW_LOG_INFO(nullptr, "%u default=%u %s\n", i, unsigned(devices[i].isDefault), devices[i].name);
     ma_context_uninit(&context);
     return result == MA_SUCCESS ? 0 : 2;
 #else
@@ -607,7 +607,7 @@ static void AXInit(CPUState* cpu) {
     s_device_frames = 0;
     s_device_signal_frames = 0;
     if (ma_context_init(nullptr, 0, nullptr, &s_ma_context) != MA_SUCCESS) {
-        RBREW_LOGF(stderr, "[snd_core] Failed to initialize playback backend\n");
+        RBREW_LOG_ERROR("snd_core", "Failed to initialize playback backend\n");
         return;
     }
     s_context_open = true;
@@ -643,7 +643,7 @@ static void AXInit(CPUState* cpu) {
                     break;
                 }
         if (!found) {
-            RBREW_LOGF(stderr, "[snd_core] Requested playback device is unavailable: %s\n", requested.c_str());
+            RBREW_LOG_WARN("snd_core", "Requested playback device is unavailable: %s\n", requested.c_str());
             ma_context_uninit(&s_ma_context);
             s_context_open = false;
             return;
@@ -652,17 +652,17 @@ static void AXInit(CPUState* cpu) {
     }
 
     if (ma_device_init(&s_ma_context, &cfg, &s_ma_device) != MA_SUCCESS) {
-        RBREW_LOGF(stderr, "[snd_core] miniaudio: failed to open playback device\n");
+        RBREW_LOG_ERROR("snd_core", "miniaudio: failed to open playback device\n");
     } else if (ma_device_start(&s_ma_device) != MA_SUCCESS) {
-        RBREW_LOGF(stderr, "[snd_core] miniaudio: failed to start playback device\n");
+        RBREW_LOG_ERROR("snd_core", "miniaudio: failed to start playback device\n");
         ma_device_uninit(&s_ma_device);
     } else {
         s_device_open = true;
-        RBREW_LOGF(stderr, "[snd_core] AXInit: miniaudio stereo 32000 Hz, 96-sample AX frames\n");
-        RBREW_LOGF(stderr, "[snd_core] Playback device: %s\n", s_ma_device.playback.name);
+        RBREW_LOG_INFO("snd_core", "AXInit: miniaudio stereo 32000 Hz, 96-sample AX frames\n");
+        RBREW_LOG_INFO("snd_core", "Playback device: %s\n", s_ma_device.playback.name);
     }
 #else
-    RBREW_LOGF(stderr, "[snd_core] AXInit: no audio back-end (build with HAVE_MINIAUDIO)\n");
+    RBREW_LOG_INFO("snd_core", "AXInit: no audio back-end (build with HAVE_MINIAUDIO)\n");
 #endif
 
     s_ax_inited = true;

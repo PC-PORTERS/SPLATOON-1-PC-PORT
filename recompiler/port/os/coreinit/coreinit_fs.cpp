@@ -123,7 +123,7 @@ static void FSInit(CPUState* cpu) {
     (void)cpu;
     s_last_error = FS_STATUS_OK;
     const char* root = std::getenv("RBREW_CONTENT_DIR");
-    RBREW_LOGF(stderr, "[FS] Content root: %s (read-only)\n", root ? root : "./content");
+    RBREW_LOG_INFO("FS", "Content root: %s (read-only)\n", root ? root : "./content");
 }
 static void FSShutdown(CPUState* cpu) {
     (void)cpu;
@@ -198,12 +198,12 @@ static void FSOpenFile(CPUState* cpu) {
     TXDIAG(txdiag::event("asset_open", "\"path\":%s,\"ok\":%s,\"lr\":%u", txdiag::quote(gpath).c_str(),
                          f ? "true" : "false", cpu->lr));
     if (!f) {
-        RBREW_LOGF(stderr, "[FS] FSOpenFile failed: %s (errno=%d)\n", host, errno);
+        RBREW_LOG_ERROR("FS", "FSOpenFile failed: %s (errno=%d)\n", host, errno);
         s_last_error = FS_STATUS_NOT_FOUND;
         RET = (uint32_t)FS_STATUS_NOT_FOUND;
         return;
     }
-    if (rbrew_diagnostic_env("RBREW_FS_VERBOSE")) RBREW_LOGF(stderr, "[FS] Open: %s\n", host);
+    if (rbrew_diagnostic_env("RBREW_FS_VERBOSE")) RBREW_LOG_INFO("FS", "Open: %s\n", host);
     uint32_t h = alloc_file_handle(f);
     TXDIAG(txdiag::create("file", h); txdiag::event("asset_handle", "\"path\":%s,\"handle\":%u,\"file_id\":%llu",
                                                     txdiag::quote(gpath).c_str(), h, txdiag::resource_id("file", h)));
@@ -356,7 +356,7 @@ static void FSGetStat(CPUState* cpu) {
     int result = stat(host, &st);
 #endif
     if (result != 0) {
-        RBREW_LOGF(stderr, "[FS] FSGetStat failed: %s\n", host);
+        RBREW_LOG_ERROR("FS", "FSGetStat failed: %s\n", host);
         s_last_error = FS_STATUS_NOT_FOUND;
         RET = (uint32_t)FS_STATUS_NOT_FOUND;
         return;
@@ -380,7 +380,7 @@ static void FSOpenDir(CPUState* cpu) {
     }
     DIR* d = opendir(host);
     if (!d) {
-        RBREW_LOGF(stderr, "[FS] FSOpenDir failed: %s\n", host);
+        RBREW_LOG_ERROR("FS", "FSOpenDir failed: %s\n", host);
         s_last_error = FS_STATUS_NOT_FOUND;
         RET = (uint32_t)FS_STATUS_NOT_FOUND;
         return;
@@ -545,8 +545,8 @@ void coreinit_save_open_file(CPUState* cpu) {
         return;
     }
     rbrew_write32(MEM, output, handle);
-    RBREW_LOGF(stderr, "[nn_save] SAVEOpenFile: opened '%s' (mode=%s) -> FS handle %u\n", path.string().c_str(),
-               binary.c_str(), handle);
+    RBREW_LOG_INFO("nn_save", "SAVEOpenFile: opened '%s' (mode=%s) -> FS handle %u\n", path.string().c_str(),
+                   binary.c_str(), handle);
     RET = uint32_t(FS_STATUS_OK);
 }
 

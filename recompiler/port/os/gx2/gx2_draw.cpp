@@ -458,11 +458,11 @@ static void trace_surface(const char* what, CPUState* cpu, const uint8_t* d, uin
     auto w = [&](uint32_t o) {
         return uint32_t(d[o]) << 24 | uint32_t(d[o + 1]) << 16 | uint32_t(d[o + 2]) << 8 | d[o + 3];
     };
-    RBREW_LOGF(stderr,
-               "[ftrace] %s arg=%u image=%08X fmt=%X %ux%u aa=%u tile=%u use=%X "
-               "mips=%u\n",
-               what, extra, w(GX2SURF_IMAGE), w(GX2SURF_FORMAT), w(GX2SURF_WIDTH), w(GX2SURF_HEIGHT), w(GX2SURF_AA),
-               w(GX2SURF_TILE_MODE), w(GX2SURF_USE), w(GX2SURF_MIP_LEVELS));
+    RBREW_LOG_DEBUG_BEGIN("ftrace",
+                          "%s arg=%u image=%08X fmt=%X %ux%u aa=%u tile=%u use=%X "
+                          "mips=%u\n",
+                          what, extra, w(GX2SURF_IMAGE), w(GX2SURF_FORMAT), w(GX2SURF_WIDTH), w(GX2SURF_HEIGHT),
+                          w(GX2SURF_AA), w(GX2SURF_TILE_MODE), w(GX2SURF_USE), w(GX2SURF_MIP_LEVELS));
     (void)cpu;
 }
 static const uint8_t* guest_desc(CPUState* cpu, uint32_t addr, uint32_t bytes) {
@@ -576,8 +576,8 @@ static void GX2SetDRCBuffer(CPUState* cpu) {
 
 static void GX2SetTargetChannelMasks(CPUState* cpu) {
     if (g_gx2_frame_trace_active)
-        RBREW_LOGF(stderr, "[ftrace] SetTargetChannelMasks %X %X %X %X %X %X %X %X\n", ARG0, ARG1, ARG2, ARG3, ARG4,
-                   ARG5, ARG6, ARG7);
+        RBREW_LOG_DEBUG("ftrace", "SetTargetChannelMasks %X %X %X %X %X %X %X %X\n", ARG0, ARG1, ARG2, ARG3, ARG4, ARG5,
+                        ARG6, ARG7);
     const uint32_t args[] = {ARG0, ARG1, ARG2, ARG3, ARG4, ARG5, ARG6, ARG7};
     uint32_t masks = 0;
     for (unsigned i = 0; i < 8; ++i) masks |= (args[i] & 15u) << (4 * i);
@@ -587,7 +587,7 @@ static void apply_target_channel_masks(CPUState* cpu, const uint8_t* descriptor)
     const auto* d = descriptor ? descriptor : guest_desc(cpu, ARG0, 4);
     if (!d) return;
     const uint32_t masks = uint32_t(d[0]) << 24 | uint32_t(d[1]) << 16 | uint32_t(d[2]) << 8 | d[3];
-    if (g_gx2_frame_trace_active) RBREW_LOGF(stderr, "[ftrace] SetTargetChannelMasksReg %08X\n", masks);
+    if (g_gx2_frame_trace_active) RBREW_LOG_DEBUG("ftrace", "SetTargetChannelMasksReg %08X\n", masks);
     gx2_render_set_target_channel_masks(masks);
 }
 static void GX2SetTargetChannelMasksReg(CPUState* cpu) {
@@ -607,12 +607,12 @@ static void GX2ExpandDepthBuffer(CPUState* cpu) {
     const auto* descriptor = guest_desc(cpu, ARG0, GX2DB_SIZEOF);
     trace_surface("ExpandDepth", cpu, descriptor, 0);
     if (!descriptor) {
-        RBREW_LOGF(stderr, "[gx2] GX2ExpandDepthBuffer received an invalid depth buffer %08X\n", ARG0);
+        RBREW_LOG_ERROR("gx2", "GX2ExpandDepthBuffer received an invalid depth buffer %08X\n", ARG0);
         return;
     }
     if (reg_word(descriptor + GX2SURF_AA) != 0) {
-        RBREW_LOGF(stderr, "[gx2] GX2ExpandDepthBuffer does not support multisampled depth storage yet (aa=%u)\n",
-                   reg_word(descriptor + GX2SURF_AA));
+        RBREW_LOG_INFO("gx2", "GX2ExpandDepthBuffer does not support multisampled depth storage yet (aa=%u)\n",
+                       reg_word(descriptor + GX2SURF_AA));
         return;
     }
     // Native depth views have no HiZ compression metadata: the live GPU image is
@@ -880,10 +880,10 @@ static void GX2CalcSurfaceSizeAndAlignment(CPUState* cpu) {
     // allocation.
     const auto layout = rbrew_gx2_calc_surface_layout(desc);
     if (!layout) {
-        RBREW_LOGF(stderr,
-                   "[gx2] unsupported surface layout dim=%u fmt=%X tile=%u aa=%u "
-                   "mips=%u lr=%08X\n",
-                   desc.dim, desc.format, desc.tile_mode, desc.aa, desc.levels, cpu->lr);
+        RBREW_LOG_ERROR_BEGIN("gx2",
+                              "unsupported surface layout dim=%u fmt=%X tile=%u aa=%u "
+                              "mips=%u lr=%08X\n",
+                              desc.dim, desc.format, desc.tile_mode, desc.aa, desc.levels, cpu->lr);
         abort();
     }
     rbrew_write32(MEM, surf + GX2SURF_MIP_LEVELS, layout->levels);
@@ -1051,11 +1051,11 @@ static void apply_stream_out_buffer(CPUState* cpu, const uint8_t* descriptor) {
 static void GX2SetStreamOutBuffer(CPUState* cpu) {
     const uint32_t slot = ARG0;
     if (slot >= 4) {
-        RBREW_LOGF(stderr, "[gx2] GX2SetStreamOutBuffer received invalid buffer index %u\n", slot);
+        RBREW_LOG_ERROR("gx2", "GX2SetStreamOutBuffer received invalid buffer index %u\n", slot);
         return;
     }
     if (!ARG1 || !rbrew_memory_accessible(MEM, ARG1, 0x1C)) {
-        RBREW_LOGF(stderr, "[gx2] GX2SetStreamOutBuffer received invalid buffer descriptor %08X\n", ARG1);
+        RBREW_LOG_ERROR("gx2", "GX2SetStreamOutBuffer received invalid buffer descriptor %08X\n", ARG1);
         return;
     }
     // RBREW_XFB_DUMP=1: raw descriptor fields for layout verification against
@@ -1067,8 +1067,8 @@ static void GX2SetStreamOutBuffer(CPUState* cpu) {
             ++dumped[slot];
             uint32_t w[7];
             for (unsigned i = 0; i < 7; ++i) w[i] = rbrew_read32(MEM, ARG1 + i * 4);
-            RBREW_LOGF(stderr, "[xfb] slot=%u desc=%08X words=%08X %08X %08X %08X %08X %08X %08X\n", slot, ARG1, w[0],
-                       w[1], w[2], w[3], w[4], w[5], w[6]);
+            RBREW_LOG_DEBUG("xfb", "slot=%u desc=%08X words=%08X %08X %08X %08X %08X %08X %08X\n", slot, ARG1, w[0],
+                            w[1], w[2], w[3], w[4], w[5], w[6]);
         }
     }
     std::array<uint8_t, 0x20> snapshot{};
@@ -1284,7 +1284,7 @@ static bool shader_dump_enabled() {
     return enabled;
 }
 static void GX2SetGeometryShader(CPUState* cpu) {
-    if (shader_dump_enabled()) RBREW_LOGF(stderr, "[shader-stage] GS descriptor=%08X lr=%08X\n", ARG0, cpu->lr);
+    if (shader_dump_enabled()) RBREW_LOG_INFO("shader-stage", "GS descriptor=%08X lr=%08X\n", ARG0, cpu->lr);
 }
 
 // GX2Set{Vertex,Pixel}UniformReg(u32 offset, u32 count, const u32* values)
@@ -1326,14 +1326,14 @@ static void GX2SetPixelUniformBlock(CPUState* cpu) {
 
 static void GX2SetGeometryUniformBlock(CPUState* cpu) {
     if (shader_dump_enabled())
-        RBREW_LOGF(stderr, "[shader-stage] GS block=%u address=%08X bytes=%u lr=%08X\n", ARG0, ARG2, ARG1, cpu->lr);
+        RBREW_LOG_INFO("shader-stage", "GS block=%u address=%08X bytes=%u lr=%08X\n", ARG0, ARG2, ARG1, cpu->lr);
 }
 static void GX2SetShaderModeEx(CPUState* cpu) {
     if (shader_dump_enabled()) {
         static thread_local uint32_t seen_modes = 0;
         if (ARG0 < 32 && !(seen_modes & (1u << ARG0))) {
-            RBREW_LOGF(stderr, "[shader-stage] mode=%u VS=%u/%u GS=%u/%u PS=%u/%u lr=%08X\n", ARG0, ARG1, ARG2, ARG3,
-                       ARG4, ARG5, ARG6, cpu->lr);
+            RBREW_LOG_INFO("shader-stage", "mode=%u VS=%u/%u GS=%u/%u PS=%u/%u lr=%08X\n", ARG0, ARG1, ARG2, ARG3, ARG4,
+                           ARG5, ARG6, cpu->lr);
             seen_modes |= 1u << ARG0;
         }
     }
@@ -1378,13 +1378,14 @@ static void GX2SetFetchShader(CPUState* cpu) {
     if (s_draw_trace && program && !gx2_render_active_fetch_attribute_count() && s_logged < 6 &&
         rbrew_memory_accessible(MEM, ARG0, 0x20) && rbrew_memory_accessible(MEM, program, 32)) {
         ++s_logged;
-        RBREW_LOGF(stderr,
-                   "[fetch] struct %08X: %08X %08X %08X %08X %08X | program: %08X "
-                   "%08X %08X %08X %08X %08X\n",
-                   ARG0, rbrew_read32(MEM, ARG0), rbrew_read32(MEM, ARG0 + 4), rbrew_read32(MEM, ARG0 + 8),
-                   rbrew_read32(MEM, ARG0 + 12), rbrew_read32(MEM, ARG0 + 16), rbrew_read32(MEM, program),
-                   rbrew_read32(MEM, program + 4), rbrew_read32(MEM, program + 8), rbrew_read32(MEM, program + 12),
-                   rbrew_read32(MEM, program + 16), rbrew_read32(MEM, program + 20));
+        RBREW_LOG_INFO_BEGIN("fetch",
+                             "struct %08X: %08X %08X %08X %08X %08X | program: %08X "
+                             "%08X %08X %08X %08X %08X\n",
+                             ARG0, rbrew_read32(MEM, ARG0), rbrew_read32(MEM, ARG0 + 4), rbrew_read32(MEM, ARG0 + 8),
+                             rbrew_read32(MEM, ARG0 + 12), rbrew_read32(MEM, ARG0 + 16), rbrew_read32(MEM, program),
+                             rbrew_read32(MEM, program + 4), rbrew_read32(MEM, program + 8),
+                             rbrew_read32(MEM, program + 12), rbrew_read32(MEM, program + 16),
+                             rbrew_read32(MEM, program + 20));
     }
 }
 

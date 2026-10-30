@@ -301,7 +301,7 @@ char* r700_to_glsl(const R700TranslateInput& in) {
         delete out.shader;
         return result;
     } catch (const std::exception& error) {
-        RBREW_LOGF(stderr, "[shader] %s\n", error.what());
+        RBREW_LOG_INFO("shader", "%s\n", error.what());
         if (out.shader) {
             delete out.shader->strBuf_shaderSource;
             delete out.shader;

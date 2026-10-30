@@ -109,7 +109,7 @@ class CommandRetirement {
             try {
                 count = work();
             } catch (...) {
-                RBREW_LOGF(stderr, "[gx2] display-list maintenance failed; retaining resident commands\n");
+                RBREW_LOG_ERROR("gx2", "display-list maintenance failed; retaining resident commands\n");
             }
             work = {};
             lock.lock();
@@ -489,7 +489,7 @@ void evict_old_recordings() {
                 static bool warned = false;
                 if (!warned) {
                     warned = true;
-                    RBREW_LOGF(stderr, "[gx2] cannot archive cold display lists; retaining their commands\n");
+                    RBREW_LOG_ERROR("gx2", "cannot archive cold display lists; retaining their commands\n");
                 }
             }
         }
@@ -1020,12 +1020,12 @@ void call_display_list(CPUState* cpu, const char* api) {
     {
         std::lock_guard lock(s_mutex);
         if (s_logged.insert(list).second)
-            RBREW_LOGF(stderr,
-                       "[gx2] %s unrecorded list=%08X size=%u decoded=%d writes=%zu other_packets=%zu "
-                       "words=%08X %08X %08X %08X lr=%08X\n",
-                       api, list, size, int(state.ok), state.writes.size(), state.other_opcodes.size(),
-                       rbrew_read32(MEM, list), rbrew_read32(MEM, list + 4), rbrew_read32(MEM, list + 8),
-                       rbrew_read32(MEM, list + 12), cpu->lr);
+            RBREW_LOG_INFO_BEGIN("gx2",
+                                 "%s unrecorded list=%08X size=%u decoded=%d writes=%zu other_packets=%zu "
+                                 "words=%08X %08X %08X %08X lr=%08X\n",
+                                 api, list, size, int(state.ok), state.writes.size(), state.other_opcodes.size(),
+                                 rbrew_read32(MEM, list), rbrew_read32(MEM, list + 4), rbrew_read32(MEM, list + 8),
+                                 rbrew_read32(MEM, list + 12), cpu->lr);
     }
     if (state.ok) gx2_render_apply_registers(state.writes.data(), state.writes.size());
 }
@@ -1311,10 +1311,10 @@ static void GX2EndDisplayList(CPUState* cpu) {
             new_commands += n;
         const uint32_t frame = rbrew_benchmark::frame.load(std::memory_order_relaxed);
         if (frame / 300 != last_frame / 300) {
-            std::fprintf(
-                stderr, "[dlstats] frame %u lists %llu reused %llu new_cmds %llu reused_cmds %llu largest %llu\n",
-                frame, (unsigned long long)ended, (unsigned long long)reused_lists, (unsigned long long)new_commands,
-                (unsigned long long)reused_commands, (unsigned long long)largest);
+            RBREW_LOG_INFO("dlstats", "frame %u lists %llu reused %llu new_cmds %llu reused_cmds %llu largest %llu\n",
+                           frame, (unsigned long long)ended, (unsigned long long)reused_lists,
+                           (unsigned long long)new_commands, (unsigned long long)reused_commands,
+                           (unsigned long long)largest);
             ended = reused_lists = new_commands = reused_commands = largest = 0;
         }
         last_frame = frame;

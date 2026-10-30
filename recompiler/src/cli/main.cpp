@@ -12,6 +12,7 @@
 #include "../codegen/naming.hpp"
 #include "../config/config.hpp"
 #include "../diagnostics/diagnostics.hpp"
+#include "rebrewu/logger.hpp"
 #include <iostream>
 #include <cstdlib>
 #include "audit.hpp"
@@ -57,7 +58,7 @@ std::optional<manifest::Manifest> load_manifest(const cli::CliOptions& opts, con
         std::string error;
         auto parsed = manifest::parse_file(opts.manifest_path.string(), &error);
         if (!parsed) {
-            std::cerr << error << '\n';
+            RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr) << error << '\n';
             return std::nullopt;
         }
         *path_used = opts.manifest_path.string();
@@ -70,11 +71,12 @@ std::optional<manifest::Manifest> load_manifest(const cli::CliOptions& opts, con
         std::vector<std::string> notes;
         auto selected = manifest::select_for_image(opts.rpx_path.string(), roots, &error, &notes);
         if (!selected) {
-            std::cerr << error << '\n';
+            RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr) << error << '\n';
             return std::nullopt;
         }
         if (opts.verbose)
-            for (const auto& note : notes) std::cerr << "manifest: " << note << '\n';
+            for (const auto& note : notes)
+                RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr) << "manifest: " << note << '\n';
         *path_used = selected->path;
         return selected;
     }
@@ -84,18 +86,20 @@ std::optional<manifest::Manifest> load_manifest(const cli::CliOptions& opts, con
         std::string error;
         auto parsed = manifest::parse_file(paths.front(), &error);
         if (!parsed) {
-            std::cerr << error << '\n';
+            RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr) << error << '\n';
             return std::nullopt;
         }
         *path_used = paths.front();
         return parsed;
     }
     if (paths.empty()) {
-        std::cerr << "no manifest found; pass --manifest <file> or --manifest-dir <directory>\n";
+        RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr)
+            << "no manifest found; pass --manifest <file> or --manifest-dir <directory>\n";
         return std::nullopt;
     }
-    std::cerr << paths.size() << " manifests found; pass --manifest <file> or --rpx <image> to choose one:\n";
-    for (const auto& path : paths) std::cerr << "  " << path << '\n';
+    RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr)
+        << paths.size() << " manifests found; pass --manifest <file> or --rpx <image> to choose one:\n";
+    for (const auto& path : paths) RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr) << "  " << path << '\n';
     return std::nullopt;
 }
 
@@ -103,8 +107,9 @@ int list_manifests(const cli::CliOptions& opts, const char* argv0) {
     const std::vector<std::string> roots = manifest_roots(opts, argv0);
     const std::vector<std::string> paths = manifest::discover_manifests(roots);
     if (paths.empty()) {
-        std::cerr << "no manifest found; looked for Manifest/*.manifest under:\n";
-        for (const auto& root : roots) std::cerr << "  " << root << '\n';
+        RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr)
+            << "no manifest found; looked for Manifest/*.manifest under:\n";
+        for (const auto& root : roots) RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr) << "  " << root << '\n';
         return EXIT_FAILURE;
     }
     if (!opts.rpx_path.empty()) {
@@ -112,20 +117,22 @@ int list_manifests(const cli::CliOptions& opts, const char* argv0) {
         const auto matches = manifest::match_image(opts.rpx_path.string(), paths, &problems);
         for (const auto& match : matches) {
             const char* status = match.exact() ? "MATCH" : match.size_only() ? "size-only" : "no";
-            std::cout << status << "  " << match.manifest.path << "  " << manifest::identity_summary(match.manifest)
-                      << '\n';
+            RBREW_LOG_STREAM(::rbrew::log::Level::Info, nullptr)
+                << status << "  " << match.manifest.path << "  " << manifest::identity_summary(match.manifest) << '\n';
         }
-        for (const auto& problem : problems) std::cerr << "manifest: " << problem << '\n';
+        for (const auto& problem : problems)
+            RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr) << "manifest: " << problem << '\n';
         return matches.empty() ? EXIT_FAILURE : EXIT_SUCCESS;
     }
     for (const std::string& path : paths) {
         std::string error;
         auto parsed = manifest::parse_file(path, &error);
         if (!parsed) {
-            std::cout << "unreadable  " << path << "  (" << error << ")\n";
+            RBREW_LOG_STREAM(::rbrew::log::Level::Info, nullptr) << "unreadable  " << path << "  (" << error << ")\n";
             continue;
         }
-        std::cout << "candidate  " << path << "  " << manifest::identity_summary(*parsed) << '\n';
+        RBREW_LOG_STREAM(::rbrew::log::Level::Info, nullptr)
+            << "candidate  " << path << "  " << manifest::identity_summary(*parsed) << '\n';
     }
     return EXIT_SUCCESS;
 }
@@ -141,70 +148,82 @@ int run_manifest_command(const cli::CliOptions& opts, const char* argv0) {
 
     if (action == "seal") {
         if (!parsed->errors.empty()) {
-            for (const auto& e : parsed->errors) std::cerr << "manifest: " << e << '\n';
+            for (const auto& e : parsed->errors)
+                RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr) << "manifest: " << e << '\n';
             return EXIT_FAILURE;
         }
         if (!manifest::seal_file(path, &error)) {
-            std::cerr << error << '\n';
+            RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr) << error << '\n';
             return EXIT_FAILURE;
         }
         auto resealed = manifest::parse_file(path, &error);
         if (!resealed) {
-            std::cerr << error << '\n';
+            RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr) << error << '\n';
             return EXIT_FAILURE;
         }
-        std::cout << "Sealed " << path << " (" << resealed->hashed_section_count() << " hashed sections)\n";
+        RBREW_LOG_STREAM(::rbrew::log::Level::Info, nullptr)
+            << "Sealed " << path << " (" << resealed->hashed_section_count() << " hashed sections)\n";
         return EXIT_SUCCESS;
     }
 
     if (action == "emit") {
         if (!manifest::verify_hashes(*parsed)) {
-            for (const auto& e : parsed->errors) std::cerr << "manifest: " << e << '\n';
-            std::cerr << "manifest: refusing to emit from an unsealed manifest\n";
+            for (const auto& e : parsed->errors)
+                RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr) << "manifest: " << e << '\n';
+            RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr)
+                << "manifest: refusing to emit from an unsealed manifest\n";
             return EXIT_FAILURE;
         }
         const std::string out =
             opts.manifest_emit_dir.empty() ? std::string("recompiler/port") : opts.manifest_emit_dir.string();
         std::vector<std::string> written;
         if (!manifest::emit(*parsed, out, written, &error)) {
-            std::cerr << error << '\n';
+            RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr) << error << '\n';
             return EXIT_FAILURE;
         }
-        for (const auto& file : written) std::cout << "Wrote " << (std::filesystem::path(out) / file).string() << '\n';
+        for (const auto& file : written)
+            RBREW_LOG_STREAM(::rbrew::log::Level::Info, nullptr)
+                << "Wrote " << (std::filesystem::path(out) / file).string() << '\n';
         return EXIT_SUCCESS;
     }
 
     if (action == "show") {
-        std::cout << "Manifest:   " << path << '\n'
-                  << "Id:         " << parsed->id << '\n'
-                  << "Title:      " << parsed->identity_string("title_id") << " "
-                  << parsed->identity_string("product_code") << " (" << parsed->identity_string("region") << ")\n"
-                  << "App version:" << ' ' << parsed->identity_string("app_version") << '\n'
-                  << "Entry point: " << manifest::format_address(parsed->identity_u32("entry_point")) << '\n'
-                  << "Modules:    " << parsed->modules.size() << '\n'
-                  << "Imports:    " << parsed->imports.size() << '\n'
-                  << "Entries:    " << parsed->entries.size() << '\n'
-                  << "Sections:   " << parsed->hashed_section_count() << " hashed\n";
+        RBREW_LOG_STREAM(::rbrew::log::Level::Info, nullptr)
+            << "Manifest:   " << path << '\n'
+            << "Id:         " << parsed->id << '\n'
+            << "Title:      " << parsed->identity_string("title_id") << " " << parsed->identity_string("product_code")
+            << " (" << parsed->identity_string("region") << ")\n"
+            << "App version:" << ' ' << parsed->identity_string("app_version") << '\n'
+            << "Entry point: " << manifest::format_address(parsed->identity_u32("entry_point")) << '\n'
+            << "Modules:    " << parsed->modules.size() << '\n'
+            << "Imports:    " << parsed->imports.size() << '\n'
+            << "Entries:    " << parsed->entries.size() << '\n'
+            << "Sections:   " << parsed->hashed_section_count() << " hashed\n";
         return EXIT_SUCCESS;
     }
 
     if (action != "verify") {
-        std::cerr << "unknown manifest action '" << action << "' (expected list, verify, seal, emit or show)\n";
+        RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr)
+            << "unknown manifest action '" << action << "' (expected list, verify, seal, emit or show)\n";
         return EXIT_FAILURE;
     }
 
     const bool hashes_ok = manifest::verify_hashes(*parsed);
-    for (const auto& e : parsed->errors) std::cerr << "manifest: " << e << '\n';
-    for (const auto& w : parsed->warnings) std::cerr << "manifest: warning: " << w << '\n';
+    for (const auto& e : parsed->errors)
+        RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr) << "manifest: " << e << '\n';
+    for (const auto& w : parsed->warnings)
+        RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr) << "manifest: warning: " << w << '\n';
     bool images_ok = true;
     if (!opts.rpx_path.empty()) {
         std::vector<std::string> problems;
         images_ok = manifest::verify_image(*parsed, opts.rpx_path.string(), problems);
-        for (const auto& problem : problems) std::cerr << "manifest: " << problem << '\n';
+        for (const auto& problem : problems)
+            RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr) << "manifest: " << problem << '\n';
     }
     if (!hashes_ok || !images_ok) return EXIT_FAILURE;
-    std::cout << "Manifest OK: " << parsed->id << " (" << parsed->hashed_section_count() << " hashed sections, "
-              << parsed->imports.size() << " imports, " << parsed->entries.size() << " entries)\n";
+    RBREW_LOG_STREAM(::rbrew::log::Level::Info, nullptr)
+        << "Manifest OK: " << parsed->id << " (" << parsed->hashed_section_count() << " hashed sections, "
+        << parsed->imports.size() << " imports, " << parsed->entries.size() << " entries)\n";
     return EXIT_SUCCESS;
 }
 
@@ -221,7 +240,7 @@ int main(int argc, char** argv) {
     rpx::RpxLoader rpx_loader(diag);
     auto rpx_opt = rpx_loader.load(opts->rpx_path);
     if (!rpx_opt) {
-        std::cerr << "Failed to load RPX: " << opts->rpx_path << "\n";
+        RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr) << "Failed to load RPX: " << opts->rpx_path << "\n";
         return EXIT_FAILURE;
     }
     auto& rpx = *rpx_opt;
@@ -231,7 +250,8 @@ int main(int argc, char** argv) {
     for (const auto& rpl_path : opts->rpl_paths) {
         auto rpl_opt = rpl_loader.load(rpl_path);
         if (!rpl_opt) {
-            std::cerr << "warning: failed to load RPL: " << rpl_path << "\n";
+            RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr)
+                << "warning: failed to load RPL: " << rpl_path << "\n";
             continue;
         }
         lnk.add_rpl(std::make_shared<rpl::RplModule>(std::move(*rpl_opt)));
@@ -240,33 +260,38 @@ int main(int argc, char** argv) {
     if (!opts->rpl_paths.empty() && !lnk.link(rpx)) return EXIT_FAILURE;
 
     if (opts->command == cli::Command::Inspect) {
-        std::cout << "Module: " << rpx.name << "\nEntry point: 0x" << std::hex << rpx.entry_point << "\nSDA: 0x"
-                  << rpx.file_info.sda_base << "\nSDA2: 0x" << rpx.file_info.sda2_base << std::dec
-                  << "\nSections: " << rpx.sections.size() << "\nSymbols: " << rpx.symbols.size()
-                  << "\nImports: " << rpx.imports.size() << "\nExports: " << rpx.exports.size()
-                  << "\nRelocations: " << rpx.relocations.size() << "\n";
+        RBREW_LOG_STREAM(::rbrew::log::Level::Info, nullptr)
+            << "Module: " << rpx.name << "\nEntry point: 0x" << std::hex << rpx.entry_point << "\nSDA: 0x"
+            << rpx.file_info.sda_base << "\nSDA2: 0x" << rpx.file_info.sda2_base << std::dec
+            << "\nSections: " << rpx.sections.size() << "\nSymbols: " << rpx.symbols.size()
+            << "\nImports: " << rpx.imports.size() << "\nExports: " << rpx.exports.size()
+            << "\nRelocations: " << rpx.relocations.size() << "\n";
         return EXIT_SUCCESS;
     }
 
     if (opts->command == cli::Command::ListSymbols) {
-        for (const auto& sym : rpx.symbols) std::cout << std::hex << sym.address << "  " << sym.name << "\n";
+        for (const auto& sym : rpx.symbols)
+            RBREW_LOG_STREAM(::rbrew::log::Level::Info, nullptr) << std::hex << sym.address << "  " << sym.name << "\n";
         return EXIT_SUCCESS;
     }
 
     if (opts->command == cli::Command::ListSections) {
         for (const auto& sec : rpx.sections)
-            std::cout << sec.name << "  addr=0x" << std::hex << sec.address << "  size=0x" << sec.size << "\n";
+            RBREW_LOG_STREAM(::rbrew::log::Level::Info, nullptr)
+                << sec.name << "  addr=0x" << std::hex << sec.address << "  size=0x" << sec.size << "\n";
         return EXIT_SUCCESS;
     }
 
     if (opts->command == cli::Command::ListExports) {
-        for (const auto& exp : rpx.exports) std::cout << std::hex << exp.address << "  " << exp.name << "\n";
+        for (const auto& exp : rpx.exports)
+            RBREW_LOG_STREAM(::rbrew::log::Level::Info, nullptr) << std::hex << exp.address << "  " << exp.name << "\n";
         return EXIT_SUCCESS;
     }
 
     if (opts->command == cli::Command::ListImports) {
         for (const auto& imp : rpx.imports)
-            std::cout << imp.from_module << "!" << imp.name << "  stub=0x" << std::hex << imp.stub_address << "\n";
+            RBREW_LOG_STREAM(::rbrew::log::Level::Info, nullptr)
+                << imp.from_module << "!" << imp.name << "  stub=0x" << std::hex << imp.stub_address << "\n";
         return EXIT_SUCCESS;
     }
 
@@ -282,7 +307,8 @@ int main(int argc, char** argv) {
     if (!opts->analyzer_entries_file.empty()) {
         std::ifstream entries(opts->analyzer_entries_file);
         if (!entries) {
-            std::cerr << "cannot read analyzer entries " << opts->analyzer_entries_file << '\n';
+            RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr)
+                << "cannot read analyzer entries " << opts->analyzer_entries_file << '\n';
             return EXIT_FAILURE;
         }
         for (std::string line; std::getline(entries, line);) {
@@ -293,7 +319,8 @@ int main(int argc, char** argv) {
                 disc_cfg.analyzer_entries.insert(uint32_t(std::stoul(hex, nullptr, 16)));
             } catch (...) {}
         }
-        std::cerr << "Loaded " << disc_cfg.analyzer_entries.size() << " analyzer entries for corroboration\n";
+        RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr)
+            << "Loaded " << disc_cfg.analyzer_entries.size() << " analyzer entries for corroboration\n";
     }
     analysis::FunctionDiscovery disc(rpx, lnk, disc_cfg);
     // Entry hints come from the manifest the image selects: this file holds no
@@ -308,33 +335,39 @@ int main(int argc, char** argv) {
         }
         auto& mf = *manifest_opt;
         const bool hashes_ok = manifest::verify_hashes(mf);
-        for (const auto& e : mf.errors) std::cerr << "manifest: " << e << '\n';
+        for (const auto& e : mf.errors)
+            RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr) << "manifest: " << e << '\n';
         if (!hashes_ok) {
-            std::cerr << "manifest: " << manifest_path
-                      << " was modified without resealing (run 'rebrewu manifest seal')\n";
+            RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr)
+                << "manifest: " << manifest_path << " was modified without resealing (run 'rebrewu manifest seal')\n";
             return EXIT_FAILURE;
         }
         std::vector<std::string> problems;
         if (!manifest::verify_image(mf, opts->rpx_path.string(), problems)) {
-            for (const auto& problem : problems) std::cerr << "manifest: " << problem << '\n';
+            for (const auto& problem : problems)
+                RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr) << "manifest: " << problem << '\n';
             if (!opts->allow_image_mismatch) {
-                std::cerr << "manifest: " << manifest_path << " does not describe " << opts->rpx_path
-                          << " (pass --allow-image-mismatch to recompile anyway)\n";
+                RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr)
+                    << "manifest: " << manifest_path << " does not describe " << opts->rpx_path
+                    << " (pass --allow-image-mismatch to recompile anyway)\n";
                 return EXIT_FAILURE;
             }
-            std::cerr << "manifest: continuing despite the identity mismatch\n";
+            RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr)
+                << "manifest: continuing despite the identity mismatch\n";
         }
         for (const auto& entry : mf.entries) disc.add_hint({entry.address, {}, entry.force});
         if (opts->verbose)
-            std::cerr << "Manifest " << mf.id << " (" << manifest_path << "): " << mf.imports.size() << " imports, "
-                      << mf.entries.size() << " entry hints\n";
+            RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr)
+                << "Manifest " << mf.id << " (" << manifest_path << "): " << mf.imports.size() << " imports, "
+                << mf.entries.size() << " entry hints\n";
     }
     // Diagnostic inventory only: force every listed address as an entry so a
     // single run can show which undiscovered targets startup really reaches.
     if (!opts->hints_file.empty()) {
         std::ifstream hints(opts->hints_file);
         if (!hints) {
-            std::cerr << "cannot read hints file " << opts->hints_file << '\n';
+            RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr)
+                << "cannot read hints file " << opts->hints_file << '\n';
             return EXIT_FAILURE;
         }
         unsigned count = 0;
@@ -343,20 +376,22 @@ int main(int argc, char** argv) {
             disc.add_hint({uint32_t(std::stoul(line, nullptr, 16)), {}, true});
             ++count;
         }
-        std::cerr << "Forced " << count << " diagnostic entry hints from " << opts->hints_file << '\n';
+        RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr)
+            << "Forced " << count << " diagnostic entry hints from " << opts->hints_file << '\n';
     }
     auto boundaries = disc.discover();
 
     if (opts->verbose)
-        std::cerr << "Discovered " << boundaries.size() << " function candidates.\n"
-                  << "Recognized " << disc.stats().pre_stack_prologues << " pre-stack LR-save prologues.\n"
-                  << "Recognized " << disc.stats().post_stack_prologues
-                  << " post-stack LR-save prologues with validated unwinds.\n"
-                  << "Added " << disc.stats().from_code_ptr_relocs
-                  << " isolated address-taken leaves from code relocations.\n"
-                  << "Added " << disc.stats().from_tail_callbacks << " relocation-backed conditional tail callbacks.\n"
-                  << "Added " << disc.stats().from_backward_leaf_thunks
-                  << " relocation-backed isolated backward leaf thunks.\n";
+        RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr)
+            << "Discovered " << boundaries.size() << " function candidates.\n"
+            << "Recognized " << disc.stats().pre_stack_prologues << " pre-stack LR-save prologues.\n"
+            << "Recognized " << disc.stats().post_stack_prologues
+            << " post-stack LR-save prologues with validated unwinds.\n"
+            << "Added " << disc.stats().from_code_ptr_relocs
+            << " isolated address-taken leaves from code relocations.\n"
+            << "Added " << disc.stats().from_tail_callbacks << " relocation-backed conditional tail callbacks.\n"
+            << "Added " << disc.stats().from_backward_leaf_thunks
+            << " relocation-backed isolated backward leaf thunks.\n";
 
     analysis::CFGBuilder cfg_builder(rpx);
     ir::IRModule ir_module;
@@ -372,21 +407,24 @@ int main(int argc, char** argv) {
         } else {
             ++built_fail;
             if (opts->verbose)
-                std::cerr << "  build failed @ 0x" << std::hex << fb.start << ": " << cfg_builder.last_error() << "\n";
+                RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr)
+                    << "  build failed @ 0x" << std::hex << fb.start << ": " << cfg_builder.last_error() << "\n";
         }
     }
     if (opts->verbose)
-        std::cerr << "Built " << std::dec << built_ok << " functions (" << built_fail << " failed).\n"
-                  << "Entry point: 0x" << std::hex << rpx.entry_point << "\n";
+        RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr)
+            << "Built " << std::dec << built_ok << " functions (" << built_fail << " failed).\n"
+            << "Entry point: 0x" << std::hex << rpx.entry_point << "\n";
 
     if (opts->command == cli::Command::Audit) {
         return audit.write(rpx, ir_module, cfg_builder, opts->output_dir) ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
     if (opts->command == cli::Command::Analyze) {
-        std::cout << "Discovered " << boundaries.size() << " function candidates.\n"
-                  << "Built " << built_ok << " functions (" << built_fail << " failed).\nEntry point: 0x" << std::hex
-                  << rpx.entry_point << "\n";
+        RBREW_LOG_STREAM(::rbrew::log::Level::Info, nullptr)
+            << "Discovered " << boundaries.size() << " function candidates.\n"
+            << "Built " << built_ok << " functions (" << built_fail << " failed).\nEntry point: 0x" << std::hex
+            << rpx.entry_point << "\n";
         return EXIT_SUCCESS;
     }
 
@@ -420,7 +458,7 @@ int main(int argc, char** argv) {
     if (!opts->hooks_file.empty()) {
         std::ifstream hooks(opts->hooks_file);
         if (!hooks) {
-            std::cerr << "cannot read hooks " << opts->hooks_file << std::endl;
+            RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr) << "cannot read hooks " << opts->hooks_file << "\n";
             return EXIT_FAILURE;
         }
         for (std::string line; std::getline(hooks, line);) {
@@ -429,24 +467,26 @@ int main(int argc, char** argv) {
             try {
                 emit_config.hooked.insert(uint32_t(std::stoul(hex, nullptr, 16)));
             } catch (...) {
-                std::cerr << "invalid hook address " << line << std::endl;
+                RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr) << "invalid hook address " << line << "\n";
                 return EXIT_FAILURE;
             }
         }
         for (uint32_t addr : emit_config.hooked)
             if (std::none_of(ir_module.functions.begin(), ir_module.functions.end(),
                              [&](const auto& f) { return f.entry_addr == addr; })) {
-                std::cerr << "hook address " << std::hex << addr << " is not a discovered function entry" << std::endl;
+                RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr)
+                    << "hook address " << std::hex << addr << " is not a discovered function entry" << "\n";
                 return EXIT_FAILURE;
             }
-        std::cerr << "Hook wrappers: " << emit_config.hooked.size() << std::endl;
+        RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr) << "Hook wrappers: " << emit_config.hooked.size() << "\n";
     }
     codegen::CppEmitter emitter(ir_module, rpx, lnk, std::move(names), emit_config);
     if (!emitter.emit(opts->output_dir)) {
-        std::cerr << "Code generation failed: " << emitter.last_error() << "\n";
+        RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr)
+            << "Code generation failed: " << emitter.last_error() << "\n";
         return EXIT_FAILURE;
     }
 
-    std::cout << "Done. Output written to " << opts->output_dir << "\n";
+    RBREW_LOG_STREAM(::rbrew::log::Level::Info, nullptr) << "Done. Output written to " << opts->output_dir << "\n";
     return EXIT_SUCCESS;
 }

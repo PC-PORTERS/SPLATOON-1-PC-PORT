@@ -164,15 +164,14 @@ uint32_t rbrew_lwarx(CPUState* cpu, uint32_t addr) {
     if (hot_lwarx_enabled()) {
         thread_local uint64_t total = 0;
         if (++total % 5000000 == 0 && total <= 15000000)
-            RBREW_LOGF(stderr, "[resv] hot lwarx cpu=%p n=%llu addr=%08X value=%08X lr=%08X r3=%08X\n", (void*)cpu,
-                       (unsigned long long)total, addr, rbrew_read32(cpu->mem, addr), cpu->lr, cpu->r[3]);
+            RBREW_LOG_DEBUG("resv", "hot lwarx cpu=%p n=%llu addr=%08X value=%08X lr=%08X r3=%08X\n", (void*)cpu,
+                            (unsigned long long)total, addr, rbrew_read32(cpu->mem, addr), cpu->lr, cpu->r[3]);
     }
     if (addr && addr == reservation_trace_addr())
-        RBREW_LOGF(stderr, "[resv] lwarx cpu=%p value=%08X lr=%08X\n", (void*)cpu, rbrew_read32(cpu->mem, addr),
-                   cpu->lr);
+        RBREW_LOG_DEBUG("resv", "lwarx cpu=%p value=%08X lr=%08X\n", (void*)cpu, rbrew_read32(cpu->mem, addr), cpu->lr);
     cpu->reservation_valid = false;
     if ((addr & 3u) || !rbrew_memory_accessible(cpu->mem, addr, 4)) {
-        RBREW_LOGF(stderr, "[rbrew] invalid lwarx address=0x%08X\n", addr);
+        RBREW_LOG_ERROR("rbrew", "invalid lwarx address=0x%08X\n", addr);
         return 0;
     }
     // Counter first: a store between the two reads changes either the
@@ -204,7 +203,7 @@ void rbrew_stwcx(CPUState* cpu, uint32_t addr, uint32_t value) {
     cpu->reservation_valid = false; // every attempt consumes the reservation
     cpu->cr[0] = (success ? 2u : 0u) | ((cpu->xer >> 31) & 1u);
     if (addr && addr == reservation_trace_addr())
-        RBREW_LOGF(stderr, "[resv] stwcx cpu=%p value=%08X success=%d lr=%08X\n", (void*)cpu, value, success, cpu->lr);
+        RBREW_LOG_DEBUG("resv", "stwcx cpu=%p value=%08X success=%d lr=%08X\n", (void*)cpu, value, success, cpu->lr);
 }
 
 // Dispatch table is a flat array: dispatch_table[addr >> 2] = HostFunc
@@ -224,7 +223,7 @@ uint32_t rbrew_run_constructors(CPUState* cpu, uint32_t table, uint32_t done_fla
     for (;;) {
         uint32_t fn = rbrew_read32(cpu->mem, table + count * 4u);
         if (!fn) return count;
-        if (rbrew_diagnostic_env("RBREW_CTOR_TRACE")) RBREW_LOGF(stderr, "[PPC] ctor[%u]=0x%08X\n", count, fn);
+        if (rbrew_diagnostic_env("RBREW_CTOR_TRACE")) RBREW_LOG_INFO("PPC", "ctor[%u]=0x%08X\n", count, fn);
         rbrew_dispatch(cpu, fn);
         ++count;
     }
@@ -271,18 +270,18 @@ ImportProfile* import_profile_start() {
                     previous[i] = now;
                 }
                 std::sort(delta.begin(), delta.end(), std::greater<>());
-                RBREW_LOGF(stderr, "[profile] t=%us imports=%zu\n", tick * 5, delta.size());
+                RBREW_LOG_INFO("profile", "t=%us imports=%zu\n", tick * 5, delta.size());
                 for (size_t k = 0; k < delta.size() && k < 24; ++k)
-                    RBREW_LOGF(stderr, "[profile]   %08X calls=%llu last_lr=%08X\n",
-                               plt_profile_begin + (delta[k].second << 2),
-                               static_cast<unsigned long long>(delta[k].first),
-                               p->last_lr[delta[k].second].load(std::memory_order_relaxed));
+                    RBREW_LOG_INFO("profile", "  %08X calls=%llu last_lr=%08X\n",
+                                   plt_profile_begin + (delta[k].second << 2),
+                                   static_cast<unsigned long long>(delta[k].first),
+                                   p->last_lr[delta[k].second].load(std::memory_order_relaxed));
                 std::lock_guard lock(p->threads_mutex);
                 for (auto* t : p->threads) {
                     const uint64_t now = t->dispatches.load(std::memory_order_relaxed);
-                    RBREW_LOGF(stderr, "[profile]   thread cpu=%p dispatch_delta=%llu inside=%08X lr=%08X r3=%08X\n",
-                               (const void*)t->cpu, static_cast<unsigned long long>(now - thread_previous[t]),
-                               t->inside.load(), t->inside_lr.load(), t->inside_r3.load());
+                    RBREW_LOG_INFO("profile", "  thread cpu=%p dispatch_delta=%llu inside=%08X lr=%08X r3=%08X\n",
+                                   (const void*)t->cpu, static_cast<unsigned long long>(now - thread_previous[t]),
+                                   t->inside.load(), t->inside_lr.load(), t->inside_r3.load());
                     thread_previous[t] = now;
                 }
             }
@@ -406,8 +405,8 @@ void rbrew_dispatch(CPUState* cpu, uint32_t guest_addr) {
     if (EntryTrace* trace = entry_trace(); trace && trace->watched.contains(guest_addr)) {
         std::lock_guard lock(trace->mutex);
         if (trace->seen.insert(guest_addr).second)
-            RBREW_LOGF(stderr, "[entry] reached %08X lr=%08X r3=%08X r4=%08X\n", guest_addr, cpu->lr, cpu->r[3],
-                       cpu->r[4]);
+            RBREW_LOG_INFO("entry", "reached %08X lr=%08X r3=%08X r4=%08X\n", guest_addr, cpu->lr, cpu->r[3],
+                           cpu->r[4]);
     }
     import_trace(cpu, guest_addr);
     InsideImport inside_import;
@@ -437,12 +436,12 @@ void rbrew_dispatch(CPUState* cpu, uint32_t guest_addr) {
                 static std::unordered_set<uint32_t> seen;
                 std::lock_guard lock(seen_mutex);
                 if (seen.insert(guest_addr).second)
-                    RBREW_LOGF(stderr, "[hybrid] fallback target=%08X lr=%08X\n", guest_addr, cpu->lr);
+                    RBREW_LOG_WARN("hybrid", "fallback target=%08X lr=%08X\n", guest_addr, cpu->lr);
             }
             const auto result = rbrew_ppc_run(cpu, guest_addr, cpu->lr, cpu->ppc_instruction_budget);
             if (result.stop == RbrewHybridStop::Returned) return;
-            RBREW_LOGF(stderr, "[hybrid] rejected target=%08X pc=%08X word=%08X steps=%llu: %s\n", guest_addr,
-                       result.pc, result.word, static_cast<unsigned long long>(result.instructions), result.detail);
+            RBREW_LOG_INFO("hybrid", "rejected target=%08X pc=%08X word=%08X steps=%llu: %s\n", guest_addr, result.pc,
+                           result.word, static_cast<unsigned long long>(result.instructions), result.detail);
             throw RbrewHybridFailure(result);
         }
 #endif
@@ -460,26 +459,25 @@ void rbrew_dispatch(CPUState* cpu, uint32_t guest_addr) {
         }
         if (occurrence > 8 && !stop_on_unhandled) {
             if ((occurrence & (occurrence - 1)) == 0)
-                RBREW_LOGF(stderr, "[rbrew] unhandled dispatch to 0x%08X seen %llu times (last lr=0x%08X)\n",
-                           guest_addr, static_cast<unsigned long long>(occurrence), cpu->lr);
+                RBREW_LOG_INFO("rbrew", "unhandled dispatch to 0x%08X seen %llu times (last lr=0x%08X)\n", guest_addr,
+                               static_cast<unsigned long long>(occurrence), cpu->lr);
             return;
         }
-        RBREW_LOGF(stderr,
-                   "[rbrew] unhandled dispatch to 0x%08X (lr=0x%08X r1=0x%08X ctr=0x%08X r3=0x%08X r12=0x%08X)\n",
-                   guest_addr, cpu->lr, cpu->r[1], cpu->ctr, cpu->r[3], cpu->r[12]);
+        RBREW_LOG_INFO("rbrew", "unhandled dispatch to 0x%08X (lr=0x%08X r1=0x%08X ctr=0x%08X r3=0x%08X r12=0x%08X)\n",
+                       guest_addr, cpu->lr, cpu->r[1], cpu->ctr, cpu->r[3], cpu->r[12]);
         // Walk guest stack frames (PPC ABI: saved back-chain at r1+0, saved LR at r1+4)
-        RBREW_LOGF(stderr, "[rbrew]   guest call chain:");
+        RBREW_LOG_INFO_BEGIN("rbrew", "  guest call chain:");
         uint32_t sp = cpu->r[1];
         for (int i = 0; i < 8 && sp >= 0x10000000u && sp < 0x1FC10000u; i++) {
             uint32_t saved_lr = read_u32_be(cpu->mem, sp + 4);
             uint32_t saved_sp = read_u32_be(cpu->mem, sp);
-            RBREW_LOGF(stderr, " lr=0x%08X", saved_lr);
+            RBREW_LOG_RAW(" lr=0x%08X", saved_lr);
             if (saved_sp == 0 || saved_sp == sp) break;
             sp = saved_sp;
         }
-        RBREW_LOGF(stderr, "\n");
+        RBREW_LOG_RAW("\n");
         if (stop_on_unhandled) {
-            RBREW_LOGF(stderr, "[CRASH] Stopping at first unresolved guest dispatch\n");
+            RBREW_LOG_ERROR("CRASH", "Stopping at first unresolved guest dispatch\n");
             exit(2);
         }
     }
@@ -499,12 +497,12 @@ void rbrew_dispatch_linked(CPUState* cpu, uint32_t guest_addr) {
                 static std::unordered_set<uint32_t> seen;
                 std::lock_guard lock(seen_mutex);
                 if (seen.insert(guest_addr).second)
-                    RBREW_LOGF(stderr, "[hybrid] fallback target=%08X lr=%08X\n", guest_addr, cpu->lr);
+                    RBREW_LOG_WARN("hybrid", "fallback target=%08X lr=%08X\n", guest_addr, cpu->lr);
             }
             const auto result = rbrew_ppc_run(cpu, guest_addr, cpu->lr, cpu->ppc_instruction_budget);
             if (result.stop == RbrewHybridStop::Returned) return;
-            RBREW_LOGF(stderr, "[hybrid] rejected target=%08X pc=%08X word=%08X steps=%llu: %s\n", guest_addr,
-                       result.pc, result.word, static_cast<unsigned long long>(result.instructions), result.detail);
+            RBREW_LOG_INFO("hybrid", "rejected target=%08X pc=%08X word=%08X steps=%llu: %s\n", guest_addr, result.pc,
+                           result.word, static_cast<unsigned long long>(result.instructions), result.detail);
             throw RbrewHybridFailure(result);
         }
     }
@@ -568,7 +566,7 @@ void rbrew_coverage_event(char kind, uint32_t owner, uint32_t pc) {
         Sink() {
             if (const char* path = rbrew_diagnostic_env("RBREW_COVERAGE_FILE")) {
                 file = fopen(path, "wb");
-                if (!file) RBREW_LOGF(stderr, "[coverage] cannot open output %s\n", path);
+                if (!file) RBREW_LOG_ERROR("coverage", "cannot open output %s\n", path);
             }
         }
         // Process-lifetime object: worker exit/abort cannot lose buffered records.

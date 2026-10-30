@@ -58,7 +58,7 @@ inline uint32_t rbrew_current_core() {
 // Log unimplemented stubs without crashing (use inside a stub function body)
 #define STUB_LOG(name)                                                                                                 \
     do {                                                                                                               \
-        RBREW_LOGF(stderr, "[stub] %s called (r3=0x%08X)\n", #name, cpu->r[3]);                                        \
+        RBREW_LOG_INFO("stub", "%s called (r3=0x%08X)\n", #name, cpu->r[3]);                                           \
     } while (0)
 
 // Null stub function — used as the HostFunc passed to rbrew_register_func

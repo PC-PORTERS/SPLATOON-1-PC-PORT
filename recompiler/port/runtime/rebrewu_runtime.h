@@ -237,14 +237,14 @@ static inline bool rbrew_arena_access(const uint8_t* mem, uint32_t addr, uint32_
 
 static RBREW_NOINLINE uint8_t rbrew_read8_checked(uint8_t* mem, uint32_t addr) {
     if (!rbrew_memory_accessible(mem, addr, 1)) {
-        RBREW_LOGF(stderr, "[rbrew] OOB read8  addr=0x%08X\n", addr);
+        RBREW_LOG_INFO("rbrew", "OOB read8  addr=0x%08X\n", addr);
         return 0;
     }
     return mem[addr];
 }
 static RBREW_NOINLINE uint16_t rbrew_read16_checked(uint8_t* mem, uint32_t addr) {
     if (!rbrew_memory_accessible(mem, addr, 2)) {
-        RBREW_LOGF(stderr, "[rbrew] OOB read16 addr=0x%08X\n", addr);
+        RBREW_LOG_INFO("rbrew", "OOB read16 addr=0x%08X\n", addr);
         return 0;
     }
     uint16_t v;
@@ -253,7 +253,7 @@ static RBREW_NOINLINE uint16_t rbrew_read16_checked(uint8_t* mem, uint32_t addr)
 }
 static RBREW_NOINLINE uint32_t rbrew_read32_checked(uint8_t* mem, uint32_t addr) {
     if (!rbrew_memory_accessible(mem, addr, 4)) {
-        RBREW_LOGF(stderr, "[rbrew] OOB read32 addr=0x%08X\n", addr);
+        RBREW_LOG_INFO("rbrew", "OOB read32 addr=0x%08X\n", addr);
         return 0;
     }
     uint32_t v;
@@ -262,7 +262,7 @@ static RBREW_NOINLINE uint32_t rbrew_read32_checked(uint8_t* mem, uint32_t addr)
 }
 static RBREW_NOINLINE uint64_t rbrew_read64_checked(uint8_t* mem, uint32_t addr) {
     if (!rbrew_memory_accessible(mem, addr, 8)) {
-        RBREW_LOGF(stderr, "[rbrew] OOB read64 addr=0x%08X\n", addr);
+        RBREW_LOG_INFO("rbrew", "OOB read64 addr=0x%08X\n", addr);
         return 0;
     }
     uint64_t v;
@@ -321,14 +321,14 @@ static inline void rbrew_store_bytes(uint8_t* mem, uint32_t addr, const void* by
 }
 static RBREW_NOINLINE void rbrew_write8_checked(uint8_t* mem, uint32_t addr, uint8_t v) {
     if (!rbrew_memory_accessible(mem, addr, 1)) {
-        RBREW_LOGF(stderr, "[rbrew] OOB write8  addr=0x%08X val=0x%02X\n", addr, v);
+        RBREW_LOG_INFO("rbrew", "OOB write8  addr=0x%08X val=0x%02X\n", addr, v);
         return;
     }
     rbrew_write_memory(mem, addr, &v, 1);
 }
 static RBREW_NOINLINE void rbrew_write16_checked(uint8_t* mem, uint32_t addr, uint16_t v) {
     if (!rbrew_memory_accessible(mem, addr, 2)) {
-        RBREW_LOGF(stderr, "[rbrew] OOB write16 addr=0x%08X val=0x%04X\n", addr, v);
+        RBREW_LOG_INFO("rbrew", "OOB write16 addr=0x%08X val=0x%04X\n", addr, v);
         return;
     }
     uint16_t be = rbrew_bswap16(v);
@@ -336,7 +336,7 @@ static RBREW_NOINLINE void rbrew_write16_checked(uint8_t* mem, uint32_t addr, ui
 }
 static RBREW_NOINLINE void rbrew_write32_checked(uint8_t* mem, uint32_t addr, uint32_t v) {
     if (!rbrew_memory_accessible(mem, addr, 4)) {
-        RBREW_LOGF(stderr, "[rbrew] OOB write32 addr=0x%08X val=0x%08X\n", addr, v);
+        RBREW_LOG_INFO("rbrew", "OOB write32 addr=0x%08X val=0x%08X\n", addr, v);
         return;
     }
     uint32_t be = rbrew_bswap32(v);
@@ -344,7 +344,7 @@ static RBREW_NOINLINE void rbrew_write32_checked(uint8_t* mem, uint32_t addr, ui
 }
 static RBREW_NOINLINE void rbrew_write64_checked(uint8_t* mem, uint32_t addr, uint64_t v) {
     if (!rbrew_memory_accessible(mem, addr, 8)) {
-        RBREW_LOGF(stderr, "[rbrew] OOB write64 addr=0x%08X\n", addr);
+        RBREW_LOG_INFO("rbrew", "OOB write64 addr=0x%08X\n", addr);
         return;
     }
     uint64_t be = rbrew_bswap64(v);

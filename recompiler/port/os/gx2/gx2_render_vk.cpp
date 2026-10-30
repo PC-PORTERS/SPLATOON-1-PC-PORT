@@ -373,8 +373,7 @@ Format gx2r::gx2_vk_format(uint32_t f) {
         static std::set<uint32_t> s_seen;
         static std::mutex s_seen_mutex;
         std::lock_guard lock(s_seen_mutex);
-        if (s_seen.insert(f).second)
-            RBREW_LOGF(stderr, "[gx2_render] unknown GX2SurfaceFormat 0x%04X, using RGBA8\n", f);
+        if (s_seen.insert(f).second) RBREW_LOG_INFO("gx2_render", "unknown GX2SurfaceFormat 0x%04X, using RGBA8\n", f);
         set(VK_FORMAT_R8G8B8A8_UNORM, 4, wire::RGBA8, wire::RGBA, wire::UNSIGNED_BYTE);
         break;
     }
@@ -574,8 +573,8 @@ void gx2_render_init() {
     if (!gx2vk::ready()) {
         if (!gx2vk::init(static_cast<SDL_Window*>(gx2_native_window()))) {
             // No silent fallback to another API: the Vulkan build only renders with Vulkan.
-            RBREW_LOGF(stderr,
-                       "[gx2_render] FATAL: Vulkan initialization failed; this build has no other graphics backend\n");
+            RBREW_LOG_FATAL("gx2_render",
+                            "FATAL: Vulkan initialization failed; this build has no other graphics backend\n");
             std::fflush(stderr);
             std::exit(3);
         }
@@ -600,7 +599,7 @@ void gx2_render_init() {
         SDL_DisplayMode desktop{};
         const int display = SDL_GetWindowDisplayIndex(window);
         if (display < 0 || SDL_GetDesktopDisplayMode(display, &desktop) != 0) {
-            RBREW_LOGF(stderr, "[gx2_render] cannot query the desktop's display mode\n");
+            RBREW_LOG_ERROR("gx2_render", "cannot query the desktop's display mode\n");
             std::exit(3);
         }
         // Console-native scene workload; the window still fills the desktop.
@@ -629,15 +628,15 @@ void gx2_render_init() {
             }
         }
         if (!gx2_render_set_display_resolution(target_w, target_h)) {
-            RBREW_LOGF(stderr, "[gx2_render] cannot select the render resolution (%ux%u)\n", target_w, target_h);
+            RBREW_LOG_ERROR("gx2_render", "cannot select the render resolution (%ux%u)\n", target_w, target_h);
             std::exit(3);
         }
-        RBREW_LOGF(stderr, "[gx2_render] Internal render resolution: %ux%u (desktop display: %dx%d)\n", target_w,
-                   target_h, desktop.w, desktop.h);
+        RBREW_LOG_INFO("gx2_render", "Internal render resolution: %ux%u (desktop display: %dx%d)\n", target_w, target_h,
+                       desktop.w, desktop.h);
         S.raster.viewport[2] = 1280;
         S.raster.viewport[3] = 720;
     }
-    RBREW_LOGF(stderr, "[gx2_render] Vulkan rendering back-end initialised (%s)\n", gx2vk::caps().device_name.c_str());
+    RBREW_LOG_INFO("gx2_render", "Vulkan rendering back-end initialised (%s)\n", gx2vk::caps().device_name.c_str());
 }
 
 // GX2SetSpecialState(ClearColorAsDepth = 8): Gambit's GX2UTClearRectOp
@@ -682,8 +681,8 @@ static void copy_depth_to_color_alias(DepthTarget& depth, ColorTarget& color) {
     vkCmdCopyBufferToImage(cb, s_alias_staging.buffer, color.image.image, VK_IMAGE_LAYOUT_GENERAL, 1, &region);
     gx2vk::note_gpu_write(color.image);
     if (shadow_log())
-        RBREW_LOGF(stderr, "[shadow] ClearColorAsDepth: depth %u -> color %u (%ux%u)\n", depth.id, color.id,
-                   depth.width, depth.height);
+        RBREW_LOG_DEBUG("shadow", "ClearColorAsDepth: depth %u -> color %u (%ux%u)\n", depth.id, color.id, depth.width,
+                        depth.height);
 }
 
 void gx2_render_set_special_state(uint32_t state, bool enable) {
@@ -790,7 +789,7 @@ void gx2_render_set_color_buffer(uint32_t cb_addr, uint8_t* mem, const uint8_t* 
     static unsigned s_set_cb_logs;
     if (s_set_cb_logs < 20) {
         ++s_set_cb_logs;
-        RBREW_LOGF(stderr, "[gx2_render] GX2SetColorBuffer cb=0x%08X\n", cb_addr);
+        RBREW_LOG_INFO("gx2_render", "GX2SetColorBuffer cb=0x%08X\n", cb_addr);
     }
     if (!gx2vk::ready() || target >= 8) return;
     if (!cb_addr) {
@@ -846,13 +845,13 @@ void gx2_render_set_color_buffer(uint32_t cb_addr, uint8_t* mem, const uint8_t* 
         it = S.cb_map.emplace(key, std::move(e)).first;
         ++S.color_view_revision;
         it->second.tex.image = &it->second.image;
-        RBREW_LOGF(stderr, "[gx2_render] created FBO %u for CB 0x%08X (%ux%u fmt=0x%04X)\n", it->second.id, cb_addr, w,
-                   h, fmt);
+        RBREW_LOG_INFO("gx2_render", "created FBO %u for CB 0x%08X (%ux%u fmt=0x%04X)\n", it->second.id, cb_addr, w, h,
+                       fmt);
         // A surface used both as a depth buffer and as a color target is how
         // games render depth data into a color-format shadow map.
         if (shadow_log() && S.depth_map.count(key))
-            RBREW_LOGF(stderr, "[shadow] color target shares a depth address: cb=0x%08X %ux%u fmt=%X depthfmt=%X\n",
-                       cb_addr, w, h, fmt, S.depth_map.find(key)->second.gx2_format);
+            RBREW_LOG_DEBUG("shadow", "color target shares a depth address: cb=0x%08X %ux%u fmt=%X depthfmt=%X\n",
+                            cb_addr, w, h, fmt, S.depth_map.find(key)->second.gx2_format);
     }
     S.color_targets[target] = &it->second;
     TXDIAG(txdiag::target(mem, data, it->second.image, it->second.id, "color"));
@@ -862,7 +861,7 @@ void gx2_render_set_color_buffer(uint32_t cb_addr, uint8_t* mem, const uint8_t* 
 void gx2_render_set_depth_buffer(uint32_t db_addr, uint8_t* mem, const uint8_t* descriptor) {
     if (!gx2vk::ready()) return;
     if (g_trace_active)
-        RBREW_LOGF(stderr, "[ftrace] render set depth db=%08X descriptor=%p\n", db_addr, (const void*)descriptor);
+        RBREW_LOG_DEBUG("ftrace", "render set depth db=%08X descriptor=%p\n", db_addr, (const void*)descriptor);
     if (!db_addr) {
         S.depth_target = nullptr;
         bind_target_framebuffer();
@@ -911,8 +910,8 @@ void gx2_render_set_depth_buffer(uint32_t db_addr, uint8_t* mem, const uint8_t* 
         e.tex.params = render_target_params(true);
         e.tex.id = e.id;
         e.tex.coordinate_scale = image_coordinate_scale(e.image, e.width, e.height);
-        RBREW_LOGF(stderr, "[gx2_render] created depth texture %u for image %08X (%ux%u fmt=%X)\n", e.id, key[0],
-                   e.width, e.height, key[1]);
+        RBREW_LOG_INFO("gx2_render", "created depth texture %u for image %08X (%ux%u fmt=%X)\n", e.id, key[0], e.width,
+                       e.height, key[1]);
         // The GPU back-end binds the new depth-only FBO while creating it; with
         // no color target bound it stays the current framebuffer (clears
         // reach the new depth image).
@@ -933,8 +932,8 @@ void gx2_render_set_depth_buffer(uint32_t db_addr, uint8_t* mem, const uint8_t* 
     static uint32_t s_last_bound = UINT32_MAX;
     if (shadow_log() && s_last_bound != key[0]) {
         s_last_bound = key[0];
-        RBREW_LOGF(stderr, "[shadow] bind depth db=%08X %ux%u gx2fmt=%X vkfmt=%d stencil=%d\n", db_addr, e.width,
-                   e.height, e.gx2_format, int(e.format), int(e.stencil));
+        RBREW_LOG_DEBUG("shadow", "bind depth db=%08X %ux%u gx2fmt=%X vkfmt=%d stencil=%d\n", db_addr, e.width,
+                        e.height, e.gx2_format, int(e.format), int(e.stencil));
     }
 }
 
@@ -983,12 +982,13 @@ static float quantize_unorm(float v, uint32_t bits) {
 
 static void clear_bound(bool color, bool depth, bool stencil) {
     if (g_trace_active)
-        RBREW_LOGF(stderr,
-                   "[ftrace] clear bound fbo=%u color=%u depth=%u stencil=%u rgba=%g,%g,%g,%g z=%g masks=%08X "
-                   "scissor=%d,%d,%d,%d\n",
-                   S.current_fbo_id, unsigned(color), unsigned(depth), unsigned(stencil), S.raster.clear_color[0],
-                   S.raster.clear_color[1], S.raster.clear_color[2], S.raster.clear_color[3], S.raster.clear_depth,
-                   S.target_masks, S.raster.scissor[0], S.raster.scissor[1], S.raster.scissor[2], S.raster.scissor[3]);
+        RBREW_LOG_DEBUG_BEGIN("ftrace",
+                              "clear bound fbo=%u color=%u depth=%u stencil=%u rgba=%g,%g,%g,%g z=%g masks=%08X "
+                              "scissor=%d,%d,%d,%d\n",
+                              S.current_fbo_id, unsigned(color), unsigned(depth), unsigned(stencil),
+                              S.raster.clear_color[0], S.raster.clear_color[1], S.raster.clear_color[2],
+                              S.raster.clear_color[3], S.raster.clear_depth, S.target_masks, S.raster.scissor[0],
+                              S.raster.scissor[1], S.raster.scissor[2], S.raster.scissor[3]);
     if (!S.framebuffer.valid || !ensure_rendering()) return;
     const VkRect2D area = render_area();
     VkClearRect rect{};
@@ -1040,10 +1040,10 @@ static void clear_bound(bool color, bool depth, bool stencil) {
             gx2vk::note_gpu_write(S.framebuffer.depth->image);
     }
     if (shadow_log() && depth && S.framebuffer.depth)
-        RBREW_LOGF(stderr, "[shadow] clear bound depth value=%g stencil=%u %ux%u gx2fmt=%X scissor=%d,%d %ux%u\n",
-                   double(S.raster.clear_depth), unsigned(S.raster.clear_stencil & 255), S.framebuffer.depth->width,
-                   S.framebuffer.depth->height, S.framebuffer.depth->gx2_format, rect.rect.offset.x, rect.rect.offset.y,
-                   rect.rect.extent.width, rect.rect.extent.height);
+        RBREW_LOG_DEBUG("shadow", "clear bound depth value=%g stencil=%u %ux%u gx2fmt=%X scissor=%d,%d %ux%u\n",
+                        double(S.raster.clear_depth), unsigned(S.raster.clear_stencil & 255),
+                        S.framebuffer.depth->width, S.framebuffer.depth->height, S.framebuffer.depth->gx2_format,
+                        rect.rect.offset.x, rect.rect.offset.y, rect.rect.extent.width, rect.rect.extent.height);
 }
 
 void gx2_render_clear_color(float r, float g, float b, float a) {
@@ -1073,9 +1073,8 @@ void gx2_render_clear_depth_buffer(uint32_t db_addr, uint8_t* mem, float depth, 
     if (first_slice >= surface_layers) return;
     const uint32_t slice_count = std::min(std::max(1u, named_key[7]), surface_layers - first_slice);
     if (g_trace_active)
-        RBREW_LOGF(
-            stderr,
-            "[ftrace] clear named depth db=%08X image=%08X fmt=%X mip=%u slice=%u count=%u flags=%X z=%g stencil=%u\n",
+        RBREW_LOG_DEBUG(
+            "ftrace", "clear named depth db=%08X image=%08X fmt=%X mip=%u slice=%u count=%u flags=%X z=%g stencil=%u\n",
             db_addr, named_key[0], named_key[1], named_key[5], first_slice, slice_count, clear_mode, depth,
             unsigned(stencil));
     const uint64_t end_slice = uint64_t(first_slice) + slice_count;
@@ -1121,9 +1120,9 @@ void gx2_render_clear_depth_buffer(uint32_t db_addr, uint8_t* mem, float depth, 
         gx2vk::note_gpu_write(target.image);
     }
     if (shadow_log())
-        RBREW_LOGF(stderr,
-                   "[shadow] clear named depth db=%08X value=%g stencil=%u mode=%X firstSlice=%u slices=%u gx2fmt=%X\n",
-                   db_addr, value.depth, value.stencil, clear_mode, first_slice, slice_count, named_key[1]);
+        RBREW_LOG_DEBUG("shadow",
+                        "clear named depth db=%08X value=%g stencil=%u mode=%X firstSlice=%u slices=%u gx2fmt=%X\n",
+                        db_addr, value.depth, value.stencil, clear_mode, first_slice, slice_count, named_key[1]);
 }
 void gx2_render_clear_buffers(float r, float g, float b, float a, float depth, uint8_t stencil) {
     S.raster.clear_color = {r, g, b, a};
@@ -1151,12 +1150,13 @@ void gx2_render_clear_color_buffer(uint32_t cb_addr, uint8_t* mem, float r, floa
     if (!target || !target->image.image || target->fmt.compressed) return;
     if (g_trace_active) {
         const auto* d = recorded ? recorded : mem + cb_addr;
-        RBREW_LOGF(stderr,
-                   "[ftrace] clear named color cb=%08X target=%u image=%08X fmt=%X size=%ux%u mip=%u slice=%u count=%u "
-                   "rgba=%g,%g,%g,%g\n",
-                   cb_addr, target->id, descriptor_word(d, GX2SURF_IMAGE), target->gx2_format, target->width,
-                   target->height, descriptor_word(d, GX2CB_VIEW_MIP), descriptor_word(d, GX2CB_VIEW_FIRST_SLICE),
-                   descriptor_word(d, GX2CB_VIEW_NUM_SLICES), r, g, b, a);
+        RBREW_LOG_DEBUG_BEGIN(
+            "ftrace",
+            "clear named color cb=%08X target=%u image=%08X fmt=%X size=%ux%u mip=%u slice=%u count=%u "
+            "rgba=%g,%g,%g,%g\n",
+            cb_addr, target->id, descriptor_word(d, GX2SURF_IMAGE), target->gx2_format, target->width, target->height,
+            descriptor_word(d, GX2CB_VIEW_MIP), descriptor_word(d, GX2CB_VIEW_FIRST_SLICE),
+            descriptor_word(d, GX2CB_VIEW_NUM_SLICES), r, g, b, a);
     }
     VkClearColorValue value{};
     if (target->fmt.integer) {
@@ -1193,7 +1193,7 @@ static void update_native_viewport() {
     const bool half_z = (S.regs[0xA204] & (1u << 19)) != 0;
     const float near_z = f(0xA114) - (half_z ? 0.0f : f(0xA113));
     const float far_z = f(0xA114) + f(0xA113);
-    if (g_trace_active) RBREW_LOGF(stderr, "[ftrace] render set viewport %g,%g %gx%g\n", x, y, w, h);
+    if (g_trace_active) RBREW_LOG_DEBUG("ftrace", "render set viewport %g,%g %gx%g\n", x, y, w, h);
     const bool inverted = h < 0;
     if (inverted) {
         y += h;
@@ -1711,13 +1711,13 @@ void gx2_render_upload_texture(uint32_t tex_addr, uint32_t slot, uint8_t* mem, c
         if (depth_alias_probe) {
             static unsigned reports = 0;
             if (reports++ < 20)
-                RBREW_LOGF(stderr,
-                           "[depth-alias-probe] image=%X target=%X layers=%u key=%X,%u,%u,%u,%u,%u,%u,%u "
-                           "texture=%X,%u,%u,%u,%u,%u,%u,%u\n",
-                           img_ptr, target, layers, key[1], key[2], key[3], key[4], key[5], key[6], key[7], key[8], fmt,
-                           w, h, descriptor_word(data, GX2SURF_PITCH), descriptor_word(data, GX2TEX_VIEW_MIP),
-                           first_slice, descriptor_word(data, GX2TEX_VIEW_NUM_SLICES),
-                           descriptor_word(data, GX2SURF_AA));
+                RBREW_LOG_INFO_BEGIN("depth-alias-probe",
+                                     "image=%X target=%X layers=%u key=%X,%u,%u,%u,%u,%u,%u,%u "
+                                     "texture=%X,%u,%u,%u,%u,%u,%u,%u\n",
+                                     img_ptr, target, layers, key[1], key[2], key[3], key[4], key[5], key[6], key[7],
+                                     key[8], fmt, w, h, descriptor_word(data, GX2SURF_PITCH),
+                                     descriptor_word(data, GX2TEX_VIEW_MIP), first_slice,
+                                     descriptor_word(data, GX2TEX_VIEW_NUM_SLICES), descriptor_word(data, GX2SURF_AA));
         }
         // A surface cleared through a depth alias (ClearColorAsDepth) and then
         // rendered as color: the newer of the two native views holds the bytes.
@@ -1744,8 +1744,8 @@ void gx2_render_upload_texture(uint32_t tex_addr, uint32_t slot, uint8_t* mem, c
             sampled->swizzle = word4;
             bind_unit(slot, sampled);
             if (g_trace_active || shadow_log())
-                RBREW_LOGF(stderr, "[tex] slot %u samples depth target image %08X (gl tex %u %ux%u fmt %X mip %u)\n",
-                           slot, img_ptr, depth.id, depth.width, depth.height, fmt, key[5]);
+                RBREW_LOG_DEBUG("tex", "slot %u samples depth target image %08X (gl tex %u %ux%u fmt %X mip %u)\n",
+                                slot, img_ptr, depth.id, depth.width, depth.height, fmt, key[5]);
             return;
         }
     }
@@ -1817,9 +1817,8 @@ void gx2_render_upload_texture(uint32_t tex_addr, uint32_t slot, uint8_t* mem, c
                 }
                 live_copy_recorded(entry, depth);
                 if (g_trace_active || shadow_log())
-                    RBREW_LOGF(
-                        stderr,
-                        "[tex] slot %u samples depth target slice %u image %08X (tex %u %ux%ux%u fmt %X mip %u)\n",
+                    RBREW_LOG_DEBUG(
+                        "tex", "slot %u samples depth target slice %u image %08X (tex %u %ux%ux%u fmt %X mip %u)\n",
                         slot, key[6], img_ptr, entry.tex.id, w, h, layers, fmt, key[5]);
             }
             return;
@@ -1935,8 +1934,8 @@ void gx2_render_upload_texture(uint32_t tex_addr, uint32_t slot, uint8_t* mem, c
             bind_unit(slot, &cb.tex);
             static unsigned s_logged_aliases;
             if (s_logged_aliases++ < 8 || g_trace_active)
-                RBREW_LOGF(stderr, "[tex] slot %u samples render target image %08X (gl tex %u %ux%u fmt %X)\n", slot,
-                           img_ptr, cb.id, cb.width, cb.height, key[1]);
+                RBREW_LOG_DEBUG("tex", "slot %u samples render target image %08X (gl tex %u %ux%u fmt %X)\n", slot,
+                                img_ptr, cb.id, cb.width, cb.height, key[1]);
             return;
         }
         const bool source32 = key[1] == 0x122u || key[1] == 0x322u || key[1] == 0x823u;
@@ -2032,11 +2031,11 @@ void gx2_render_upload_texture(uint32_t tex_addr, uint32_t slot, uint8_t* mem, c
                 ++s_logged_uploads;
                 size_t nonzero = 0;
                 for (size_t i = 0; i < img_sz && i < (1u << 20); ++i) nonzero += mem[img_ptr + i] != 0;
-                RBREW_LOGF(stderr,
-                           "[tex] upload %08X %ux%u fmt=%X tile=%u pitch=%u detiled=%d nonzero_src_bytes=%zu/%u "
-                           "surf_dim=%u word0=%08X\n",
-                           img_ptr, w, h, fmt, d.tile_mode, d.pitch, int(detiled), nonzero, img_sz,
-                           descriptor_word(data, GX2SURF_DIM), descriptor_word(data, 0x88));
+                RBREW_LOG_DEBUG_BEGIN("tex",
+                                      "upload %08X %ux%u fmt=%X tile=%u pitch=%u detiled=%d nonzero_src_bytes=%zu/%u "
+                                      "surf_dim=%u word0=%08X\n",
+                                      img_ptr, w, h, fmt, d.tile_mode, d.pitch, int(detiled), nonzero, img_sz,
+                                      descriptor_word(data, GX2SURF_DIM), descriptor_word(data, 0x88));
             }
         }
         // GPU: compressed level 0 without CPU data is never specified; a
@@ -2154,15 +2153,16 @@ void gx2_render_upload_texture(uint32_t tex_addr, uint32_t slot, uint8_t* mem, c
         static unsigned probe_reports = 0;
         if (probe_reports < 300) {
             ++probe_reports;
-            RBREW_LOGF(stderr,
-                       "[cube-probe] tex image=%08X fmt=%X %ux%u dim=%u layers=%u first=%u mips=%u pitch=%u upload=%d "
-                       "storage=%d\n",
-                       img_ptr, fmt, w, h, dim, layers, first_slice, mip_levels, descriptor_word(data, GX2SURF_PITCH),
-                       int(upload), int(entry.image.image != VK_NULL_HANDLE));
+            RBREW_LOG_INFO_BEGIN("cube-probe",
+                                 "tex image=%08X fmt=%X %ux%u dim=%u layers=%u first=%u mips=%u pitch=%u upload=%d "
+                                 "storage=%d\n",
+                                 img_ptr, fmt, w, h, dim, layers, first_slice, mip_levels,
+                                 descriptor_word(data, GX2SURF_PITCH), int(upload),
+                                 int(entry.image.image != VK_NULL_HANDLE));
             for (auto& [key, cbc] : image_views(S.cb_map, img_ptr))
-                RBREW_LOGF(stderr, "[cube-probe]   cb key=%08X,%X,%u,%u,%u,mip%u,slice%u,n%u,aa%u gen=%llu\n", key[0],
-                           key[1], key[2], key[3], key[4], key[5], key[6], key[7], key[8],
-                           (unsigned long long)cbc.image.content_generation);
+                RBREW_LOG_INFO("cube-probe", "  cb key=%08X,%X,%u,%u,%u,mip%u,slice%u,n%u,aa%u gen=%llu\n", key[0],
+                               key[1], key[2], key[3], key[4], key[5], key[6], key[7], key[8],
+                               (unsigned long long)cbc.image.content_generation);
         }
     }
     if (target != wire::TEXTURE_2D && entry.image.image) {
@@ -2193,9 +2193,9 @@ void gx2_render_upload_texture(uint32_t tex_addr, uint32_t slot, uint8_t* mem, c
             live_copy_recorded(entry, cb);
             copied = true;
             if (g_trace_active)
-                RBREW_LOGF(stderr,
-                           "[tex] slot %u samples render target slice %u image %08X (gl tex %u %ux%ux%u fmt %X)\n",
-                           slot, key[6], img_ptr, entry.tex.id, w, h, layers, fmt);
+                RBREW_LOG_DEBUG("tex",
+                                "slot %u samples render target slice %u image %08X (gl tex %u %ux%ux%u fmt %X)\n", slot,
+                                key[6], img_ptr, entry.tex.id, w, h, layers, fmt);
         }
     }
 }
@@ -2259,9 +2259,9 @@ void gx2_render_restore_context_state(uint32_t context_state, uint8_t* mem) {
     if (found == S.context_snapshots.end()) return;
     const auto snapshot = found->second;
     if (g_trace_active)
-        RBREW_LOGF(stderr, "[ftrace] restore context %08X depth %p -> %p color0 %p -> %p\n", context_state,
-                   (void*)S.depth_target, (void*)snapshot.depth_target, (void*)S.color_targets[0],
-                   (void*)snapshot.color_targets[0]);
+        RBREW_LOG_DEBUG("ftrace", "restore context %08X depth %p -> %p color0 %p -> %p\n", context_state,
+                        (void*)S.depth_target, (void*)snapshot.depth_target, (void*)S.color_targets[0],
+                        (void*)snapshot.color_targets[0]);
     S.color_targets = snapshot.color_targets;
     S.depth_target = snapshot.depth_target;
     S.cur_vs = snapshot.vertex_shader;
@@ -2446,9 +2446,9 @@ void gx2_render_copy_surface(const uint8_t* src, uint32_t src_mip, uint32_t src_
     // side is LINEAR_SPECIAL: complete readback and guest publication here.
     if (descriptor_word(src, GX2SURF_TILE_MODE) == 16 || descriptor_word(dst, GX2SURF_TILE_MODE) == 16) {
         if (!copy_cpu_surface(src, src_mip, src_slice, dst, dst_mip, dst_slice, mem))
-            RBREW_LOGF(stderr, "[gx2] unsupported or invalid CPU surface copy fmt=%X/%X mip=%u/%u slice=%u/%u\n",
-                       descriptor_word(src, GX2SURF_FORMAT), descriptor_word(dst, GX2SURF_FORMAT), src_mip, dst_mip,
-                       src_slice, dst_slice);
+            RBREW_LOG_ERROR("gx2", "unsupported or invalid CPU surface copy fmt=%X/%X mip=%u/%u slice=%u/%u\n",
+                            descriptor_word(src, GX2SURF_FORMAT), descriptor_word(dst, GX2SURF_FORMAT), src_mip,
+                            dst_mip, src_slice, dst_slice);
         return;
     }
     const auto color_targets = S.color_targets;
@@ -2608,7 +2608,7 @@ void gx2r::capture_next_present(const std::string& path) {
 }
 void gx2_render_set_scan_format(bool gamepad, uint32_t format) {
     S.scan_formats[gamepad] = format;
-    RBREW_LOGF(stderr, "[scan] %s buffer format=%X (sRGB=%u)\n", gamepad ? "DRC" : "TV", format, (format >> 10) & 1);
+    RBREW_LOG_DEBUG("scan", "%s buffer format=%X (sRGB=%u)\n", gamepad ? "DRC" : "TV", format, (format >> 10) & 1);
 }
 
 extern void gx2r_capture_frame_copy(); // gx2_render_vk_capture.cpp
@@ -2624,8 +2624,8 @@ void gx2_render_copy_to_scan(uint32_t cb_addr, uint32_t scan_target, uint8_t* me
     static unsigned scan_logs = 0;
     if (scan_logs < 8) {
         ++scan_logs;
-        RBREW_LOGF(stderr, "[gx2_render] GX2CopyColorBufferToScanBuffer cb=0x%08X target=%u fbo_map_size=%zu\n",
-                   cb_addr, scan_target, S.cb_map.size());
+        RBREW_LOG_INFO("gx2_render", "GX2CopyColorBufferToScanBuffer cb=0x%08X target=%u fbo_map_size=%zu\n", cb_addr,
+                       scan_target, S.cb_map.size());
     }
     const auto scan_key = color_image_key(cb_addr, mem, descriptor);
     auto it = S.cb_map.find(scan_key);
@@ -2652,11 +2652,12 @@ void gx2_render_copy_to_scan(uint32_t cb_addr, uint32_t scan_target, uint8_t* me
     if (it == S.cb_map.end()) {
         static unsigned misses = 0;
         if (misses++ < 20)
-            RBREW_LOGF(stderr,
-                       "[scan] missing source target=%u image=%08X fmt=%X size=%ux%u pitch=%u mip=%u slice=%u count=%u "
-                       "aa=%u\n",
-                       scan_target, scan_key[0], scan_key[1], scan_key[2], scan_key[3], scan_key[4], scan_key[5],
-                       scan_key[6], scan_key[7], scan_key[8]);
+            RBREW_LOG_ERROR_BEGIN(
+                "scan",
+                "missing source target=%u image=%08X fmt=%X size=%ux%u pitch=%u mip=%u slice=%u count=%u "
+                "aa=%u\n",
+                scan_target, scan_key[0], scan_key[1], scan_key[2], scan_key[3], scan_key[4], scan_key[5], scan_key[6],
+                scan_key[7], scan_key[8]);
         return;
     }
     ColorTarget& scan = it->second;
@@ -2813,7 +2814,7 @@ static void frame_signature(gx2vk::Image& image, uint32_t width, uint32_t height
     ++seq;
     std::vector<uint8_t> raw;
     if (!gx2vk::read_image(image, VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, width, height, raw)) {
-        RBREW_LOGF(stderr, "[sig] %u g=%u readback failed\n", seq, gamepad ? 1u : 0u);
+        RBREW_LOG_ERROR("sig", "%u g=%u readback failed\n", seq, gamepad ? 1u : 0u);
         return;
     }
     const VkFormat format = image.desc.format;
@@ -2881,7 +2882,7 @@ static void frame_signature(gx2vk::Image& image, uint32_t width, uint32_t height
     hist_b[hist_pos] = b;
     hist_pos = (hist_pos + 1) % 12;
     if (hist_n < 12) ++hist_n;
-    RBREW_LOGF(stderr, "[sig] %u g=%u a=%u b=%u%s\n", seq, gamepad ? 1u : 0u, a, b, dev > 25 ? " GLITCH" : "");
+    RBREW_LOG_DEBUG("sig", "%u g=%u a=%u b=%u%s\n", seq, gamepad ? 1u : 0u, a, b, dev > 25 ? " GLITCH" : "");
 }
 #else
 static void frame_signature(gx2vk::Image&, uint32_t, uint32_t, bool) {}
@@ -2908,21 +2909,22 @@ void gx2_render_present(void* sdl_window, bool gamepad_mode) {
         constexpr uint64_t guest_committed =
             uint64_t(RBREW_APPLICATION_ARENA_END) + RBREW_FG_FREE_SIZE + RBREW_MEM1_SIZE + RBREW_SHARED_DATA_SIZE;
         const auto [lists_recorded, lists_resident] = gx2_dl_recording_counts();
-        RBREW_LOGF(stderr,
-                   "[mem] process in RAM %llu MB (private %llu MB) | system free %llu of %llu MB | guest reserved %llu "
-                   "MB committed %llu MB"
-                   " | GPU allocations %llu MB | vertex cache %zu meshes %llu MB | display lists %llu resident of %llu "
-                   "recorded\n",
-                   (unsigned long long)(m.working_set >> 20), (unsigned long long)(m.private_bytes >> 20),
-                   (unsigned long long)(m.available >> 20), (unsigned long long)(m.total >> 20),
-                   (unsigned long long)(uint64_t(WIIU_MEM_SIZE) >> 20), (unsigned long long)(guest_committed >> 20),
-                   (unsigned long long)(gx2vk::allocated_bytes() >> 20), gx2r_vertex_cache_entries(),
-                   (unsigned long long)(gx2r_vertex_cache_bytes() >> 20), (unsigned long long)lists_resident,
-                   (unsigned long long)lists_recorded);
+        RBREW_LOG_INFO_BEGIN(
+            "mem",
+            "process in RAM %llu MB (private %llu MB) | system free %llu of %llu MB | guest reserved %llu "
+            "MB committed %llu MB"
+            " | GPU allocations %llu MB | vertex cache %zu meshes %llu MB | display lists %llu resident of %llu "
+            "recorded\n",
+            (unsigned long long)(m.working_set >> 20), (unsigned long long)(m.private_bytes >> 20),
+            (unsigned long long)(m.available >> 20), (unsigned long long)(m.total >> 20),
+            (unsigned long long)(uint64_t(WIIU_MEM_SIZE) >> 20), (unsigned long long)(guest_committed >> 20),
+            (unsigned long long)(gx2vk::allocated_bytes() >> 20), gx2r_vertex_cache_entries(),
+            (unsigned long long)(gx2r_vertex_cache_bytes() >> 20), (unsigned long long)lists_resident,
+            (unsigned long long)lists_recorded);
     }
     if (present_log)
-        RBREW_LOGF(stderr, "[present] %u gamepad=%u image=%p size=%ux%u\n", present_seq, gamepad_mode ? 1u : 0u,
-                   (void*)image, w, h);
+        RBREW_LOG_INFO("present", "%u gamepad=%u image=%p size=%ux%u\n", present_seq, gamepad_mode ? 1u : 0u,
+                       (void*)image, w, h);
     gx2vk::Image* source = image;
     if (image && image->image && (image->desc.format == VK_FORMAT_R8G8B8A8_SRGB)) {
         // GPU blits sRGB scan textures to the window unconverted.
@@ -2980,10 +2982,10 @@ void gx2_render_present(void* sdl_window, bool gamepad_mode) {
                     saved = std::fclose(file) == 0 && wrote;
                 }
                 if (saved)
-                    RBREW_LOGF(stderr, "[capture] presented -> %s (%ux%u scan=%u)\n", path.c_str(), width, height,
-                               S.scan_tv_source_id);
+                    RBREW_LOG_INFO("capture", "presented -> %s (%ux%u scan=%u)\n", path.c_str(), width, height,
+                                   S.scan_tv_source_id);
                 else
-                    RBREW_LOGF(stderr, "[capture] cannot write presented image %s\n", path.c_str());
+                    RBREW_LOG_ERROR("capture", "cannot write presented image %s\n", path.c_str());
             }
         }
     } else {
@@ -3016,7 +3018,7 @@ void gx2_render_set_active_fetch_shader(uint32_t fs_addr) {
     S.active_fetch = fs_addr;
     static std::set<uint32_t> s_unknown;
     if (fs_addr && !S.fetch_shaders.count(fs_addr) && s_unknown.insert(fs_addr).second && s_unknown.size() <= 20)
-        RBREW_LOGF(stderr, "[gx2_render] fetch shader program %08X has no GX2InitFetchShaderEx layout\n", fs_addr);
+        RBREW_LOG_INFO("gx2_render", "fetch shader program %08X has no GX2InitFetchShaderEx layout\n", fs_addr);
 }
 void gx2_render_store_fetch_attributes(uint32_t program, const std::vector<R700FetchAttribute>& attributes) {
     if (!program || attributes.empty()) return;

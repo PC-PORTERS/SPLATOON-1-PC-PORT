@@ -102,7 +102,7 @@ static void OSCreateThread(CPUState* cpu) {
     uint32_t ptr_arg = ARG3;
     uint32_t stack_top = ARG4; // r7 = high end of stack
 
-    RBREW_LOGF(stderr, "[coreinit] OSCreateThread(thread=0x%08X entry=0x%08X)\n", thread_addr, entry_addr);
+    RBREW_LOG_INFO("coreinit", "OSCreateThread(thread=0x%08X entry=0x%08X)\n", thread_addr, entry_addr);
 
     if (!thread_addr || !entry_addr) {
         RET = 0;
@@ -191,14 +191,14 @@ static void OSResumeThread(CPUState* cpu) {
         rbrew_thread_core_slot = &gt->core;
         memset(t_thread_specific, 0, sizeof(t_thread_specific));
 
-        RBREW_LOGF(stderr, "[coreinit] thread 0x%08X started (entry=0x%08X host_tid=%lu cpu=%p)\n", gt->osthread_addr,
-                   gt->entry_addr, host_thread_id(), (void*)&gt->cpu);
+        RBREW_LOG_INFO("coreinit", "thread 0x%08X started (entry=0x%08X host_tid=%lu cpu=%p)\n", gt->osthread_addr,
+                       gt->entry_addr, host_thread_id(), (void*)&gt->cpu);
         try {
             rbrew_dispatch(&gt->cpu, gt->entry_addr);
         } catch (const GuestThreadExit&) {
             // OSExitThread was called — clean exit
         }
-        RBREW_LOGF(stderr, "[coreinit] thread 0x%08X finished\n", gt->osthread_addr);
+        RBREW_LOG_INFO("coreinit", "thread 0x%08X finished\n", gt->osthread_addr);
 
         // Mark MORIBUND in guest struct
         if (rbrew_memory_accessible(gt->cpu.mem, gt->osthread_addr, 0x20u))

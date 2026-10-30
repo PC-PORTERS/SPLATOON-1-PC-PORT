@@ -1,5 +1,6 @@
 #include "discord_rpc.h"
 #include "native_control_defaults.h"
+#include "rebrewu/logger.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -161,7 +162,7 @@ static bool send_handshake(HANDLE pipe, const std::string& client_id) {
         if (resp_hdr.length > 0 && resp_hdr.length < 4096) {
             std::vector<char> buffer(resp_hdr.length + 1, 0);
             pipe_read_all(pipe, buffer.data(), resp_hdr.length, 1000);
-            fprintf(stderr, "[Discord RPC] Handshake error (opcode %u): %s\n", resp_hdr.opcode, buffer.data());
+            RBREW_LOG_ERROR("Discord RPC", "Handshake error (opcode %u): %s\n", resp_hdr.opcode, buffer.data());
         }
         return false;
     }
@@ -169,7 +170,7 @@ static bool send_handshake(HANDLE pipe, const std::string& client_id) {
         std::vector<char> buffer(resp_hdr.length + 1, 0);
         if (!pipe_read_all(pipe, buffer.data(), resp_hdr.length, 3000)) return false;
         if (strstr(buffer.data(), "DISPATCH") == nullptr && strstr(buffer.data(), "READY") == nullptr) {
-            fprintf(stderr, "[Discord RPC] Unexpected handshake response: %s\n", buffer.data());
+            RBREW_LOG_INFO("Discord RPC", "Unexpected handshake response: %s\n", buffer.data());
             return false;
         }
     }
@@ -222,15 +223,15 @@ static void discord_worker() {
                     CloseHandle(pipe);
                     pipe = INVALID_HANDLE_VALUE;
                     if (!fallback_tried && *kDefaultWorkingClientId && current_id != kDefaultWorkingClientId) {
-                        fprintf(stderr, "[Discord RPC] Configured ID %s failed handshake, falling back to %s\n",
-                                current_id.c_str(), kDefaultWorkingClientId);
+                        RBREW_LOG_ERROR("Discord RPC", "Configured ID %s failed handshake, falling back to %s\n",
+                                        current_id.c_str(), kDefaultWorkingClientId);
                         current_id = kDefaultWorkingClientId;
                         fallback_tried = true;
                         continue;
                     }
                 } else {
-                    fprintf(stderr, "[Discord RPC] Connected and active on Discord! (Client ID: %s)\n",
-                            current_id.c_str());
+                    RBREW_LOG_INFO("Discord RPC", "Connected and active on Discord! (Client ID: %s)\n",
+                                   current_id.c_str());
                     std::lock_guard<std::mutex> lock(s_mutex);
                     s_dirty = true;
                 }

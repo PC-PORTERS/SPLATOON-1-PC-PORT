@@ -505,8 +505,8 @@ static TexObject* shadow_depth_copy(const TexObject& source) {
         gx2vk::note_gpu_write(c.image);
         c.source_generation = src.content_generation;
         if (shadow_log())
-            RBREW_LOGF(stderr, "[shadow] SAMPLE_C on color texture: depth copy %ux%ux%u fmt %d -> %d\n", sd.width,
-                       sd.height, sd.layers, int(sd.format), int(format));
+            RBREW_LOG_DEBUG("shadow", "SAMPLE_C on color texture: depth copy %ux%ux%u fmt %d -> %d\n", sd.width,
+                            sd.height, sd.layers, int(sd.format), int(format));
     }
     return &c.tex;
 }
@@ -813,8 +813,8 @@ void trace_shader(uint32_t addr, bool pixel, uint8_t* mem) {
     // after the boot/menu shaders (a frame trace is usually taken in-game).
     if (seen.size() >= 128 || !seen.emplace(key, true).second) return;
     auto p = gx2_shader_program({mem, WIIU_MEM_SIZE}, addr, pixel);
-    RBREW_LOGF(stderr, "[shader] %s descriptor=%08X program=%08X bytes=%u mode=%u attributes=%u\n", pixel ? "PS" : "VS",
-               addr, p.address, p.size, p.mode, p.attribute_count);
+    RBREW_LOG_INFO("shader", "%s descriptor=%08X program=%08X bytes=%u mode=%u attributes=%u\n", pixel ? "PS" : "VS",
+                   addr, p.address, p.size, p.mode, p.attribute_count);
     if (!p) return;
     char path[1024];
     std::snprintf(path, sizeof(path), "%s/%s_%08X.bin", configured.c_str(), pixel ? "ps" : "vs", addr);
@@ -894,17 +894,17 @@ void trace_program_key_miss(uint32_t vs, uint32_t ps, bool reused) {
     auto& last = previous[{vs, ps}];
     if (!last.empty()) {
         ++lines;
-        RBREW_LOGF(stderr, "[keymiss] VS=%08X PS=%08X %s:", vs, ps, reused ? "reused" : "linked");
+        RBREW_LOG_DEBUG_BEGIN("keymiss", "VS=%08X PS=%08X %s:", vs, ps, reused ? "reused" : "linked");
         unsigned shown = 0;
         for (size_t i = 0; i < now.size() && shown < 12; ++i)
             if (now[i] != last[i]) {
                 ++shown;
                 if (i < 0x400)
-                    RBREW_LOGF(stderr, " %04X:%08X->%08X", unsigned(0xA000 + i), last[i], now[i]);
+                    RBREW_LOG_RAW(" %04X:%08X->%08X", unsigned(0xA000 + i), last[i], now[i]);
                 else
-                    RBREW_LOGF(stderr, " tex%zu:%08X->%08X", i - 0x400, last[i], now[i]);
+                    RBREW_LOG_RAW(" tex%zu:%08X->%08X", i - 0x400, last[i], now[i]);
             }
-        RBREW_LOGF(stderr, "\n");
+        RBREW_LOG_RAW("\n");
     }
     last = std::move(now);
 
@@ -1204,9 +1204,9 @@ bool write_translation_pack(const TranslationSnapshot& snapshot, const std::stri
     std::error_code ec;
     if (ok) std::filesystem::rename(temporary, path, ec);
     if (!ok || ec) std::filesystem::remove(temporary, ec);
-    RBREW_LOGF(stderr, "[shader] translation pack %s: %zu entries, %zu bodies (%llu MB)\n",
-               ok && !ec ? "written" : "write failed", snapshot.size(), bodies.size(),
-               (unsigned long long)(body_bytes >> 20));
+    RBREW_LOG_INFO("shader", "translation pack %s: %zu entries, %zu bodies (%llu MB)\n",
+                   ok && !ec ? "written" : "write failed", snapshot.size(), bodies.size(),
+                   (unsigned long long)(body_bytes >> 20));
     return ok && !ec;
 }
 struct PreloadStats {
@@ -1214,7 +1214,7 @@ struct PreloadStats {
     bool complete = false, pack_written = false;
 };
 PreloadStats run_translation_preload(TranslationPreload& preload, const std::string& dir, const std::string& prefix) {
-    RBREW_LOGF(stderr, "[shader] translation preload started: %s\n", dir.c_str());
+    RBREW_LOG_INFO("shader", "translation preload started: %s\n", dir.c_str());
     const auto start = std::chrono::steady_clock::now();
     const uint64_t budget = gx2_host_total_ram() ? gx2_host_total_ram() / 8 : (1ull << 30);
     std::atomic<uint64_t> bytes{0}; // held: distinct bodies only
@@ -1339,8 +1339,7 @@ PreloadStats run_translation_preload(TranslationPreload& preload, const std::str
     for (auto& t : pool) t.join();
     const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
     if (over_budget) { // too large to hold: lookups keep probing the disk
-        RBREW_LOGF(stderr, "[shader] translation preload stopped at %llu MB budget\n",
-                   (unsigned long long)(budget >> 20));
+        RBREW_LOG_INFO("shader", "translation preload stopped at %llu MB budget\n", (unsigned long long)(budget >> 20));
         return {on_disk, from_pack, files.size(), stale, false, false};
     }
     // 3. Refresh the pack when that saves many opens next time (or it is an
@@ -1353,9 +1352,9 @@ PreloadStats run_translation_preload(TranslationPreload& preload, const std::str
     preload.done.store(true, std::memory_order_release);
     preload.finished = true;
     preload.finished.notify_all();
-    RBREW_LOGF(stderr,
-               "[shader] translation preload: %zu files (%zu from pack, %zu read), %zu distinct, %llu MB in %.2f s\n",
-               on_disk, from_pack, files.size(), distinct.load(), (unsigned long long)(bytes >> 20), seconds);
+    RBREW_LOG_INFO("shader",
+                   "translation preload: %zu files (%zu from pack, %zu read), %zu distinct, %llu MB in %.2f s\n",
+                   on_disk, from_pack, files.size(), distinct.load(), (unsigned long long)(bytes >> 20), seconds);
     bool pack_written = false;
     if (write_pack) {
 #if defined(_WIN32)
@@ -1990,15 +1989,15 @@ void note_exact_key_miss(uint32_t vs, uint32_t ps, const uint8_t* mem, uint32_t 
         std::vector<std::pair<uint64_t, uint32_t>> top;
         for (const auto& [r, n] : by_register) top.push_back({n, r});
         std::sort(top.rbegin(), top.rend());
-        RBREW_LOGF(stderr,
-                   "[shader] key misses=%llu new_pair=%llu changed: code=%llu regs=%llu tex=%llu fetch=%llu other=%llu "
-                   "| top regs:",
-                   (unsigned long long)misses, (unsigned long long)first, (unsigned long long)code,
-                   (unsigned long long)regs, (unsigned long long)tex, (unsigned long long)fetch,
-                   (unsigned long long)other);
+        RBREW_LOG_INFO_BEGIN(
+            "shader",
+            "key misses=%llu new_pair=%llu changed: code=%llu regs=%llu tex=%llu fetch=%llu other=%llu "
+            "| top regs:",
+            (unsigned long long)misses, (unsigned long long)first, (unsigned long long)code, (unsigned long long)regs,
+            (unsigned long long)tex, (unsigned long long)fetch, (unsigned long long)other);
         for (size_t k = 0; k < top.size() && k < 8; ++k)
-            RBREW_LOGF(stderr, " %04X:%llu", top[k].second, (unsigned long long)top[k].first);
-        RBREW_LOGF(stderr, "\n");
+            RBREW_LOG_RAW(" %04X:%llu", top[k].second, (unsigned long long)top[k].first);
+        RBREW_LOG_RAW("\n");
     }
 
 #endif
@@ -2277,12 +2276,12 @@ Program* resolve_active_program_impl(uint8_t* mem) {
                 ++checked;
                 if (!same) {
                     ++different;
-                    RBREW_LOGF(stderr, "[shader] key verify DIFFERS program=%u VS=%08X PS=%08X (%llu of %llu)\n", p.id,
-                               vs_program.address, ps_program.address, (unsigned long long)different,
-                               (unsigned long long)checked);
+                    RBREW_LOG_ERROR("shader", "key verify DIFFERS program=%u VS=%08X PS=%08X (%llu of %llu)\n", p.id,
+                                    vs_program.address, ps_program.address, (unsigned long long)different,
+                                    (unsigned long long)checked);
                 } else if (checked % 100 == 0) {
-                    RBREW_LOGF(stderr, "[shader] key verify %llu identical, %llu different\n",
-                               (unsigned long long)(checked - different), (unsigned long long)different);
+                    RBREW_LOG_ERROR("shader", "key verify %llu identical, %llu different\n",
+                                    (unsigned long long)(checked - different), (unsigned long long)different);
                 }
                 std::free(vs);
                 std::free(ps);
@@ -2404,11 +2403,11 @@ Program* resolve_active_program_impl(uint8_t* mem) {
                 ++checked;
                 if (!same_translation(ps_glsl, info[1], serial, serial_info)) {
                     ++different;
-                    RBREW_LOGF(stderr, "[shader] parallel translation DIFFERS PS=%08X (%llu of %llu)\n",
-                               ps_program.address, (unsigned long long)different, (unsigned long long)checked);
+                    RBREW_LOG_ERROR("shader", "parallel translation DIFFERS PS=%08X (%llu of %llu)\n",
+                                    ps_program.address, (unsigned long long)different, (unsigned long long)checked);
                 } else if (checked % 100 == 0) {
-                    RBREW_LOGF(stderr, "[shader] parallel translation verified %llu identical, %llu different\n",
-                               (unsigned long long)(checked - different), (unsigned long long)different);
+                    RBREW_LOG_ERROR("shader", "parallel translation verified %llu identical, %llu different\n",
+                                    (unsigned long long)(checked - different), (unsigned long long)different);
                 }
             }
             std::free(ps_glsl);
@@ -2432,9 +2431,9 @@ Program* resolve_active_program_impl(uint8_t* mem) {
                 std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - translate_start)
                     .count());
         if ((hits + misses) % 1000 == 0)
-            RBREW_LOGF(stderr, "[shader] translation cache hits=%llu misses=%llu parallel=%d miss_us=%.1f\n",
-                       (unsigned long long)hits, (unsigned long long)misses, int(parallel_translation()),
-                       misses ? miss_ns / 1e3 / double(misses) : 0.0);
+            RBREW_LOG_INFO("shader", "translation cache hits=%llu misses=%llu parallel=%d miss_us=%.1f\n",
+                           (unsigned long long)hits, (unsigned long long)misses, int(parallel_translation()),
+                           misses ? miss_ns / 1e3 / double(misses) : 0.0);
     }
 #endif
     if (const char* directory = rbrew_diagnostic_env("RBREW_SHADER_DUMP_DIR"); directory && vs_glsl && ps_glsl) {
@@ -2476,8 +2475,8 @@ Program* resolve_active_program_impl(uint8_t* mem) {
     std::free(vs_glsl);
     std::free(ps_glsl);
     if (!reused)
-        RBREW_LOGF(stderr, "[shader] native program=%u VS=%08X%s PS=%08X%s\n", prog ? prog->id : 0, vs_program.address,
-                   S.vs_from_regs ? "(regs)" : "", ps_program.address, S.ps_from_regs ? "(regs)" : "");
+        RBREW_LOG_INFO("shader", "native program=%u VS=%08X%s PS=%08X%s\n", prog ? prog->id : 0, vs_program.address,
+                       S.vs_from_regs ? "(regs)" : "", ps_program.address, S.ps_from_regs ? "(regs)" : "");
     trace_program_key_miss(vs_program.address, ps_program.address, reused);
     s_prog_cache[key] = prog;
     return prog;
@@ -2871,7 +2870,7 @@ VkPipeline create_pipeline(const PipelineRequest& r, const PipelineSwitches& s) 
         VK_SUCCESS) {
         TXDIAG(
             txdiag::event("pipeline_create_failed", "\"program\":%u,\"layout\":%llu", p.id, txdiag::handle(p.layout)));
-        RBREW_LOGF(stderr, "[vk] pipeline creation failed for program %u\n", p.id);
+        RBREW_LOG_ERROR("vk", "pipeline creation failed for program %u\n", p.id);
         pipeline = VK_NULL_HANDLE;
     }
     (void)stream;
@@ -2971,7 +2970,7 @@ void warm_record_pipeline(const PipelineRequest& r, const PipelineSwitches& s) {
         // Recorded earlier yet created at a draw: the warm-up did not cover it.
         static uint64_t missed = 0;
         if (++missed <= 10 || missed % 1000 == 0)
-            RBREW_LOGF(stderr, "[warm] recorded pipeline built at draw time (%llu)\n", (unsigned long long)missed);
+            RBREW_LOG_INFO("warm", "recorded pipeline built at draw time (%llu)\n", (unsigned long long)missed);
         return;
     }
     warm_append(kWarmPipeline, &record, sizeof(record));
@@ -3069,7 +3068,7 @@ void warm_start() {
     // instead of opening each file again while it runs.
     start_translation_preload(dir);
     wait_translation_preload(dir, s_warm_progress ? +[](double f) { s_warm_progress(0.5 * f); } : nullptr);
-    RBREW_LOGF(stderr, "[warm] translation preload ready after %.2f s\n", warm_seconds());
+    RBREW_LOG_INFO("warm", "translation preload ready after %.2f s\n", warm_seconds());
     double load_seconds = 0, link_seconds = 0, last_progress = 0;
     size_t loaded = 0, linked = 0, visited = 0;
     // Keys with byte-identical translations share one interned body and link
@@ -3152,11 +3151,11 @@ void warm_start() {
     linked = atomic_linked.load();
     visited = atomic_visited.load();
     body_links.clear(); // releases the last references to linked bodies
-    RBREW_LOGF(stderr, "[warm] %zu programs listed, %zu loaded (%.2f s), %zu linked (%.2f s), loop %.2f s\n",
-               programs.size(), loaded, load_seconds, linked, link_seconds, warm_seconds());
+    RBREW_LOG_INFO("warm", "%zu programs listed, %zu loaded (%.2f s), %zu linked (%.2f s), loop %.2f s\n",
+                   programs.size(), loaded, load_seconds, linked, link_seconds, warm_seconds());
     for (const auto& p : pipelines) s_warm.pending.push_back(p);
     warm_poll();
-    RBREW_LOGF(stderr, "[warm] %zu pipelines queued, total %.2f s\n", pipelines.size(), warm_seconds());
+    RBREW_LOG_INFO("warm", "%zu pipelines queued, total %.2f s\n", pipelines.size(), warm_seconds());
     // Rewrite the file without duplicates, then append to it from now on.
     bool rewritten = false;
     if (std::FILE* f = std::fopen((path + ".tmp").c_str(), "wb")) {
@@ -3218,8 +3217,8 @@ const VertexCacheLimits& vertex_cache_limits() {
         const uint64_t ram = gx2_host_total_ram();
         const size_t entries = ram >= (24ull << 30) ? 262144 : ram >= (12ull << 30) ? 131072 : 65536;
         const uint64_t bytes = ram ? ram / 4 : (1ull << 30); // a quarter of physical RAM
-        RBREW_LOGF(stderr, "[mem] vertex cache: %zu entries, %llu MB budget (system RAM %llu MB)\n", entries,
-                   (unsigned long long)(bytes >> 20), (unsigned long long)(ram >> 20));
+        RBREW_LOG_INFO("mem", "vertex cache: %zu entries, %llu MB budget (system RAM %llu MB)\n", entries,
+                       (unsigned long long)(bytes >> 20), (unsigned long long)(ram >> 20));
         return VertexCacheLimits{entries, entries / 2, bytes};
     }();
     return limits;
@@ -3321,15 +3320,16 @@ void cache_verify(const char* kind, const uint8_t* mem, uint32_t addr, uint32_t 
         const bool pending = gx2_write_watch_pending(mem, addr, size);
         (pending ? stale_pending : stale_missed)++;
         if (logged++ < 400)
-            RBREW_LOGF(stderr,
-                       "[cache-verify] STALE %s addr=%08X size=%u first_diff=%u differ=%u cached_gen=%llu gen=%llu "
-                       "pending=%d serial=%llu\n",
-                       kind, addr, size, first, differ, (unsigned long long)cached_written, (unsigned long long)written,
-                       int(pending), (unsigned long long)gx2vk::recording_serial());
+            RBREW_LOG_ERROR_BEGIN("cache-verify",
+                                  "STALE %s addr=%08X size=%u first_diff=%u differ=%u cached_gen=%llu gen=%llu "
+                                  "pending=%d serial=%llu\n",
+                                  kind, addr, size, first, differ, (unsigned long long)cached_written,
+                                  (unsigned long long)written, int(pending),
+                                  (unsigned long long)gx2vk::recording_serial());
     }
     if (hits % 200000 == 0)
-        RBREW_LOGF(stderr, "[cache-verify] hits=%llu stale_pending=%llu stale_missed=%llu\n", (unsigned long long)hits,
-                   (unsigned long long)stale_pending, (unsigned long long)stale_missed);
+        RBREW_LOG_WARN("cache-verify", "hits=%llu stale_pending=%llu stale_missed=%llu\n", (unsigned long long)hits,
+                       (unsigned long long)stale_pending, (unsigned long long)stale_missed);
 }
 #endif
 BufferRef cached_vertex_buffer(uint8_t* mem, uint32_t addr, uint32_t size, uint64_t written) {
@@ -3449,9 +3449,9 @@ void setup_vertex_attribs(uint8_t* mem, Program& prog, VertexBindings& out) {
     const uint32_t input_limit = vertex_input_limit();
     auto it = S.fetch_shaders.find(S.active_fetch);
     if (g_trace_active)
-        RBREW_LOGF(stderr, "[ftrace]   fetch program=%08X known=%d attributes=%zu\n", S.active_fetch,
-                   int(it != S.fetch_shaders.end()),
-                   it != S.fetch_shaders.end() ? it->second.attributes.size() : size_t(0));
+        RBREW_LOG_DEBUG("ftrace", "  fetch program=%08X known=%d attributes=%zu\n", S.active_fetch,
+                        int(it != S.fetch_shaders.end()),
+                        it != S.fetch_shaders.end() ? it->second.attributes.size() : size_t(0));
     std::array<BufferRef, 32> vbo{};
     std::vector<R700FetchAttribute> none;
     const auto& attributes = it != S.fetch_shaders.end() ? it->second.attributes : none;
@@ -3511,9 +3511,9 @@ void setup_vertex_attribs(uint8_t* mem, Program& prog, VertexBindings& out) {
         const uint32_t buf_slot = attr.buffer;
         uint32_t offset = attr.offset;
         if (g_trace_active)
-            RBREW_LOGF(stderr, "[ftrace]   attr loc=%u buf=%u off=%u fmt=%X vbo_addr=%08X size=%u stride=%u\n",
-                       location, buf_slot, offset, attr.guest_format, buf_slot < 32 ? S.attrib[buf_slot].guest_addr : 0,
-                       buf_slot < 32 ? S.attrib[buf_slot].size : 0, buf_slot < 32 ? S.attrib[buf_slot].stride : 0);
+            RBREW_LOG_DEBUG("ftrace", "  attr loc=%u buf=%u off=%u fmt=%X vbo_addr=%08X size=%u stride=%u\n", location,
+                            buf_slot, offset, attr.guest_format, buf_slot < 32 ? S.attrib[buf_slot].guest_addr : 0,
+                            buf_slot < 32 ? S.attrib[buf_slot].size : 0, buf_slot < 32 ? S.attrib[buf_slot].stride : 0);
         if (!vbo[buf_slot].buffer) continue;
         if (attr.format == VK_FORMAT_UNDEFINED) break; // the GPU loop aborts the remaining attributes
         const auto& ab = S.attrib[buf_slot];
@@ -3624,7 +3624,7 @@ bool build_stage(uint8_t* mem, Program& prog, unsigned stage, StageDescriptors& 
                 if (stage == 1 && g_trace_active && remapped_bytes) {
                     float c[4];
                     std::memcpy(c, values, 16);
-                    RBREW_LOGF(stderr, "[ftrace] PS remapped c0=(%g %g %g %g)\n", c[0], c[1], c[2], c[3]);
+                    RBREW_LOG_DEBUG("ftrace", "PS remapped c0=(%g %g %g %g)\n", c[0], c[1], c[2], c[3]);
                 }
             }
         } else if (info.uniform_mode == 2 && vk.offset_registers >= 0) {
@@ -4196,12 +4196,12 @@ uint32_t frame_trace_end_query(VkCommandBuffer cb) {
 void frame_trace_draw(Program& prog) {
     if (!g_trace_active) return;
     const auto& g = S.raster;
-    RBREW_LOGF(stderr, "[ftrace] draw#%u fbo=%u prog=%u vs=%08X ps=%08X vp=%d,%d,%dx%d blend=%d cw=%d depth=%d\n",
-               s_frame_draw_index - 1, S.current_fbo_id, prog.id, S.cur_vs, S.cur_ps, g.viewport[0], g.viewport[1],
-               g.viewport[2], g.viewport[3], int(g.blend), int(S.color_write), int(g.depth_test));
-    RBREW_LOGF(stderr, "[ftrace]   blend rgb=%X/%X eq=%X alpha=%X/%X eq=%X mask0=%X regs A1E0=%08X A202=%08X\n",
-               g.blend_src_rgb, g.blend_dst_rgb, g.blend_eq_rgb, g.blend_src_alpha, g.blend_dst_alpha, g.blend_eq_alpha,
-               unsigned(g.color_mask[0]), S.regs[0xA1E0], S.regs[0xA202]);
+    RBREW_LOG_DEBUG("ftrace", "draw#%u fbo=%u prog=%u vs=%08X ps=%08X vp=%d,%d,%dx%d blend=%d cw=%d depth=%d\n",
+                    s_frame_draw_index - 1, S.current_fbo_id, prog.id, S.cur_vs, S.cur_ps, g.viewport[0], g.viewport[1],
+                    g.viewport[2], g.viewport[3], int(g.blend), int(S.color_write), int(g.depth_test));
+    RBREW_LOG_DEBUG("ftrace", "  blend rgb=%X/%X eq=%X alpha=%X/%X eq=%X mask0=%X regs A1E0=%08X A202=%08X\n",
+                    g.blend_src_rgb, g.blend_dst_rgb, g.blend_eq_rgb, g.blend_src_alpha, g.blend_dst_alpha,
+                    g.blend_eq_alpha, unsigned(g.color_mask[0]), S.regs[0xA1E0], S.regs[0xA202]);
     // Raw sampler words of every unit the pixel stage reads: word0 carries the
     // filters and the depth-compare function, word1 the LOD clamps and word2
     // FORCE_DEGAMMA/high-precision flags. These identify a material's sampling
@@ -4209,26 +4209,26 @@ void frame_trace_draw(Program& prog) {
     for (unsigned t = 0; t < 18; ++t)
         if (prog.info[1].vk.texture_bindings[t] >= 0) {
             const uint32_t* w = &S.regs[0xF000 + t * 3];
-            RBREW_LOGF(stderr, "[ftrace]   ps tex%u sampler=%08X %08X %08X compare=%d\n", t, w[0], w[1], w[2],
-                       int(S.sampler_compare[t]));
+            RBREW_LOG_DEBUG("ftrace", "  ps tex%u sampler=%08X %08X %08X compare=%d\n", t, w[0], w[1], w[2],
+                            int(S.sampler_compare[t]));
         }
-    RBREW_LOGF(stderr, "[ftrace]   depth_func=%X write=%d alpha_control=%X\n", g.depth_func, int(g.depth_write),
-               S.regs[0xA104]);
-    RBREW_LOGF(stderr, "[ftrace]   scissor=%u %d,%d,%dx%d masks=%08X depth_size=%ux%u\n", unsigned(g.scissor_test),
-               g.scissor[0], g.scissor[1], g.scissor[2], g.scissor[3], S.target_masks,
-               S.depth_target ? S.depth_target->width : 0, S.depth_target ? S.depth_target->height : 0);
+    RBREW_LOG_DEBUG("ftrace", "  depth_func=%X write=%d alpha_control=%X\n", g.depth_func, int(g.depth_write),
+                    S.regs[0xA104]);
+    RBREW_LOG_DEBUG("ftrace", "  scissor=%u %d,%d,%dx%d masks=%08X depth_size=%ux%u\n", unsigned(g.scissor_test),
+                    g.scissor[0], g.scissor[1], g.scissor[2], g.scissor[3], S.target_masks,
+                    S.depth_target ? S.depth_target->width : 0, S.depth_target ? S.depth_target->height : 0);
     for (const auto& [key, e] : S.cb_map)
         for (unsigned i = 0; i < 8; ++i)
             if (S.color_targets[i] == &e && (S.target_masks & (15u << (4 * i))))
-                RBREW_LOGF(stderr, "[ftrace]   target%u image=%08X fmt=%X size=%ux%u mip=%u slice=%u aa=%u\n", i,
-                           key[0], key[1], e.width, e.height, key[5], key[6], key[8]);
+                RBREW_LOG_DEBUG("ftrace", "  target%u image=%08X fmt=%X size=%ux%u mip=%u slice=%u aa=%u\n", i, key[0],
+                                key[1], e.width, e.height, key[5], key[6], key[8]);
     for (unsigned i = 0; i < S.bound_textures.size(); ++i)
         if (S.bound_textures[i].address) {
             const auto* d = S.bound_textures[i].descriptor.data();
-            RBREW_LOGF(stderr, "[ftrace]   texture%u image=%08X fmt=%X size=%ux%u mip=%u slice=%u\n", i,
-                       descriptor_word(d, GX2SURF_IMAGE), descriptor_word(d, GX2SURF_FORMAT),
-                       descriptor_word(d, GX2SURF_WIDTH), descriptor_word(d, GX2SURF_HEIGHT),
-                       descriptor_word(d, GX2TEX_VIEW_MIP), descriptor_word(d, GX2TEX_VIEW_FIRST_SLICE));
+            RBREW_LOG_DEBUG("ftrace", "  texture%u image=%08X fmt=%X size=%ux%u mip=%u slice=%u\n", i,
+                            descriptor_word(d, GX2SURF_IMAGE), descriptor_word(d, GX2SURF_FORMAT),
+                            descriptor_word(d, GX2SURF_WIDTH), descriptor_word(d, GX2SURF_HEIGHT),
+                            descriptor_word(d, GX2TEX_VIEW_MIP), descriptor_word(d, GX2TEX_VIEW_FIRST_SLICE));
         }
 }
 
@@ -4258,8 +4258,8 @@ void frame_trace_after_draw(uint32_t prim, uint32_t count, uint32_t fragments) {
         }
     // mean/bright separate "the material was drawn but shaded dark" from
     // "the draw wrote nothing" - the question a dark-surface report needs.
-    RBREW_LOGF(stderr, "[ftrace]   -> prim=%X count=%u fragments=%u nonblack=%zu/%zu alpha>0=%zu mean=%u bright=%zu\n",
-               prim, count, fragments, rgb, samples, alpha, samples ? unsigned(luma / (samples * 3)) : 0u, bright);
+    RBREW_LOG_DEBUG("ftrace", "  -> prim=%X count=%u fragments=%u nonblack=%zu/%zu alpha>0=%zu mean=%u bright=%zu\n",
+                    prim, count, fragments, rgb, samples, alpha, samples ? unsigned(luma / (samples * 3)) : 0u, bright);
 }
 
 // ---------------------------------------------------------------------------
@@ -4320,12 +4320,12 @@ struct GuestStreamOut {
         if (!mask) return true;
         info = &program.info[0];
         if (position_capture || program.rect || !gx2vk::caps().transform_feedback) {
-            RBREW_LOGF(stderr,
-                       "[gx2] unsupported stream-out stage/capture or missing native transform-feedback capability\n");
+            RBREW_LOG_ERROR("gx2",
+                            "unsupported stream-out stage/capture or missing native transform-feedback capability\n");
             return false;
         }
         if ((S.regs[0xA2C8] & mask) != mask) {
-            RBREW_LOGF(stderr, "[gx2] stream-out shader uses a disabled output buffer\n");
+            RBREW_LOG_INFO("gx2", "stream-out shader uses a disabled output buffer\n");
             return false;
         }
         if (s_streamout_batch.pending_count >= StreamOutBatch::kMaxBatch) {
@@ -4353,8 +4353,8 @@ struct GuestStreamOut {
             offsets[i] = S.regs[0xA2B7 + i * 4];
             if (!addresses[i] || !sizes[i] || !rbrew_memory_accessible(mem, addresses[i], sizes[i]) ||
                 (offsets[i] & 3)) {
-                RBREW_LOGF(stderr, "[gx2] invalid stream-out buffer %u address=%08X size=%u offset=%u\n", i,
-                           addresses[i], sizes[i], offsets[i]);
+                RBREW_LOG_ERROR("gx2", "invalid stream-out buffer %u address=%08X size=%u offset=%u\n", i, addresses[i],
+                                sizes[i], offsets[i]);
                 return false;
             }
             const uint32_t stride = info->streamout_strides[i];
@@ -4362,7 +4362,7 @@ struct GuestStreamOut {
                 std::max<uint64_t>(sizes[i], uint64_t(offsets[i]) + assembled * instances * stride);
             if (!stride || stride > tf.maxTransformFeedbackBufferDataStride ||
                 capacity > tf.maxTransformFeedbackBufferSize || capacity > UINT32_MAX) {
-                RBREW_LOGF(stderr, "[gx2] stream-out exceeds native device limits\n");
+                RBREW_LOG_ERROR("gx2", "stream-out exceeds native device limits\n");
                 return false;
             }
             auto& b_data = s_streamout_batch.pool_data[batch_idx][i];
@@ -4466,15 +4466,15 @@ void flush_streamouts(uint8_t* mem) {
                 uint32_t written = 0;
                 std::memcpy(&written, entry.counter[i].memory.mapped, 4);
                 if (written < entry.offsets[i] || written > entry.data[i].size) {
-                    RBREW_LOGF(stderr, "[gx2] stream-out counter outside buffer %u: %u\n", i, written);
+                    RBREW_LOG_INFO("gx2", "stream-out counter outside buffer %u: %u\n", i, written);
                     continue;
                 }
                 const uint32_t end = std::min(written, entry.sizes[i]);
                 const uint32_t stride = entry.info->streamout_strides[i];
                 static const bool xfb_log = rbrew_diagnostic_env("RBREW_XFB_LOG") != nullptr;
                 if (xfb_log)
-                    RBREW_LOGF(stderr, "[xfb] publish slot=%u base=%08X start=%u end=%u written=%u\n", i,
-                               entry.addresses[i], entry.offsets[i], end, written);
+                    RBREW_LOG_DEBUG("xfb", "publish slot=%u base=%08X start=%u end=%u written=%u\n", i,
+                                    entry.addresses[i], entry.offsets[i], end, written);
                 const auto& words = entry.info->streamout_written_words[i];
                 for (uint32_t byte = entry.offsets[i]; byte < end;) {
                     const uint32_t word = ((byte - entry.offsets[i]) % stride) / 4;
@@ -4560,12 +4560,13 @@ static bool trace_skip(const char* reason) {
                txdiag::event("draw_skip", "\"reason\":%s,\"vs\":%u,\"ps\":%u,\"framebuffer\":%u",
                              txdiag::quote(reason).c_str(), S.cur_vs, S.cur_ps, S.current_fbo_id));
     if (g_trace_active)
-        RBREW_LOGF(stderr,
-                   "[ftrace] draw skipped: %s fb.valid=%d depth_only=%d depth=%p color0=%p masks=%X depth_target=%p "
-                   "vp=%d,%d,%dx%d\n",
-                   reason, int(S.framebuffer.valid), int(S.framebuffer.depth_only), (void*)S.framebuffer.depth,
-                   (void*)S.framebuffer.colors[0], S.target_masks, (void*)S.depth_target, S.raster.viewport[0],
-                   S.raster.viewport[1], S.raster.viewport[2], S.raster.viewport[3]);
+        RBREW_LOG_WARN_BEGIN("ftrace",
+                             "draw skipped: %s fb.valid=%d depth_only=%d depth=%p color0=%p masks=%X depth_target=%p "
+                             "vp=%d,%d,%dx%d\n",
+                             reason, int(S.framebuffer.valid), int(S.framebuffer.depth_only),
+                             (void*)S.framebuffer.depth, (void*)S.framebuffer.colors[0], S.target_masks,
+                             (void*)S.depth_target, S.raster.viewport[0], S.raster.viewport[1], S.raster.viewport[2],
+                             S.raster.viewport[3]);
     return false;
 }
 
@@ -4618,13 +4619,13 @@ bool issue_draw_program(Program* prog, uint8_t* mem, uint32_t prim, uint32_t cou
         else
             ++s_shadow_color_draws;
         if (shadow_log() && depth_only_pass && s_shadow_depth_only_draws <= 6)
-            RBREW_LOGF(stderr,
-                       "[shadow] depth-only draw prog=%u masks=%X depth=%ux%u gx2fmt=%X test=%d write=%d func=%X "
-                       "vp=%d,%d,%dx%d\n",
-                       prog->id, S.target_masks, s_active_fb.depth->width, s_active_fb.depth->height,
-                       s_active_fb.depth->gx2_format, int(S.raster.depth_test), int(S.raster.depth_write),
-                       S.raster.depth_func, S.raster.viewport[0], S.raster.viewport[1], S.raster.viewport[2],
-                       S.raster.viewport[3]);
+            RBREW_LOG_DEBUG_BEGIN("shadow",
+                                  "depth-only draw prog=%u masks=%X depth=%ux%u gx2fmt=%X test=%d write=%d func=%X "
+                                  "vp=%d,%d,%dx%d\n",
+                                  prog->id, S.target_masks, s_active_fb.depth->width, s_active_fb.depth->height,
+                                  s_active_fb.depth->gx2_format, int(S.raster.depth_test), int(S.raster.depth_write),
+                                  S.raster.depth_func, S.raster.viewport[0], S.raster.viewport[1], S.raster.viewport[2],
+                                  S.raster.viewport[3]);
     }
     const VkPrimitiveTopology topology = vk_topology(prim);
     // Pipeline formats and blend state from the bound framebuffer.
@@ -4817,10 +4818,9 @@ bool s_xfb_pipeline = false;
 void gx2r::shadow_log_frame_end() {
     if (!shadow_log()) return;
     if (s_shadow_depth_only_draws || s_shadow_frames_logged < 8)
-        RBREW_LOGF(stderr,
-                   "[shadow] frame: color draws=%u depth-only draws=%u (depth_test=%d write=%d func=%X fbo=%u)\n",
-                   s_shadow_color_draws, s_shadow_depth_only_draws, int(S.raster.depth_test), int(S.raster.depth_write),
-                   S.raster.depth_func, S.current_fbo_id);
+        RBREW_LOG_DEBUG("shadow", "frame: color draws=%u depth-only draws=%u (depth_test=%d write=%d func=%X fbo=%u)\n",
+                        s_shadow_color_draws, s_shadow_depth_only_draws, int(S.raster.depth_test),
+                        int(S.raster.depth_write), S.raster.depth_func, S.current_fbo_id);
     ++s_shadow_frames_logged;
     s_shadow_depth_only_draws = s_shadow_color_draws = 0;
 }
@@ -4858,12 +4858,12 @@ uint32_t gx2r_next_frame_draw() {
 void gx2r_draw_report() {
     static unsigned s_copies;
     if (++s_copies % 120 != 0) return;
-    RBREW_LOGF(stderr, "[draw] last 120 scan copies: draws=%u no_program=%u (no_vs_or_ps=%u)\n", s_draws_requested,
-               s_draws_no_program, s_draws_no_shader_set);
+    RBREW_LOG_DEBUG("draw", "last 120 scan copies: draws=%u no_program=%u (no_vs_or_ps=%u)\n", s_draws_requested,
+                    s_draws_no_program, s_draws_no_shader_set);
     s_draws_requested = s_draws_no_program = s_draws_no_shader_set = 0;
-    RBREW_LOGF(stderr, "[draw]   draws by fbo:");
-    for (auto& [fbo, n] : s_draws_per_fbo) RBREW_LOGF(stderr, " %u:%u", fbo, n);
-    RBREW_LOGF(stderr, "\n");
+    RBREW_LOG_DEBUG_BEGIN("draw", "  draws by fbo:");
+    for (auto& [fbo, n] : s_draws_per_fbo) RBREW_LOG_RAW(" %u:%u", fbo, n);
+    RBREW_LOG_RAW("\n");
     s_draws_per_fbo.clear();
 }
 
@@ -4935,8 +4935,8 @@ void gx2_render_draw(uint32_t prim_type, uint32_t count, uint32_t first_vertex, 
     static unsigned array_trace = 0;
     static const bool array_trace_on = rbrew_diagnostic_env("RBREW_DRAW_TRACE") != nullptr;
     if (array_trace_on && array_trace++ < 32)
-        RBREW_LOGF(stderr, "[draw] arrays primitive=%X count=%u first=%u instances=%u first_instance=%u\n", prim_type,
-                   count, first_vertex, instances, first_instance);
+        RBREW_LOG_DEBUG("draw", "arrays primitive=%X count=%u first=%u instances=%u first_instance=%u\n", prim_type,
+                        count, first_vertex, instances, first_instance);
     IndexStream indices;
     const unsigned mode = prim_type & 31;
     if (mode == 0x13 || mode == 0x14 || mode == 0x0D) {
@@ -4988,13 +4988,13 @@ void gx2_render_draw_indexed(uint32_t prim_type, uint32_t count, uint32_t index_
     static unsigned draw_trace = 0;
     static const bool s_draw_trace = rbrew_diagnostic_env("RBREW_DRAW_TRACE") != nullptr;
     if (s_draw_trace && draw_trace++ < 32)
-        RBREW_LOGF(stderr,
-                   "[draw] indexed primitive=%X count=%u type=%u base=%u indices=%08X instances=%u first_instance=%u\n",
-                   prim_type, count, index_type, first_vertex, idx_guest_addr, instances, first_instance);
+        RBREW_LOG_DEBUG("draw",
+                        "indexed primitive=%X count=%u type=%u base=%u indices=%08X instances=%u first_instance=%u\n",
+                        prim_type, count, index_type, first_vertex, idx_guest_addr, instances, first_instance);
     if (g_trace_active) {
-        RBREW_LOGF(stderr, "[ftrace]   indexed prim=%X count=%u index_type=%u raw:", prim_type, count, index_type);
-        for (uint32_t i = 0; i < idx_bytes && i < 16; ++i) RBREW_LOGF(stderr, " %02X", mem[idx_guest_addr + i]);
-        RBREW_LOGF(stderr, "\n");
+        RBREW_LOG_DEBUG_BEGIN("ftrace", "  indexed prim=%X count=%u index_type=%u raw:", prim_type, count, index_type);
+        for (uint32_t i = 0; i < idx_bytes && i < 16; ++i) RBREW_LOG_RAW(" %02X", mem[idx_guest_addr + i]);
+        RBREW_LOG_RAW("\n");
     }
     Gx2PerfScope index_scope(kPerfIndex);
     auto index = [&](unsigned i) -> uint32_t {
@@ -5201,12 +5201,12 @@ void recycle_deferred_queries() {
 
 void gx2_render_query_begin(uint32_t type, uint32_t address, uint8_t* mem) {
     if ((type != 0 && type != 2) || !address || !rbrew_memory_accessible(mem, address, 64)) {
-        RBREW_LOGF(stderr, "[gx2] Unsupported or invalid query begin type=%u address=%08X\n", type, address);
+        RBREW_LOG_ERROR("gx2", "Unsupported or invalid query begin type=%u address=%08X\n", type, address);
         return;
     }
     auto& q = s_native_queries[{reinterpret_cast<uintptr_t>(mem), address}];
     if (q.open) {
-        RBREW_LOGF(stderr, "[gx2] Query %08X already open\n", address);
+        RBREW_LOG_INFO("gx2", "Query %08X already open\n", address);
         return;
     }
     close_query_segment();
@@ -5220,7 +5220,7 @@ void gx2_render_query_begin(uint32_t type, uint32_t address, uint8_t* mem) {
 void gx2_render_query_end(uint32_t type, uint32_t address, uint8_t* mem) {
     auto* q = find_query(mem, address);
     if (!q || !q->open || q->type != type) {
-        RBREW_LOGF(stderr, "[gx2] Query end without matching begin %08X type=%u\n", address, type);
+        RBREW_LOG_INFO("gx2", "Query end without matching begin %08X type=%u\n", address, type);
         return;
     }
     close_query_segment();
@@ -5303,7 +5303,7 @@ void gx2_render_conditional_begin(uint32_t type, uint32_t address, bool no_wait,
     auto* q = find_query(mem, address);
     uint64_t samples = 0;
     if ((type != 0 && type != 2) || !q || q->type != type) {
-        RBREW_LOGF(stderr, "[gx2] Conditional render has no matching occlusion query %08X\n", address);
+        RBREW_LOG_ERROR("gx2", "Conditional render has no matching occlusion query %08X\n", address);
         S.conditional_draw = true;
         return;
     }

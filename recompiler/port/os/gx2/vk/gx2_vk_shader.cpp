@@ -236,8 +236,8 @@ VkShaderModule shader_module(VkShaderStageFlagBits stage, const std::string& sou
             TXDIAG(txdiag::event("shader_compile_failed", "\"stage\":%u,\"source_hash\":%llu,\"message\":%s",
                                  uint32_t(stage), key.a, txdiag::quote(log.c_str()).c_str());
                    txdiag::artifact("failed-shader-" + std::to_string(key.a) + ".glsl", source));
-            RBREW_LOGF(stderr, "[vk] shader compilation failed (stage %d):\n%s\n----- source -----\n%s\n", int(stage),
-                       log.c_str(), source.c_str());
+            RBREW_LOG_ERROR("vk", "shader compilation failed (stage %d):\n%s\n----- source -----\n%s\n", int(stage),
+                            log.c_str(), source.c_str());
             promise->set_value(VK_NULL_HANDLE);
             return VK_NULL_HANDLE;
         }

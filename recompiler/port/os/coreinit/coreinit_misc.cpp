@@ -98,7 +98,7 @@ static void OSReport(CPUState* cpu) {
     const char* fmt = (const char*)(MEM + ARG0);
     size_t length = strnlen(fmt, size_t(std::min<uint64_t>(256, cpu->guest_memory_size - ARG0)));
     while (length && fmt[length - 1] == '\n') --length;
-    RBREW_LOGF(stderr, "[OSReport] %.*s [r4=%08X r5=%08X]\n", int(length), fmt, ARG1, ARG2);
+    RBREW_LOG_INFO("OSReport", "%.*s [r4=%08X r5=%08X]\n", int(length), fmt, ARG1, ARG2);
 }
 static void OSPanic(CPUState* cpu) {
     // OSPanic(const char* file, int line, const char* fmt, ...)
@@ -107,22 +107,22 @@ static void OSPanic(CPUState* cpu) {
     int line = (int)ARG1;
     const char* fmt = ARG2 ? (const char*)(MEM + ARG2) : "";
     // Print with up to 3 integer varargs (r6/r7/r8)
-    RBREW_LOGF(stderr, "[OSPanic] %s:%d  ", file, line);
-    RBREW_LOGF(stderr, fmt, cpu->r[6], cpu->r[7], cpu->r[8]);
-    RBREW_LOGF(stderr, "\n");
+    RBREW_LOG_FATAL_BEGIN("OSPanic", "%s:%d  ", file, line);
+    RBREW_LOG_RAW(fmt, cpu->r[6], cpu->r[7], cpu->r[8]);
+    RBREW_LOG_RAW("\n");
     // Read-only caller attribution. EABI frames hold the previous SP at +0 and
     // the callee-saved LR in the previous frame at +4. Stop at any unreadable,
     // misaligned or non-increasing link; never write guest state.
-    RBREW_LOGF(stderr, "[OSPanic]   LR=%08X SP=%08X chain:", cpu->lr, cpu->r[1]);
+    RBREW_LOG_FATAL_BEGIN("OSPanic", "  LR=%08X SP=%08X chain:", cpu->lr, cpu->r[1]);
     uint32_t sp = cpu->r[1];
     for (int depth = 0; depth < 16; ++depth) {
         if ((sp & 3u) || !rbrew_memory_accessible(cpu->mem, sp, 4)) break;
         const uint32_t prev = rbrew_read32(cpu->mem, sp);
         if (!prev || (prev & 3u) || prev <= sp || !rbrew_memory_accessible(cpu->mem, prev, 8)) break;
-        RBREW_LOGF(stderr, " %08X", rbrew_read32(cpu->mem, prev + 4));
+        RBREW_LOG_RAW(" %08X", rbrew_read32(cpu->mem, prev + 4));
         sp = prev;
     }
-    RBREW_LOGF(stderr, "\n");
+    RBREW_LOG_RAW("\n");
     // Do NOT abort() — let the game continue.  A real Wii U OSPanic would
     // halt the system, but during bring-up we want to see what happens after
     // non-fatal panics (e.g. "unhandled signal 6" from the fiber scheduler).
@@ -233,7 +233,7 @@ static void memset_fn(CPUState* cpu) {
         if (rbrew_memory_accessible(MEM, dst, n))
             memset(MEM + dst, (int)val, n);
         else
-            RBREW_LOGF(stderr, "[coreinit] memset OOB: dst=0x%08X n=0x%X\n", dst, n);
+            RBREW_LOG_INFO("coreinit", "memset OOB: dst=0x%08X n=0x%X\n", dst, n);
     }
     RET = dst;
 }

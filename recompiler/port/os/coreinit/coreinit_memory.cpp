@@ -31,8 +31,8 @@ static bool mem_trace_enabled() {
 #define MEM_TRACE(name, a0, a1, a2)                                                                                    \
     do {                                                                                                               \
         if (mem_trace_enabled())                                                                                       \
-            RBREW_LOGF(stderr, "[MEMTRACE] %s lr=%08X r3=%08X r4=%08X r5=%08X -> %08X\n", name, cpu->lr,               \
-                       (uint32_t)(a0), (uint32_t)(a1), (uint32_t)(a2), RET);                                           \
+            RBREW_LOG_INFO("MEMTRACE", "%s lr=%08X r3=%08X r4=%08X r5=%08X -> %08X\n", name, cpu->lr, (uint32_t)(a0),  \
+                           (uint32_t)(a1), (uint32_t)(a2), RET);                                                       \
     } while (0)
 
 // Cafe uses the sign to select front/back allocation. Widen before negation
@@ -57,7 +57,7 @@ static uint32_t guest_alloc(uint32_t size, uint32_t align) {
         p = (uint64_t(s_heap_ptr) + alignment - 1) & ~(alignment - 1);
     }
     if (p < s_heap_ptr || p + size > s_heap_end) {
-        RBREW_LOGF(stderr, "[coreinit] guest heap OOM (requested 0x%X)\n", size);
+        RBREW_LOG_ERROR("coreinit", "guest heap OOM (requested 0x%X)\n", size);
         return 0;
     }
     if (static_cast<int32_t>(align) < 0)

@@ -1,6 +1,7 @@
 // Offline release preparation. Uses the actual runtime shader compiler/cache
 // writer, without a Vulkan device, game entry point or player assets in source.
 #include "../os/gx2/vk/gx2_vk_shader.h"
+#include "rebrewu/logger.hpp"
 #include <fstream>
 #include <iostream>
 #include <set>
@@ -48,7 +49,7 @@ int main(int argc, char** argv) {
                     it->second = gx2vk::compile_glsl(stage, source, spirv, &log);
                     if (!it->second) {
                         ++failed;
-                        std::cerr << "Shader failure: " << log << '\n';
+                        RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr) << "Shader failure: " << log << '\n';
                     } else
                         ++compiled;
                 }
@@ -58,10 +59,11 @@ int main(int argc, char** argv) {
             ++body_index;
             pos = end;
         }
-        std::cout << "Unique shaders verified: " << compiled << ", failed: " << failed << '\n';
+        RBREW_LOG_STREAM(::rbrew::log::Level::Info, nullptr)
+            << "Unique shaders verified: " << compiled << ", failed: " << failed << '\n';
         return failed ? 6 : 0;
     } catch (const std::exception& e) {
-        std::cerr << e.what();
+        RBREW_LOG_STREAM(::rbrew::log::Level::Error, nullptr) << e.what();
         return 7;
     }
 }

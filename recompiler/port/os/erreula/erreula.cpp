@@ -19,7 +19,7 @@ StateOwner& state_owner() {
     return *owner;
 }
 [[noreturn]] void unsupported(const char* api) {
-    RBREW_LOGF(stderr, "[erreula] unsupported active capability: %s\n", api);
+    RBREW_LOG_ERROR("erreula", "unsupported active capability: %s\n", api);
     throw std::runtime_error(std::string("ErrEula active UI capability unavailable: ") + api);
 }
 bool guest_pointer(CPUState* cpu, uint32_t value) {
@@ -48,8 +48,8 @@ void create(CPUState* cpu) {
     state.initialized = true;
     // WUT State::Hidden/ResultType::None and original Calc/Draw guards; no
     // fabricated success return or guest object-field initialization.
-    RBREW_LOGF(stderr, "[erreula] initialized version=%u work=%08X region=%u language=%u FSClient=%08X state=Hidden\n",
-               state.version, state.work_memory, state.region, state.language, state.fs_client);
+    RBREW_LOG_INFO("erreula", "initialized version=%u work=%08X region=%u language=%u FSClient=%08X state=Hidden\n",
+                   state.version, state.work_memory, state.region, state.language, state.fs_client);
 }
 void destroy(CPUState* cpu) {
     auto& owner = state_owner();
@@ -123,9 +123,9 @@ void inactive_draw(CPUState* cpu) {
 void appear_error(CPUState* cpu) {
     // Diagnostic: nn::erreula::ErrorArg errorType @+0x00, errorCode @+0x10.
     if (guest_pointer(cpu, cpu->r[3]) && rbrew_memory_accessible(cpu->mem, cpu->r[3], 0x14))
-        RBREW_LOGF(stderr, "[erreula] AppearError type=%u code=%d lr=%08X caller_lr=%08X\n",
-                   rbrew_read32(cpu->mem, cpu->r[3]), int32_t(rbrew_read32(cpu->mem, cpu->r[3] + 0x10)), cpu->lr,
-                   guest_pointer(cpu, cpu->r[1] + 0x14) ? rbrew_read32(cpu->mem, cpu->r[1] + 0x14) : 0u);
+        RBREW_LOG_ERROR("erreula", "AppearError type=%u code=%d lr=%08X caller_lr=%08X\n",
+                        rbrew_read32(cpu->mem, cpu->r[3]), int32_t(rbrew_read32(cpu->mem, cpu->r[3] + 0x10)), cpu->lr,
+                        guest_pointer(cpu, cpu->r[1] + 0x14) ? rbrew_read32(cpu->mem, cpu->r[1] + 0x14) : 0u);
     unsupported("AppearError");
 }
 void appear_home(CPUState*) {

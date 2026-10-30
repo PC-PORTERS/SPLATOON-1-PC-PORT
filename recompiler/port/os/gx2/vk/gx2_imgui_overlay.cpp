@@ -7,6 +7,7 @@
 // (mutex-protected), so either thread may persist them.
 #include "gx2_imgui_overlay.h"
 
+#include "rebrewu/logger.hpp"
 #include "gx2_vk.h"
 #include "gx2_vk_shader.h"
 
@@ -154,7 +155,7 @@ std::string pad_name(int binding) {
 }
 
 void check_vk_result(VkResult result) {
-    if (result != VK_SUCCESS) std::fprintf(stderr, "[imgui] Vulkan error %d\n", int(result));
+    if (result != VK_SUCCESS) RBREW_LOG_ERROR("imgui", "Vulkan error %d\n", int(result));
 }
 
 bool backend_init(SDL_Window* window, VkInstance instance, VkPhysicalDevice physical, VkDevice device,
@@ -167,7 +168,7 @@ bool backend_init(SDL_Window* window, VkInstance instance, VkPhysicalDevice phys
     ImGui::StyleColorsDark();
 
     if (!ImGui_ImplSDL2_InitForVulkan(window)) {
-        std::fprintf(stderr, "[imgui] ImGui_ImplSDL2_InitForVulkan failed\n");
+        RBREW_LOG_ERROR("imgui", "ImGui_ImplSDL2_InitForVulkan failed\n");
         ImGui::DestroyContext();
         return false;
     }
@@ -190,14 +191,14 @@ bool backend_init(SDL_Window* window, VkInstance instance, VkPhysicalDevice phys
     info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
     info.CheckVkResultFn = check_vk_result;
     if (!ImGui_ImplVulkan_Init(&info)) {
-        std::fprintf(stderr, "[imgui] ImGui_ImplVulkan_Init failed\n");
+        RBREW_LOG_ERROR("imgui", "ImGui_ImplVulkan_Init failed\n");
         ImGui_ImplSDL2_Shutdown();
         ImGui::DestroyContext();
         return false;
     }
     s_format = format;
     s_ready = true;
-    std::fprintf(stderr, "[imgui] interface ready (docking branch)\n");
+    RBREW_LOG_INFO("imgui", "interface ready (docking branch)\n");
     return true;
 }
 

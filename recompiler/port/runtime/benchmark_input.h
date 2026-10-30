@@ -1,4 +1,5 @@
 #pragma once
+#include "rebrewu/logger.hpp"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -37,7 +38,7 @@ inline std::vector<Input> read_inputs(std::istream& stream) {
             input.y >= 480 ||
             !(input.lx >= -1 && input.lx <= 1 && input.ly >= -1 && input.ly <= 1 && input.rx >= -1 && input.rx <= 1 &&
               input.ry >= -1 && input.ry <= 1)) {
-            std::fprintf(stderr, "[benchmark] invalid input script; automation disabled\n");
+            RBREW_LOG_ERROR("benchmark", "invalid input script; automation disabled\n");
             return {};
         }
         inputs.push_back(input);
@@ -144,7 +145,7 @@ inline FILE* record_file() {
                        "| % frame n kind id\n",
                        f);
         else
-            std::fprintf(stderr, "[record] cannot write %s\n", path);
+            RBREW_LOG_ERROR("record", "cannot write %s\n", path);
         return f;
     }();
     return file;
@@ -251,11 +252,10 @@ inline bool replay_input(Pad& pad, int scene, int scene_id, bool physical_input)
         loaded = true;
         std::ifstream file(std::getenv("RBREW_INPUT_REPLAY"));
         if (!file || !read_replay(file, replay)) {
-            std::fprintf(stderr, "[replay] cannot read %s; controller input only\n", std::getenv("RBREW_INPUT_REPLAY"));
+            RBREW_LOG_ERROR("replay", "cannot read %s; controller input only\n", std::getenv("RBREW_INPUT_REPLAY"));
             done = true;
         } else {
-            std::fprintf(stderr, "[replay] %zu inputs, %zu scene/load marks\n", replay.pads.size(),
-                         replay.scenes.size());
+            RBREW_LOG_INFO("replay", "%zu inputs, %zu scene/load marks\n", replay.pads.size(), replay.scenes.size());
             replay_running.store(true);
         }
     }
@@ -264,7 +264,7 @@ inline bool replay_input(Pad& pad, int scene, int scene_id, bool physical_input)
     const auto finish = [&](const char* why) {
         done = true;
         replay_running.store(false);
-        std::fprintf(stderr, "[replay] %s at frame %u; the controller takes over\n", why, now);
+        RBREW_LOG_INFO("replay", "%s at frame %u; the controller takes over\n", why, now);
         return false;
     };
     // Input held over several frames: a controller reports one stray full
