@@ -1,4 +1,5 @@
 #include "gx2_frame_interp.h"
+#include "../../runtime/rebrewu_runtime.h"
 #include "gx2_native_context.h"
 #include "../../runtime/port_settings.h"
 #include "../../runtime/benchmark_input.h"
@@ -188,7 +189,7 @@ uint32_t to_bits(float f) {
 uint32_t be(const uint8_t* p) {
     uint32_t w;
     std::memcpy(&w, p, 4);
-    return _byteswap_ulong(w);
+    return rbrew_bswap32(w);
 }
 uint32_t le(const uint8_t* p) {
     uint32_t w;
@@ -258,7 +259,7 @@ void blend_bytes(const uint8_t* prev, const uint8_t* cur, uint8_t* out, size_t s
         for (size_t i = 0; i < count * 4; ++i) dst[i] = read(base + row * 16 + i * 4);
     };
     auto put = [&](size_t word, float v) {
-        const uint32_t w = host_order ? to_bits(v) : _byteswap_ulong(to_bits(v));
+        const uint32_t w = host_order ? to_bits(v) : rbrew_bswap32(to_bits(v));
         std::memcpy(out + word * 4, &w, 4);
     };
     for (size_t r = 0; r < rows;) {
@@ -545,7 +546,7 @@ void note_ubo(unsigned stage, unsigned bank, uint64_t buffer, uint64_t offset) {
 }
 void before_item() {
     sync_capture();
-}                      // render thread, before each queue item
+} // render thread, before each queue item
 void present_begin() { // gx2_render_present: the present's own commands are not the frame's
     if (gx2vk::capture::enabled()) gx2vk::capture::set_enabled(false);
 }

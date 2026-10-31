@@ -10,6 +10,7 @@
 // game's own fog, bloom, lens flare and colour grading apply to it and
 // transparent effects drawn later stay on top.
 #include "gx2_weather.h"
+#include "../../runtime/rebrewu_runtime.h"
 #include "gx2_weather_math.h"
 #include "gx2_weather_collision.h"
 #include "gx2_weather_shaders.h"
@@ -1017,7 +1018,7 @@ bool is_dome(uint8_t* memory, uint32_t addr, uint32_t size, uint32_t stride) {
         auto rf = [&](uint32_t a) {
             uint32_t v;
             std::memcpy(&v, memory + a, 4);
-            v = _byteswap_ulong(v);
+            v = rbrew_bswap32(v);
             float f;
             std::memcpy(&f, &v, 4);
             return f;
@@ -1378,7 +1379,7 @@ void observe_draw(uint8_t* memory, uint32_t primitive, uint32_t count) {
             auto rd = [&](uint32_t a) {
                 uint32_t v;
                 std::memcpy(&v, memory + a, 4);
-                v = _byteswap_ulong(v);
+                v = rbrew_bswap32(v);
                 float f;
                 std::memcpy(&f, &v, 4);
                 return f;

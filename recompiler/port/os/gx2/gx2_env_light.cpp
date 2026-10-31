@@ -48,10 +48,10 @@ constexpr uint32_t crc32(const char* text) {
 uint32_t r32(const uint8_t* mem, uint32_t a) {
     uint32_t v;
     std::memcpy(&v, mem + a, 4);
-    return _byteswap_ulong(v);
+    return rbrew_bswap32(v);
 }
 void w32(uint8_t* mem, uint32_t a, uint32_t v) {
-    v = _byteswap_ulong(v);
+    v = rbrew_bswap32(v);
     std::memcpy(mem + a, &v, 4);
 }
 float rf(const uint8_t* mem, uint32_t a) {
