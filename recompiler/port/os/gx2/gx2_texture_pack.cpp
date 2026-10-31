@@ -63,6 +63,11 @@ const Pack& pack() {
             wchar_t exe[32768]{};
             if (GetModuleFileNameW(nullptr, exe, 32768))
                 out.dir = std::filesystem::path(exe).parent_path() / "textures";
+#elif defined(__linux__)
+            // Next to the executable, like on Windows (not the working directory).
+            std::error_code exe_error;
+            const auto exe = std::filesystem::read_symlink("/proc/self/exe", exe_error);
+            out.dir = exe_error ? std::filesystem::path("textures") : exe.parent_path() / "textures";
 #else
             out.dir = "textures";
 #endif

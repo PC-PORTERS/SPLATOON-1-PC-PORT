@@ -88,7 +88,14 @@ Setup.bat -GameDump "D:\My Wii U games\Splatoon [AGMP01]"
 
 ### Optional: HD textures
 
-Double-click `HD-Textures.bat`. The game starts; visit the places you want in HD and close it. The textures it showed are then upscaled (Real-ESRGAN) into `Game\textures` and load at the next start. Everything happens on your PC from your own copy of the game; the HD textures are never uploaded or shared, because they are derived from the game's files. Needs Python 3 (the script offers to install `torch`, `numpy` and `pillow`); an NVIDIA graphics card makes it much faster.
+The game starts; visit the places you want in HD and close it. The textures it showed are then upscaled (Real-ESRGAN) into the `textures` folder next to the game and load at the next start. Everything happens on your PC from your own copy of the game; the HD textures are never uploaded or shared, because they are derived from the game's files.
+
+- **Windows:** double-click `HD-Textures.bat`.
+- **Linux:** run `./HD-Textures.sh` from the project folder (after `./setup.sh`).
+
+Both need Python 3; the script offers to install `torch`, `numpy` and `pillow` with pip (on Linux you may need `python3-pip` from your distribution first). An NVIDIA graphics card with CUDA makes it many times faster than the CPU. Finished textures are kept, so you can stop and run it again later.
+
+> **macOS** is not supported yet: the setup and the renderer have no macOS path (no MoltenVK build), so there is no macOS package or script.
 
 ## Installation (Linux, CMake)
 
