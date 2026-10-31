@@ -2042,4 +2042,3 @@ hash = 0xA359D087A60635C1
 # The instruction is PowerPC assembly (cmpwi, li, stw, b, ...).
 # Branch targets are absolute guest addresses.
 hash = 0xBD953C46BC85E6F1
-0x02741b58 = blr
