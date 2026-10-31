@@ -31,3 +31,4 @@ A clear and concise description of what you expected to happen.
 [Compile Time (before I can open the game) / Runtime (In the produced game)] 
 
 - [ ]  I’ve looked everywhere, and the bug hasn’t been reported yet.
+- [ ]  I am working on / intend to work on a PR to fix this bug (note: after 1 week of inactivity / without a PR, we will assume that you do not intend to submit one).
