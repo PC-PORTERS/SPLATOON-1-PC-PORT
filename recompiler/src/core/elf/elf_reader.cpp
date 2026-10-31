@@ -5,8 +5,7 @@
 
 namespace rebrewu::elf {
 
-ElfReader::ElfReader(diagnostics::DiagEngine& diag) noexcept
-    : m_diag(diag) {}
+ElfReader::ElfReader(diagnostics::DiagEngine& diag) noexcept : m_diag(diag) {}
 
 std::optional<ElfImage> ElfReader::load(const std::filesystem::path& path) {
     std::ifstream f(path, std::ios::binary | std::ios::ate);
@@ -25,19 +24,15 @@ std::optional<ElfImage> ElfReader::load(const std::filesystem::path& path) {
 }
 
 std::optional<ElfImage> ElfReader::parse(std::span<const uint8_t> bytes) {
-    if (!validate_ident(bytes))
-        return {};
+    if (!validate_ident(bytes)) return {};
 
     ElfImage img;
     // Copy the ELF header (it is at offset 0 in a well-formed ELF file)
     std::memcpy(&img.ehdr, bytes.data(), sizeof(Elf32_Ehdr));
 
-    if (!parse_phdrs(bytes, img.ehdr, img))
-        return {};
-    if (!parse_shdrs(bytes, img.ehdr, img))
-        return {};
-    if (!resolve_section_names(bytes, img))
-        return {};
+    if (!parse_phdrs(bytes, img.ehdr, img)) return {};
+    if (!parse_shdrs(bytes, img.ehdr, img)) return {};
+    if (!resolve_section_names(bytes, img)) return {};
 
     return img;
 }
@@ -47,8 +42,8 @@ bool ElfReader::validate_ident(std::span<const uint8_t> bytes) {
         m_diag.error("file too small to be an ELF");
         return false;
     }
-    if (bytes[EI_MAG0] != ELFMAG0 || bytes[EI_MAG1] != ELFMAG1 ||
-        bytes[EI_MAG2] != ELFMAG2 || bytes[EI_MAG3] != ELFMAG3) {
+    if (bytes[EI_MAG0] != ELFMAG0 || bytes[EI_MAG1] != ELFMAG1 || bytes[EI_MAG2] != ELFMAG2 ||
+        bytes[EI_MAG3] != ELFMAG3) {
         m_diag.error("not an ELF file (bad magic)");
         return false;
     }
@@ -63,11 +58,9 @@ bool ElfReader::validate_ident(std::span<const uint8_t> bytes) {
     return true;
 }
 
-bool ElfReader::parse_phdrs(std::span<const uint8_t> bytes,
-                             const Elf32_Ehdr& ehdr,
-                             ElfImage& out) {
-    uint32_t phoff  = ehdr.phoff();
-    uint16_t phnum  = ehdr.phnum();
+bool ElfReader::parse_phdrs(std::span<const uint8_t> bytes, const Elf32_Ehdr& ehdr, ElfImage& out) {
+    uint32_t phoff = ehdr.phoff();
+    uint16_t phnum = ehdr.phnum();
     uint16_t phentsize = ehdr.phentsize();
 
     if (phnum == 0) return true;
@@ -79,19 +72,15 @@ bool ElfReader::parse_phdrs(std::span<const uint8_t> bytes,
 
     out.phdrs.resize(phnum);
     for (uint16_t i = 0; i < phnum; ++i) {
-        std::memcpy(&out.phdrs[i],
-                    bytes.data() + phoff + i * phentsize,
-                    sizeof(Elf32_Phdr));
+        std::memcpy(&out.phdrs[i], bytes.data() + phoff + i * phentsize, sizeof(Elf32_Phdr));
     }
     return true;
 }
 
-bool ElfReader::parse_shdrs(std::span<const uint8_t> bytes,
-                             const Elf32_Ehdr& ehdr,
-                             ElfImage& out) {
-    uint32_t shoff    = ehdr.shoff();
-    uint16_t shnum    = ehdr.shnum();
-    uint16_t shentsize= ehdr.shentsize();
+bool ElfReader::parse_shdrs(std::span<const uint8_t> bytes, const Elf32_Ehdr& ehdr, ElfImage& out) {
+    uint32_t shoff = ehdr.shoff();
+    uint16_t shnum = ehdr.shnum();
+    uint16_t shentsize = ehdr.shentsize();
 
     if (shnum == 0) return true;
 
@@ -105,15 +94,14 @@ bool ElfReader::parse_shdrs(std::span<const uint8_t> bytes,
         Elf32_Shdr& sh = out.sections[i].header;
         std::memcpy(&sh, bytes.data() + shoff + i * shentsize, sizeof(Elf32_Shdr));
 
-        uint32_t off  = sh.offset();
+        uint32_t off = sh.offset();
         uint32_t size = sh.size();
         if (sh.type() != SHT_NOBITS && size > 0) {
             if (off + size > bytes.size()) {
                 m_diag.error("section " + std::to_string(i) + " data extends beyond file");
                 return false;
             }
-            out.sections[i].data.assign(bytes.data() + off,
-                                        bytes.data() + off + size);
+            out.sections[i].data.assign(bytes.data() + off, bytes.data() + off + size);
             // Decode every compressed section before names, symbols and RELA
             // are read. Metadata sections are compressed in retail RPX files too.
             if (sh.is_rpl_zlib_compressed()) {
@@ -127,8 +115,8 @@ bool ElfReader::parse_shdrs(std::span<const uint8_t> bytes,
                 uint32_t decoded_size = from_be(be_size);
                 std::vector<uint8_t> decoded(decoded_size);
                 uLongf actual_size = decoded_size;
-                int status = uncompress(decoded.data(), &actual_size,
-                    packed.data() + 4, static_cast<uLong>(packed.size() - 4));
+                int status =
+                    uncompress(decoded.data(), &actual_size, packed.data() + 4, static_cast<uLong>(packed.size() - 4));
                 if (status != Z_OK || actual_size != decoded_size) {
                     m_diag.error("invalid compressed section " + std::to_string(i));
                     return false;
@@ -142,19 +130,16 @@ bool ElfReader::parse_shdrs(std::span<const uint8_t> bytes,
     return true;
 }
 
-bool ElfReader::resolve_section_names(std::span<const uint8_t> /*bytes*/,
-                                      ElfImage& out) {
+bool ElfReader::resolve_section_names(std::span<const uint8_t> /*bytes*/, ElfImage& out) {
     uint16_t shstrndx = out.ehdr.shstrndx();
-    if (shstrndx == SHN_UNDEF || shstrndx >= out.sections.size())
-        return true; // no string table
+    if (shstrndx == SHN_UNDEF || shstrndx >= out.sections.size()) return true; // no string table
 
     const auto& strtab = out.sections[shstrndx].data;
     for (auto& sec : out.sections) {
         uint32_t name_off = sec.header.name();
         if (name_off < strtab.size()) {
             const char* start = reinterpret_cast<const char*>(strtab.data() + name_off);
-            const auto* end = static_cast<const char*>(
-                std::memchr(start, 0, strtab.size() - name_off));
+            const auto* end = static_cast<const char*>(std::memchr(start, 0, strtab.size() - name_off));
             if (!end) {
                 m_diag.error("unterminated section name");
                 return false;
@@ -165,4 +150,4 @@ bool ElfReader::resolve_section_names(std::span<const uint8_t> /*bytes*/,
     return true;
 }
 
-}
+} // namespace rebrewu::elf

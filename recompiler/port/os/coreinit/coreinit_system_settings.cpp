@@ -36,21 +36,20 @@ void require_profile(const RbrewMcpSystemProfile& profile) {
 void put_u32(RbrewMcpSysProdBytes& bytes, uint32_t offset, uint32_t value) {
     for (uint32_t i = 0; i < 4; ++i) bytes[offset + i] = uint8_t(value >> (24 - 8 * i));
 }
-template<std::size_t N>
+template <std::size_t N>
 void put_bytes(RbrewMcpSysProdBytes& bytes, uint32_t offset, const std::array<uint8_t, N>& value) {
     std::copy(value.begin(), value.end(), bytes.begin() + offset);
 }
 ArenaSettings& require_settings(SettingsOwner& owner, const CPUState* cpu) {
     auto found = owner.arenas.find(cpu->mem);
-    if (found == owner.arenas.end())
-        throw std::runtime_error("MCP system profile has not been configured");
+    if (found == owner.arenas.end()) throw std::runtime_error("MCP system profile has not been configured");
     return found->second;
 }
 void require_handle(const ArenaSettings& settings, uint32_t handle) {
     if (!settings.handles.contains(handle))
         throw std::runtime_error("MCP handle is invalid, closed, or owned by another guest arena");
 }
-}
+} // namespace
 
 RbrewMcpSysProdBytes rbrew_mcp_serialize_profile(const RbrewMcpSystemProfile& profile) {
     require_profile(profile);

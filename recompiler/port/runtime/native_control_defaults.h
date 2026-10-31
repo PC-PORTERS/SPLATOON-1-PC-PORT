@@ -22,12 +22,11 @@ namespace rbrew_control_defaults {
 constexpr size_t kSaveSize = 0xD280;
 constexpr size_t kChecksum = 0x08, kPayload = 0x10;
 constexpr size_t kSensitivity = 0x14, kMotion = 0x1A;
-constexpr uint32_t kSensitivityBits = 0; // big-endian float 0.0, neutral camera sensitivity
+constexpr uint32_t kSensitivityBits = 0;                   // big-endian float 0.0, neutral camera sensitivity
 constexpr uint32_t kTutorialSensitivityBits = 0xBE4CCCCDu; // original default -0.2 at 10023A04
 
 inline uint32_t be32(const uint8_t* bytes) {
-    return (uint32_t(bytes[0]) << 24) | (uint32_t(bytes[1]) << 16) |
-           (uint32_t(bytes[2]) << 8) | bytes[3];
+    return (uint32_t(bytes[0]) << 24) | (uint32_t(bytes[1]) << 16) | (uint32_t(bytes[2]) << 8) | bytes[3];
 }
 inline void put_be32(uint8_t* bytes, uint32_t value) {
     for (unsigned i = 0; i < 4; ++i) bytes[i] = uint8_t(value >> (24 - i * 8));
@@ -36,8 +35,7 @@ inline uint32_t checksum(std::span<const uint8_t> bytes) {
     uint32_t crc = 0xFFFFFFFFu;
     for (const uint8_t byte : bytes) {
         crc ^= byte;
-        for (unsigned bit = 0; bit < 8; ++bit)
-            crc = (crc >> 1) ^ ((crc & 1) ? 0xEDB88320u : 0);
+        for (unsigned bit = 0; bit < 8; ++bit) crc = (crc >> 1) ^ ((crc & 1) ? 0xEDB88320u : 0);
     }
     return ~crc;
 }
@@ -63,8 +61,7 @@ enum class FileResult { Unchanged, Updated, Failed };
 inline FileResult apply_save_file(const std::filesystem::path& path) noexcept {
     try {
         std::error_code error;
-        if (!std::filesystem::exists(path, error))
-            return error ? FileResult::Failed : FileResult::Unchanged;
+        if (!std::filesystem::exists(path, error)) return error ? FileResult::Failed : FileResult::Unchanged;
         const auto size = std::filesystem::file_size(path, error);
         if (error) return FileResult::Failed;
         if (size != kSaveSize) return FileResult::Unchanged;
@@ -78,7 +75,8 @@ inline FileResult apply_save_file(const std::filesystem::path& path) noexcept {
         backup += ".before-control-defaults";
         if (!std::filesystem::exists(backup, error)) {
             if (error || !std::filesystem::copy_file(path, backup, error) || error) return FileResult::Failed;
-        } else if (error) return FileResult::Failed;
+        } else if (error)
+            return FileResult::Failed;
         auto temporary = path;
         temporary += ".control-defaults.tmp";
         {
@@ -112,16 +110,15 @@ inline int active_scene_type(uint8_t* mem, int* id = nullptr) {
     if (!mem) return -1;
     const uint32_t scene_manager = rbrew_read32(mem, 0x101C9578u);
     const uint32_t scene_types = rbrew_read32(mem, 0x101C0F28u);
-    if (!scene_manager || !scene_types ||
-        uint64_t(scene_manager) + 0x160 > WIIU_MEM_SIZE ||
-        uint64_t(scene_types) + 0x118 > WIIU_MEM_SIZE ||
-        !rbrew_memory_accessible(mem, scene_manager + 0x15C, 4) ||
-        !rbrew_memory_accessible(mem, scene_types + 0x18, 0x100)) return -1;
+    if (!scene_manager || !scene_types || uint64_t(scene_manager) + 0x160 > WIIU_MEM_SIZE ||
+        uint64_t(scene_types) + 0x118 > WIIU_MEM_SIZE || !rbrew_memory_accessible(mem, scene_manager + 0x15C, 4) ||
+        !rbrew_memory_accessible(mem, scene_types + 0x18, 0x100))
+        return -1;
     const uint32_t scene_id = rbrew_read32(mem, scene_manager + 0x15C);
     if (scene_id >= 0x40) return -1;
     const uint32_t type = rbrew_read32(mem, scene_types + 0x18 + scene_id * 4);
     if (!(type > 0 && type < 18)) return -1;
-    if (id) *id = int(scene_id);   // tells scenes of one kind apart (plaza, Octo Valley)
+    if (id) *id = int(scene_id); // tells scenes of one kind apart (plaza, Octo Valley)
     return int(type);
 }
 
@@ -132,7 +129,7 @@ inline void apply_live(uint8_t* mem) {
     // The tutorial locks stick aiming, so it keeps its original motion mode:
     // the existing VPAD code supplies that motion from the right stick/mouse.
     const int scene_type = active_scene_type(mem);
-    if (scene_type < 0) return;   // scene initialization/teardown in progress
+    if (scene_type < 0) return; // scene initialization/teardown in progress
     const bool tutorial = scene_type == 5 || scene_type == 6;
 
     // 021729AC -> 02173470 -> 02172AD8 proves that the saved options are
@@ -144,17 +141,16 @@ inline void apply_live(uint8_t* mem) {
     if (save_manager && uint64_t(save_manager) + 0x10 <= WIIU_MEM_SIZE &&
         rbrew_memory_accessible(mem, save_manager + 0x0C, 4)) {
         const uint32_t image = rbrew_read32(mem, save_manager + 0x0C);
-        if (image && uint64_t(image) + kSaveSize <= WIIU_MEM_SIZE &&
-            rbrew_memory_accessible(mem, image, kSaveSize)) {
+        if (image && uint64_t(image) + kSaveSize <= WIIU_MEM_SIZE && rbrew_memory_accessible(mem, image, kSaveSize)) {
             patch_image(std::span<uint8_t>(mem + image, kSaveSize));
-            if (be32(mem + image + 4) == 6) saved = mem + image;   // verified format only
+            if (be32(mem + image + 4) == 6) saved = mem + image; // verified format only
         }
     }
 
     constexpr uint32_t kControlManager = 0x101C1D34u;
     const uint32_t manager = rbrew_read32(mem, kControlManager);
-    if (!manager || uint64_t(manager) + 0x184 > WIIU_MEM_SIZE ||
-        !rbrew_memory_accessible(mem, manager + 0x17C, 8)) return;
+    if (!manager || uint64_t(manager) + 0x184 > WIIU_MEM_SIZE || !rbrew_memory_accessible(mem, manager + 0x17C, 8))
+        return;
     uint32_t sensitivity;
     uint8_t motion;
     if (tutorial) {

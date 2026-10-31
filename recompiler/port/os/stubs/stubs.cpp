@@ -12,13 +12,27 @@
 #include "../coreinit/coreinit_fs.h"
 constexpr uint32_t SAVE_OK = 0;
 
-static void SAVEInit(CPUState* cpu) { coreinit_save_init(cpu); }
-static void SAVEInitSaveDir(CPUState* cpu) { coreinit_save_init_dir(cpu); }
-static void SAVEOpenFile(CPUState* cpu) { coreinit_save_open_file(cpu); }
-static void SAVEFlushQuota(CPUState* cpu) { coreinit_save_flush_quota(cpu); }
-static void SAVEMakeDir(CPUState* cpu) { coreinit_save_make_dir(cpu); }
-static void SAVEGetStat(CPUState* cpu) { coreinit_save_get_stat(cpu); }
-static void SAVEOpenDir(CPUState* cpu) { RET = uint32_t(-6); }
+static void SAVEInit(CPUState* cpu) {
+    coreinit_save_init(cpu);
+}
+static void SAVEInitSaveDir(CPUState* cpu) {
+    coreinit_save_init_dir(cpu);
+}
+static void SAVEOpenFile(CPUState* cpu) {
+    coreinit_save_open_file(cpu);
+}
+static void SAVEFlushQuota(CPUState* cpu) {
+    coreinit_save_flush_quota(cpu);
+}
+static void SAVEMakeDir(CPUState* cpu) {
+    coreinit_save_make_dir(cpu);
+}
+static void SAVEGetStat(CPUState* cpu) {
+    coreinit_save_get_stat(cpu);
+}
+static void SAVEOpenDir(CPUState* cpu) {
+    RET = uint32_t(-6);
+}
 
 // SAVEGetShared*Path(u64 titleId in r3:r4, const char* name r5, char* out r6,
 // u32 outLength r7). Formats match Cemu nn_save; the shared volume is served
@@ -62,16 +76,23 @@ static void SAVEGetFreeSpaceSize(CPUState* cpu) {
 // nn_act — account information (return dummy data)
 // ---------------------------------------------------------------------------
 
-static void ACTInit(CPUState* cpu)               { RET = 0; }
-static void ACTGetSlotNo(CPUState* cpu)          { RET = 1; } // slot 1
-static void ACTGetDefaultAccount(CPUState* cpu)  { RET = 1; }
-static void ACTGetMii(CPUState* cpu)             { RET = (uint32_t)-1; }
+static void ACTInit(CPUState* cpu) {
+    RET = 0;
+}
+static void ACTGetSlotNo(CPUState* cpu) {
+    RET = 1;
+} // slot 1
+static void ACTGetDefaultAccount(CPUState* cpu) {
+    RET = 1;
+}
+static void ACTGetMii(CPUState* cpu) {
+    RET = (uint32_t)-1;
+}
 static void ACTGetAccountId(CPUState* cpu) {
     // Write a dummy account ID string
     if (ARG0 && rbrew_memory_accessible(MEM, ARG0, 16)) {
         static const char id[] = "GambitPortUser";
-        for (size_t i = 0; i < sizeof(id); ++i)
-            rbrew_write8(MEM, ARG0 + (uint32_t)i, (uint8_t)id[i]);
+        for (size_t i = 0; i < sizeof(id); ++i) rbrew_write8(MEM, ARG0 + (uint32_t)i, (uint8_t)id[i]);
     }
     RET = 0;
 }
@@ -80,37 +101,62 @@ static void ACTGetPrincipalId(CPUState* cpu) {
     if (ARG1) rbrew_write32(MEM, ARG1, 0x12345678u);
     RET = 0;
 }
-static void ACTGetPersistentId(CPUState* cpu)   { RET = 0xABCD0001u; }
-static void ACTIsNetworkAccount(CPUState* cpu)  { RET = 0; }
-static void ACTIsPasswordCacheEnabled(CPUState* cpu) { RET = 0; }
-static void ACTGetCountryName(CPUState* cpu)    { RET = 0; }
-static void ACTGetTimeZoneId(CPUState* cpu)     { RET = 0; }
-static void ACTFinalizeLibrary(CPUState* cpu)   { (void)cpu; }
+static void ACTGetPersistentId(CPUState* cpu) {
+    RET = 0xABCD0001u;
+}
+static void ACTIsNetworkAccount(CPUState* cpu) {
+    RET = 0;
+}
+static void ACTIsPasswordCacheEnabled(CPUState* cpu) {
+    RET = 0;
+}
+static void ACTGetCountryName(CPUState* cpu) {
+    RET = 0;
+}
+static void ACTGetTimeZoneId(CPUState* cpu) {
+    RET = 0;
+}
+static void ACTFinalizeLibrary(CPUState* cpu) {
+    (void)cpu;
+}
 
 // ---------------------------------------------------------------------------
 // nn_olv — Miiverse (always unavailable)
 // ---------------------------------------------------------------------------
 
-static void OLVInit(CPUState* cpu)              { RET = (uint32_t)-2146435072u; } // NN_RESULT_FAILED
-static void OLVCalculatePostListParam(CPUState* cpu) { RET = (uint32_t)-2146435072u; }
-static void OLVDownloadPostListParam(CPUState* cpu)  { RET = (uint32_t)-2146435072u; }
-static void OLVGetIsInitialized(CPUState* cpu)  { RET = 0; }
+static void OLVInit(CPUState* cpu) {
+    RET = (uint32_t)-2146435072u;
+} // NN_RESULT_FAILED
+static void OLVCalculatePostListParam(CPUState* cpu) {
+    RET = (uint32_t)-2146435072u;
+}
+static void OLVDownloadPostListParam(CPUState* cpu) {
+    RET = (uint32_t)-2146435072u;
+}
+static void OLVGetIsInitialized(CPUState* cpu) {
+    RET = 0;
+}
 
 // ---------------------------------------------------------------------------
 // nn_boss — SpotPass (always unavailable)
 // ---------------------------------------------------------------------------
 
-static void BOSSInit(CPUState* cpu)             { RET = (uint32_t)-1; }
-static void BOSSGetStorageInfo(CPUState* cpu)   { RET = (uint32_t)-1; }
-static void BOSSGetTaskIdList(CPUState* cpu)    { RET = (uint32_t)-1; }
+static void BOSSInit(CPUState* cpu) {
+    RET = (uint32_t)-1;
+}
+static void BOSSGetStorageInfo(CPUState* cpu) {
+    RET = (uint32_t)-1;
+}
+static void BOSSGetTaskIdList(CPUState* cpu) {
+    RET = (uint32_t)-1;
+}
 
 // nn::boss::DataName::DataName() - nn_boss.rpl 02027700: a null this is
 // allocated from the nn_boss allocator (0x20 bytes); the 32-byte name is
 // zeroed and this returned. Gambit constructs arrays of them (0279404C).
 static void BOSSDataNameCtor(CPUState* cpu) {
     const uint32_t self = ARG0;
-    if (!self)
-        throw std::runtime_error("nn::boss::DataName::DataName(nullptr): nn_boss allocator not implemented");
+    if (!self) throw std::runtime_error("nn::boss::DataName::DataName(nullptr): nn_boss allocator not implemented");
     if (!rbrew_memory_accessible(MEM, self, 0x20))
         throw std::runtime_error("nn::boss::DataName::DataName: object outside guest memory");
     memset(MEM + self, 0, 0x20);
@@ -121,27 +167,51 @@ static void BOSSDataNameCtor(CPUState* cpu) {
 // nn_nfp — Amiibo (not present)
 // ---------------------------------------------------------------------------
 
-static void NFPInit(CPUState* cpu)              { RET = 0; }
-static void NFPInitialize(CPUState* cpu)        { RET = 0; }
-static void NFPGetNfpState(CPUState* cpu)       { RET = 0; } // NFP_STATE_INIT
-static void NFPStartDetection(CPUState* cpu)    { RET = 0; }
-static void NFPStopDetection(CPUState* cpu)     { RET = 0; }
-static void NFPMount(CPUState* cpu)             { RET = (uint32_t)-1; }
-static void NFPIsNfcEnabled(CPUState* cpu)      { RET = 0; }
-static void NFPFinalize(CPUState* cpu)          { RET = 0; }
+static void NFPInit(CPUState* cpu) {
+    RET = 0;
+}
+static void NFPInitialize(CPUState* cpu) {
+    RET = 0;
+}
+static void NFPGetNfpState(CPUState* cpu) {
+    RET = 0;
+} // NFP_STATE_INIT
+static void NFPStartDetection(CPUState* cpu) {
+    RET = 0;
+}
+static void NFPStopDetection(CPUState* cpu) {
+    RET = 0;
+}
+static void NFPMount(CPUState* cpu) {
+    RET = (uint32_t)-1;
+}
+static void NFPIsNfcEnabled(CPUState* cpu) {
+    RET = 0;
+}
+static void NFPFinalize(CPUState* cpu) {
+    RET = 0;
+}
 
 // ---------------------------------------------------------------------------
 // nn_fp — friend list (empty)
 // ---------------------------------------------------------------------------
 
-static void FPInit(CPUState* cpu)               { RET = 0; }
-static void FPIsInitialized(CPUState* cpu)      { RET = 1; }
+static void FPInit(CPUState* cpu) {
+    RET = 0;
+}
+static void FPIsInitialized(CPUState* cpu) {
+    RET = 1;
+}
 static void FPGetFriendList(CPUState* cpu) {
     if (ARG2) rbrew_write32(MEM, ARG2, 0u); // 0 friends
     RET = 0;
 }
-static void FPGetFriendCount(CPUState* cpu)     { RET = 0; }
-static void FPIsOnline(CPUState* cpu)           { RET = 0; }
+static void FPGetFriendCount(CPUState* cpu) {
+    RET = 0;
+}
+static void FPIsOnline(CPUState* cpu) {
+    RET = 0;
+}
 
 // nn::fp::LoginAsync(callback, userParam) - nn_fp.rpl 020019dc forwards the
 // request to the friends service (FPD), which later completes it by calling
@@ -154,66 +224,127 @@ static void FPLoginAsync(CPUState* cpu) {
     const uint32_t callback = ARG0, user = ARG1;
     if (callback) {
         CPUState call = *cpu;
-        call.r[1] = (cpu->r[1] - 0x40) & ~0xFu;       // frame below the caller's
+        call.r[1] = (cpu->r[1] - 0x40) & ~0xFu; // frame below the caller's
         const uint32_t result = call.r[1] + 0x10;
-        rbrew_write32(MEM, call.r[1], cpu->r[1]);     // back chain
-        rbrew_write32(MEM, result, 0);                // nn::Result: success
-        call.r[3] = result; call.r[4] = user;
+        rbrew_write32(MEM, call.r[1], cpu->r[1]); // back chain
+        rbrew_write32(MEM, result, 0);            // nn::Result: success
+        call.r[3] = result;
+        call.r[4] = user;
         rbrew_dispatch(&call, callback);
     }
     RET = 0;
 }
-static void FPFinalize(CPUState* cpu)           { (void)cpu; }
+static void FPFinalize(CPUState* cpu) {
+    (void)cpu;
+}
 
 // ---------------------------------------------------------------------------
 // proc_ui — Process UI (foreground/background transitions)
 // ---------------------------------------------------------------------------
 
-static void ProcUIInit(CPUState* cpu)            { (void)cpu; }
-static void ProcUIInitEx(CPUState* cpu)          { (void)cpu; }
-static void ProcUIShutdown(CPUState* cpu)        { (void)cpu; }
+static void ProcUIInit(CPUState* cpu) {
+    (void)cpu;
+}
+static void ProcUIInitEx(CPUState* cpu) {
+    (void)cpu;
+}
+static void ProcUIShutdown(CPUState* cpu) {
+    (void)cpu;
+}
 // ProcUIProcessMessages(blocking) → PROCUI_STATUS_IN_FOREGROUND (0)
-static void ProcUIProcessMessages(CPUState* cpu) { RET = 0; }
+static void ProcUIProcessMessages(CPUState* cpu) {
+    RET = 0;
+}
 // ProcUISubProcessMessages(blocking) → 0
-static void ProcUISubProcessMessages(CPUState* cpu) { RET = 0; }
-static void ProcUISetMEM1Storage(CPUState* cpu)  { (void)cpu; }
-static void ProcUISetBucketStorage(CPUState* cpu){ (void)cpu; }
-static void ProcUIInForeground(CPUState* cpu)    { RET = 1; }
-static void ProcUIIsRunning(CPUState* cpu)       { RET = 1; }
-static void ProcUIRegisterCallback(CPUState* cpu){ (void)cpu; }
-static void ProcUIRegisterCallbackCore(CPUState* cpu) { (void)cpu; }
-static void ProcUIClearCallbacks(CPUState* cpu)  { (void)cpu; }
+static void ProcUISubProcessMessages(CPUState* cpu) {
+    RET = 0;
+}
+static void ProcUISetMEM1Storage(CPUState* cpu) {
+    (void)cpu;
+}
+static void ProcUISetBucketStorage(CPUState* cpu) {
+    (void)cpu;
+}
+static void ProcUIInForeground(CPUState* cpu) {
+    RET = 1;
+}
+static void ProcUIIsRunning(CPUState* cpu) {
+    RET = 1;
+}
+static void ProcUIRegisterCallback(CPUState* cpu) {
+    (void)cpu;
+}
+static void ProcUIRegisterCallbackCore(CPUState* cpu) {
+    (void)cpu;
+}
+static void ProcUIClearCallbacks(CPUState* cpu) {
+    (void)cpu;
+}
 
 // ---------------------------------------------------------------------------
 // sysapp — system application helpers
 // ---------------------------------------------------------------------------
 
-static void SYSRelaunchTitle(CPUState* cpu)     { (void)cpu; }
+static void SYSRelaunchTitle(CPUState* cpu) {
+    (void)cpu;
+}
 static void SYSGetTitleLoc(CPUState* cpu) {
     // Return empty path
     if (ARG0) rbrew_write8(MEM, ARG0, 0);
 }
-static void SYSLaunchTitle(CPUState* cpu)       { (void)cpu; }
-static void SYSLaunchMenu(CPUState* cpu)        { (void)cpu; }
-static void SYSCheckTitleExists(CPUState* cpu)  { RET = 0; }
+static void SYSLaunchTitle(CPUState* cpu) {
+    (void)cpu;
+}
+static void SYSLaunchMenu(CPUState* cpu) {
+    (void)cpu;
+}
+static void SYSCheckTitleExists(CPUState* cpu) {
+    RET = 0;
+}
 
 // ---------------------------------------------------------------------------
 // nsysnet — network (return no-network)
 // ---------------------------------------------------------------------------
 
-static void NSYSNETInit(CPUState* cpu)          { RET = 0; }
-static void socket_(CPUState* cpu)              { RET = (uint32_t)-1; }
-static void bind_(CPUState* cpu)                { RET = (uint32_t)-1; }
-static void connect_(CPUState* cpu)             { RET = (uint32_t)-1; }
-static void send_(CPUState* cpu)                { RET = (uint32_t)-1; }
-static void recv_(CPUState* cpu)                { RET = (uint32_t)-1; }
-static void closesocket_(CPUState* cpu)         { RET = 0; }
-static void setsockopt_(CPUState* cpu)          { RET = (uint32_t)-1; }
-static void getsockopt_(CPUState* cpu)          { RET = (uint32_t)-1; }
-static void getaddrinfo_(CPUState* cpu)         { RET = (uint32_t)-1; }
-static void freeaddrinfo_(CPUState* cpu)        { (void)cpu; }
-static void inet_ntop_(CPUState* cpu)           { RET = 0; }
-static void inet_pton_(CPUState* cpu)           { RET = 0; }
+static void NSYSNETInit(CPUState* cpu) {
+    RET = 0;
+}
+static void socket_(CPUState* cpu) {
+    RET = (uint32_t)-1;
+}
+static void bind_(CPUState* cpu) {
+    RET = (uint32_t)-1;
+}
+static void connect_(CPUState* cpu) {
+    RET = (uint32_t)-1;
+}
+static void send_(CPUState* cpu) {
+    RET = (uint32_t)-1;
+}
+static void recv_(CPUState* cpu) {
+    RET = (uint32_t)-1;
+}
+static void closesocket_(CPUState* cpu) {
+    RET = 0;
+}
+static void setsockopt_(CPUState* cpu) {
+    RET = (uint32_t)-1;
+}
+static void getsockopt_(CPUState* cpu) {
+    RET = (uint32_t)-1;
+}
+static void getaddrinfo_(CPUState* cpu) {
+    RET = (uint32_t)-1;
+}
+static void freeaddrinfo_(CPUState* cpu) {
+    (void)cpu;
+}
+static void inet_ntop_(CPUState* cpu) {
+    RET = 0;
+}
+static void inet_pton_(CPUState* cpu) {
+    RET = 0;
+}
 
 // ---------------------------------------------------------------------------
 // zlib125 — pass through to host zlib
@@ -224,11 +355,11 @@ static void inet_pton_(CPUState* cpu)           { RET = 0; }
 
 static void zlib_compress(CPUState* cpu) {
     // r3=dst, r4=*dstLen (in/out), r5=src, r6=srcLen
-    uint32_t dst_addr    = ARG0;
+    uint32_t dst_addr = ARG0;
     uint32_t dst_len_ptr = ARG1;
-    uint32_t src_addr    = ARG2;
-    uLong    src_len     = ARG3;
-    uLongf   dst_len     = (dst_len_ptr ? rbrew_read32(MEM, dst_len_ptr) : 0u);
+    uint32_t src_addr = ARG2;
+    uLong src_len = ARG3;
+    uLongf dst_len = (dst_len_ptr ? rbrew_read32(MEM, dst_len_ptr) : 0u);
     int ret = compress(MEM + dst_addr, &dst_len, MEM + src_addr, src_len);
     if (dst_len_ptr) rbrew_write32(MEM, dst_len_ptr, (uint32_t)dst_len);
     RET = (uint32_t)ret;
@@ -236,11 +367,11 @@ static void zlib_compress(CPUState* cpu) {
 
 static void zlib_uncompress(CPUState* cpu) {
     // r3=dst, r4=*dstLen (in/out), r5=src, r6=srcLen
-    uint32_t dst_addr    = ARG0;
+    uint32_t dst_addr = ARG0;
     uint32_t dst_len_ptr = ARG1;
-    uint32_t src_addr    = ARG2;
-    uLong    src_len     = ARG3;
-    uLongf   dst_len     = (dst_len_ptr ? rbrew_read32(MEM, dst_len_ptr) : 0u);
+    uint32_t src_addr = ARG2;
+    uLong src_len = ARG3;
+    uLongf dst_len = (dst_len_ptr ? rbrew_read32(MEM, dst_len_ptr) : 0u);
     int ret = uncompress(MEM + dst_addr, &dst_len, MEM + src_addr, src_len);
     if (dst_len_ptr) rbrew_write32(MEM, dst_len_ptr, (uint32_t)dst_len);
     RET = (uint32_t)ret;
@@ -248,31 +379,55 @@ static void zlib_uncompress(CPUState* cpu) {
 
 // zlib CRC32: crc32(crc, buf_guest_addr, len)
 static void zlib_crc32(CPUState* cpu) {
-    uLong    crc = (uLong)ARG0;
+    uLong crc = (uLong)ARG0;
     uint32_t buf = ARG1;
-    uInt     len = (uInt)ARG2;
+    uInt len = (uInt)ARG2;
     RET = (uint32_t)crc32(crc, MEM + buf, len);
 }
 
 // mic — microphone stubs
-static void MICInit(CPUState* cpu)    { RET = 0; }
-static void MICOpen(CPUState* cpu)    { RET = (uint32_t)-1; }
-static void MICClose(CPUState* cpu)   { (void)cpu; }
+static void MICInit(CPUState* cpu) {
+    RET = 0;
+}
+static void MICOpen(CPUState* cpu) {
+    RET = (uint32_t)-1;
+}
+static void MICClose(CPUState* cpu) {
+    (void)cpu;
+}
 
 // nn_ac (network settings) stubs
-static void ACInitialize(CPUState* cpu)   { RET = 0; }
-static void ACConnect(CPUState* cpu)      { RET = 0; }
-static void ACIsApplicationConnected(CPUState* cpu) { RET = 0; }
-static void ACGetStatus(CPUState* cpu)    { RET = 0; }
+static void ACInitialize(CPUState* cpu) {
+    RET = 0;
+}
+static void ACConnect(CPUState* cpu) {
+    RET = 0;
+}
+static void ACIsApplicationConnected(CPUState* cpu) {
+    RET = 0;
+}
+static void ACGetStatus(CPUState* cpu) {
+    RET = 0;
+}
 
 // nn_acp stubs
-static void ACPCheckTitleLaunchByTitleListType(CPUState* cpu) { RET = 0; }
-static void ACPGetTitleMetaXml(CPUState* cpu)                 { RET = (uint32_t)-1; }
+static void ACPCheckTitleLaunchByTitleListType(CPUState* cpu) {
+    RET = 0;
+}
+static void ACPGetTitleMetaXml(CPUState* cpu) {
+    RET = (uint32_t)-1;
+}
 
 // nn_ndm stubs
-static void NDMEnterExclusiveMode(CPUState* cpu) { RET = 0; }
-static void NDMExitExclusiveMode(CPUState* cpu)  { RET = 0; }
-static void NDMGetCurrentState(CPUState* cpu)    { RET = 0; }
+static void NDMEnterExclusiveMode(CPUState* cpu) {
+    RET = 0;
+}
+static void NDMExitExclusiveMode(CPUState* cpu) {
+    RET = 0;
+}
+static void NDMGetCurrentState(CPUState* cpu) {
+    RET = 0;
+}
 
 // ---------------------------------------------------------------------------
 // Registration

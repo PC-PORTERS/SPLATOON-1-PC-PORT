@@ -26,7 +26,8 @@ inline Types memory_types(const VkPhysicalDeviceMemoryProperties& memory, uint32
         if (!(bits & (1u << i))) continue;
         // These require resource/device features that this allocator never enables.
         if (flags & (VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT | VK_MEMORY_PROPERTY_PROTECTED_BIT |
-                     VK_MEMORY_PROPERTY_DEVICE_COHERENT_BIT_AMD)) continue;
+                     VK_MEMORY_PROPERTY_DEVICE_COHERENT_BIT_AMD))
+            continue;
         if (use != MemoryUse::DeviceLocal && !(flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)) continue;
         // Stable insertion preserves the driver's order among equally suitable types.
         uint32_t pos = result.count++;
@@ -45,8 +46,8 @@ inline VkDeviceSize align_up(VkDeviceSize value, VkDeviceSize alignment) {
 
 // Allocation-relative ranges become atom-aligned ranges in the backing memory.
 // Suballocations and ring spans never share a non-coherent atom with a neighbour.
-inline VkMappedMemoryRange mapped_range(const Allocation& a, VkDeviceSize atom,
-                                        VkDeviceSize offset, VkDeviceSize bytes) {
+inline VkMappedMemoryRange mapped_range(const Allocation& a, VkDeviceSize atom, VkDeviceSize offset,
+                                        VkDeviceSize bytes) {
     VkMappedMemoryRange range{VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE};
     range.memory = a.memory;
     const VkDeviceSize begin = a.offset + offset;

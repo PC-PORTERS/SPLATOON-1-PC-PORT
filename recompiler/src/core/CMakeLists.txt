@@ -5,6 +5,7 @@ add_library(rebrewu_core STATIC
     relocation/reloc_processor.cpp
     linker/module_graph.cpp
     linker/linker.cpp
+    manifest/manifest.cpp
 )
 
 target_include_directories(rebrewu_core

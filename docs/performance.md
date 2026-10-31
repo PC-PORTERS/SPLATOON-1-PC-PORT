@@ -442,8 +442,11 @@ slowest frame interval of the last half second. These are measured at actual
 swapchain presentation. The text is rasterised on the CPU with a 5×7 font and
 copied into the top-left corner after the frame blit. It needs no shaders or
 render passes and costs one small buffer-to-image copy per frame. Text is
-scaled with window height. The overlay is shown by default, **F3** toggles
-it, and `RBREW_FPS_OVERLAY=0` starts it hidden. Captured presents used by image
+scaled with window height. The overlay starts hidden, **F3** toggles it, and
+`RBREW_FPS_OVERLAY=1` starts it visible. The settings menu (Esc) can also show
+a simple FPS / frame-time / max-FPS readout (`simple_overlay` in settings.ini,
+`RBREW_SIMPLE_OVERLAY=1`), which draws without window chrome and takes no
+input. Captured presents used by image
 tests omit it. `render_overlay` checks text, statistics and glyph
 rasterisation. `render_overlay_present` presents through a real hidden Vulkan
 window on each adapter and reads back the swapchain image
@@ -1298,3 +1301,54 @@ Look fitted again (`tools/perf/fit_look.py`, `build/lookfit7`) on look-off frame
 - Test recording: `Game\Octo aufnehmen.bat` (own folder per recording); replay `Octo-20261030_205454` reaches Octo Valley and mission 1. Diagnostics: `RBREW_WEATHER_WHY=1`.
 
 - **HD textures for everyone, locally:** `HD-Textures.bat` (repo root) starts the game with `RBREW_TEXTURE_DUMP=Game\texture-dump`, then runs `scripts/hd_textures.py` (tracked; `tools/` is git-ignored): Real-ESRGAN x4plus with the network written inline (no basicsr), model downloaded once with SHA-256 check into `build\upscale\models`, CUDA in half precision when available, colour BC1-3 -> RGBA8 at 2x with mips, flat BC4 masks (loading screen) -> sharp BC4 at 4x, existing files skipped. The results derive from the game's files and are never committed. Checked: 128x128 colour texture and a 64x64 mask, sizes and colours correct (CPU: 3 s).
+
+## Host spin waits on small CPUs (2026-10-30)
+
+No game executable was run. The port keeps several host threads runnable at
+once: the game thread, the GX2 render thread, the Vulkan recorder, audio and
+the shader translation helper. Three of their waits spun for milliseconds
+before sleeping: the render thread's idle wait (4 ms, ABOVE_NORMAL priority),
+the game thread's wait for a queued renderer call such as an occlusion read
+(4 ms), and the render thread's wait for a pixel-shader translation plus the
+translator's own idle wait (2 ms each). With a spare core per spinner this
+only costs power. On a 2-4 thread CPU the spinner holds the core that the
+awaited thread, the game thread or another guest thread needs.
+
+Change: `rbrew_host_spin_budget` (`runtime/host_sleep.h`) keeps each wait's
+original budget when the process may use >= 8 logical CPUs and caps it at
+50 us otherwise; the waits then sleep on the same atomics as before.
+`RBREW_HOST_SPIN=full` restores the old budgets on any CPU, `=<us>` sets a
+cap. Ordering, wake-up protocol, queue contents and rendering are unchanged.
+The Vulkan recorder's ~0.1 ms pause-count loops were capped too at first,
+but that slowed `npc_100` on two CPUs from 1.41 to 1.56 ms per synthetic
+frame (sleep/wake per published chunk), so they keep their original counts.
+
+`gambit_performance_tests contention` models a small-CPU frame: the game
+thread computes 8 fixed chunks and posts 40 render tasks after each, then
+waits for the queue (the plaza's occlusion read); a second guest thread
+computes 1 ms and sleeps 2 ms. Work is fixed and checksummed (identical in
+all runs). `RBREW_BENCH_AFFINITY` restricts the process. Seven alternating
+runs per mode on the Ryzen 7 8700F, median (p50 spread):
+
+| CPUs | Mode | Frame p50 | Frame p95 | Frame max | Guest thread steps/s | Process CPU per frame |
+|---|---|---:|---:|---:|---:|---:|
+| 2 | old (`full`) | 11.011 (10.40-11.20) ms | 13.149 ms | 17.16 ms | 30.0 | 22.0 ms |
+| 2 | new | 10.386 (10.37-10.60) ms | 11.151 ms | 14.11 ms | 193.0 | 17.8 ms |
+| 4 | old (`full`) | 10.326 ms | 10.953 ms | 11.35 ms | 263.8 | 24.2 ms |
+| 4 | new | 10.342 ms | 10.566 ms | 10.83 ms | 264.1 | 18.4 ms |
+| 16 | old / new | 10.232 / 10.239 ms | 10.345 / 10.486 ms | 11.13 / 11.21 ms | 242 | 24.0 / 24.7 ms |
+
+On two CPUs the competing guest thread got 6.4x more work done and the
+frame's p95 fell 15%; on four, 24% less process CPU per frame. With 16 CPUs
+the budgets are unchanged by design. The real `plaza` and `npc_100` draw
+paths on two CPUs (`start /affinity 3`, seven alternating runs, identical
+checksums) stayed within noise: 1.921 -> 1.912 and 1.393 -> 1.400 ms CPU per
+synthetic frame. These are synthetic thread-scheduling measurements, not game
+FPS; the gain in the game depends on how many guest threads are busy.
+
+All 59 non-paired CTest cases pass with the default and with
+`RBREW_HOST_SPIN=0` (every wait sleeps at once). `advanced_paired` and
+`guest_paired_equivalence` fail identically on the unmodified baseline.
+Not changed: `rbrew_host_sleep_until` still spins the last 600 us of guest
+`OSSleepTicks` and vblank waits for timing precision; capping it needs a
+sleep-frequency trace (`RBREW_SLEEP_TRACE`) from the plaza first.

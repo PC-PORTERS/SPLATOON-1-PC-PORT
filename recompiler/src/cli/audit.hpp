@@ -7,6 +7,6 @@ struct AuditInventory {
     std::vector<rebrewu::analysis::FunctionDiscovery::ThunkAudit> thunks;
     void frame(const rebrewu::analysis::FunctionDiscovery::FrameAudit& f) { frames.push_back(f); }
     void thunk(const rebrewu::analysis::FunctionDiscovery::ThunkAudit& f) { thunks.push_back(f); }
-    bool write(const rebrewu::rpx::RpxModule&, const rebrewu::ir::IRModule&,
-               const rebrewu::analysis::CFGBuilder&, const std::filesystem::path&) const;
+    bool write(const rebrewu::rpx::RpxModule&, const rebrewu::ir::IRModule&, const rebrewu::analysis::CFGBuilder&,
+               const std::filesystem::path&) const;
 };

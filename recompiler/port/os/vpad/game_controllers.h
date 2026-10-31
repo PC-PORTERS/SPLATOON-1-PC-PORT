@@ -33,7 +33,10 @@ inline void shape_stick(float& x, float& y) {
 
 // Big-endian float writer for guest memory
 inline void write_guest_float(uint8_t* mem, uint32_t addr, float v) {
-    union { float f; uint32_t u; } cvt;
+    union {
+        float f;
+        uint32_t u;
+    } cvt;
     cvt.f = v;
     rbrew_write32(mem, addr, cvt.u);
 }
@@ -56,8 +59,8 @@ void on_controller_device_removed(int which);
 void check_controller_hotplug_periodic();
 
 // Log live inputs (throttled to avoid any frame hitching)
-void log_controller_input(int player, uint32_t buttons, float lx, float ly, float rx, float ry,
-                          bool has_gyro, const float* gyro);
+void log_controller_input(int player, uint32_t buttons, float lx, float ly, float rx, float ry, bool has_gyro,
+                          const float* gyro);
 
 // Query total connected and recognized controllers
 int get_connected_controller_count();

@@ -16,8 +16,8 @@ extern ScreenMode g_screen_mode;
 // Simulated touch state — written by gx2_context on mouse click in Gamepad mode,
 // read by VPADRead to populate VPADStatus.tpNormal / tpFiltered1 / tpFiltered2
 struct TouchState {
-    bool     touched;
-    uint16_t x;   // 0..853  (GamePad screen width  – 1)
-    uint16_t y;   // 0..479  (GamePad screen height – 1)
+    bool touched;
+    uint16_t x; // 0..853  (GamePad screen width  – 1)
+    uint16_t y; // 0..479  (GamePad screen height – 1)
 };
 extern TouchState g_touch_state;

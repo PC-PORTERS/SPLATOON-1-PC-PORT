@@ -24,7 +24,9 @@ set(RBREW_GX2_BACKEND_SOURCES
     ${RBREW_GX2_DIR}/gx2_texture_pack.cpp
     ${RBREW_GX2_DIR}/vk/gx2_vk.cpp
     ${RBREW_GX2_DIR}/vk/gx2_vk_capture.cpp
-    ${RBREW_GX2_DIR}/vk/gx2_vk_shader.cpp)
+    ${RBREW_GX2_DIR}/vk/gx2_vk_shader.cpp
+    ${RBREW_GX2_DIR}/vk/gx2_imgui_overlay.cpp
+    ${RBREW_GX2_DIR}/vk/gx2_graphics_menu.cpp)
 function(rbrew_gx2_backend target scope)
     target_sources(${target} PRIVATE ${RBREW_GX2_BACKEND_SOURCES})
     target_compile_definitions(${target} ${scope} RBREW_GRAPHICS_VULKAN=1)

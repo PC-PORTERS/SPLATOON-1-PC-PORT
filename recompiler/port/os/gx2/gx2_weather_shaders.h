@@ -1114,7 +1114,8 @@ vec2 rippleNormal(vec2 xz, float t) {
     }
     return n;
 }
-)glsl" R"glsl(
+)glsl"
+                                          R"glsl(
 vec3 srcColor(vec2 uv) { return textureLod(sceneColor, uv, 0.0).rgb; }
 float srcLuma(vec2 uv) { return sqrt(luminance(srcColor(uv))); }
 // FXAA 3.11 (Lottes), quality search along the edge.
@@ -1225,7 +1226,8 @@ float aoAt(vec2 uv, float viewZ) {
     }
     return sum / max(weight, 1e-4);
 }
-)glsl" R"glsl(
+)glsl"
+                                          R"glsl(
 void main() {
     ivec2 id = ivec2(gl_GlobalInvocationID.xy), size = imageSize(outImage);
     if (any(greaterThanEqual(id, size))) return;
@@ -1430,7 +1432,8 @@ void main() {
         }
         c += shafts * airOpacity(distance,mix(.000003,.000018,warm)+p.picture.w*.00009) * (1.0-c*.5);
     }
-)glsl" R"glsl(
+)glsl"
+                                          R"glsl(
     // Air: aerial perspective and, at a low sun, golden light scattered in
     // the haze; distant buildings fade into it and become silhouettes.
     vec3 vdir = normalize(worldDirection(viewDirection(uv)));
@@ -1624,4 +1627,4 @@ void main() {
     outColor = vec4(light, opacity * dropAlpha);   // linear target
 }
 )glsl";
-}
+} // namespace gx2weather

@@ -5,9 +5,15 @@
 #include "../vpad/game_controllers.h"
 #include <algorithm>
 
-static void KPADInit(CPUState* cpu)      { (void)cpu; }
-static void KPADInitEx(CPUState* cpu)    { (void)cpu; }
-static void KPADShutdown(CPUState* cpu)  { (void)cpu; }
+static void KPADInit(CPUState* cpu) {
+    (void)cpu;
+}
+static void KPADInitEx(CPUState* cpu) {
+    (void)cpu;
+}
+static void KPADShutdown(CPUState* cpu) {
+    (void)cpu;
+}
 
 // WPADProbe(chan, type*) → 0 (connected) or -1 (not connected)
 static void WPADProbe(CPUState* cpu) {
@@ -33,8 +39,8 @@ static void WPADProbe(CPUState* cpu) {
 
 // KPADReadEx(chan, buffer, count) → samplesRead
 static void KPADReadEx(CPUState* cpu) {
-    uint32_t chan  = ARG0;
-    uint32_t buf   = ARG1;
+    uint32_t chan = ARG0;
+    uint32_t buf = ARG1;
     uint32_t count = ARG2;
 
     if (!buf || count == 0 || !rbrew_memory_accessible(MEM, buf, 0xF0)) {
@@ -44,8 +50,7 @@ static void KPADReadEx(CPUState* cpu) {
 
     if (chan != 0) {
         // Battle Dojo uses WPAD / KPAD channel 0 for Player 2
-        for (uint32_t i = 0; i < 0xF0; i += 4)
-            rbrew_write32(MEM, buf + i, 0u);
+        for (uint32_t i = 0; i < 0xF0; i += 4) rbrew_write32(MEM, buf + i, 0u);
         RET = 0;
         return;
     }
@@ -54,38 +59,35 @@ static void KPADReadEx(CPUState* cpu) {
     ControllerDevice* dev = get_controller(1); // Player 2 Pro Controller
     if (dev && dev->gc && SDL_GameControllerGetAttached(dev->gc)) {
         SDL_GameController* gc = dev->gc;
-        auto btn = [&](SDL_GameControllerButton b) {
-            return SDL_GameControllerGetButton(gc, b) != 0;
-        };
+        auto btn = [&](SDL_GameControllerButton b) { return SDL_GameControllerGetButton(gc, b) != 0; };
 
-        for (uint32_t i = 0; i < 0xF0; i += 4)
-            rbrew_write32(MEM, buf + i, 0u);
+        for (uint32_t i = 0; i < 0xF0; i += 4) rbrew_write32(MEM, buf + i, 0u);
 
         uint32_t pro_hold = 0;
-        if (btn(SDL_CONTROLLER_BUTTON_DPAD_UP))       pro_hold |= 0x00000001u; // UP
-        if (btn(SDL_CONTROLLER_BUTTON_DPAD_LEFT))     pro_hold |= 0x00000002u; // LEFT
-        if (btn(SDL_CONTROLLER_BUTTON_DPAD_DOWN))     pro_hold |= 0x00004000u; // DOWN
-        if (btn(SDL_CONTROLLER_BUTTON_DPAD_RIGHT))    pro_hold |= 0x00008000u; // RIGHT
-        if (btn(SDL_CONTROLLER_BUTTON_Y))             pro_hold |= 0x00000008u; // X
-        if (btn(SDL_CONTROLLER_BUTTON_B))             pro_hold |= 0x00000010u; // A
-        if (btn(SDL_CONTROLLER_BUTTON_X))             pro_hold |= 0x00000020u; // Y
-        if (btn(SDL_CONTROLLER_BUTTON_A))             pro_hold |= 0x00000040u; // B
+        if (btn(SDL_CONTROLLER_BUTTON_DPAD_UP)) pro_hold |= 0x00000001u;       // UP
+        if (btn(SDL_CONTROLLER_BUTTON_DPAD_LEFT)) pro_hold |= 0x00000002u;     // LEFT
+        if (btn(SDL_CONTROLLER_BUTTON_DPAD_DOWN)) pro_hold |= 0x00004000u;     // DOWN
+        if (btn(SDL_CONTROLLER_BUTTON_DPAD_RIGHT)) pro_hold |= 0x00008000u;    // RIGHT
+        if (btn(SDL_CONTROLLER_BUTTON_Y)) pro_hold |= 0x00000008u;             // X
+        if (btn(SDL_CONTROLLER_BUTTON_B)) pro_hold |= 0x00000010u;             // A
+        if (btn(SDL_CONTROLLER_BUTTON_X)) pro_hold |= 0x00000020u;             // Y
+        if (btn(SDL_CONTROLLER_BUTTON_A)) pro_hold |= 0x00000040u;             // B
         if (btn(SDL_CONTROLLER_BUTTON_RIGHTSHOULDER)) pro_hold |= 0x00000200u; // R
-        if (btn(SDL_CONTROLLER_BUTTON_START))         pro_hold |= 0x00000400u; // PLUS
-        if (btn(SDL_CONTROLLER_BUTTON_GUIDE))         pro_hold |= 0x00000800u; // HOME
-        if (btn(SDL_CONTROLLER_BUTTON_BACK))          pro_hold |= 0x00001000u; // MINUS
-        if (btn(SDL_CONTROLLER_BUTTON_LEFTSHOULDER))  pro_hold |= 0x00002000u; // L
-        if (btn(SDL_CONTROLLER_BUTTON_RIGHTSTICK))    pro_hold |= 0x01000000u; // STICK_R
-        if (btn(SDL_CONTROLLER_BUTTON_LEFTSTICK))     pro_hold |= 0x02000000u; // STICK_L
+        if (btn(SDL_CONTROLLER_BUTTON_START)) pro_hold |= 0x00000400u;         // PLUS
+        if (btn(SDL_CONTROLLER_BUTTON_GUIDE)) pro_hold |= 0x00000800u;         // HOME
+        if (btn(SDL_CONTROLLER_BUTTON_BACK)) pro_hold |= 0x00001000u;          // MINUS
+        if (btn(SDL_CONTROLLER_BUTTON_LEFTSHOULDER)) pro_hold |= 0x00002000u;  // L
+        if (btn(SDL_CONTROLLER_BUTTON_RIGHTSTICK)) pro_hold |= 0x01000000u;    // STICK_R
+        if (btn(SDL_CONTROLLER_BUTTON_LEFTSTICK)) pro_hold |= 0x02000000u;     // STICK_L
 
         int16_t lt_raw = SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_TRIGGERLEFT);
         int16_t rt_raw = SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_TRIGGERRIGHT);
         if (lt_raw > 16384) pro_hold |= 0x00000080u; // ZL
         if (rt_raw > 16384) pro_hold |= 0x00000004u; // ZR
 
-        float lx =  SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_LEFTX)  / 32767.0f;
-        float ly = -SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_LEFTY)  / 32767.0f;
-        float rx =  SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_RIGHTX) / 32767.0f;
+        float lx = SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_LEFTX) / 32767.0f;
+        float ly = -SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_LEFTY) / 32767.0f;
+        float rx = SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_RIGHTX) / 32767.0f;
         float ry = -SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_RIGHTY) / 32767.0f;
         shape_stick(lx, ly);
         shape_stick(rx, ry);
@@ -93,12 +95,12 @@ static void KPADReadEx(CPUState* cpu) {
         // Stick direction emulation
         constexpr float kThreshold = 0.5f;
         if (rx <= -kThreshold) pro_hold |= 0x00020000u;
-        if (rx >= kThreshold)  pro_hold |= 0x00080000u;
-        if (ry >= kThreshold)  pro_hold |= 0x00010000u;
+        if (rx >= kThreshold) pro_hold |= 0x00080000u;
+        if (ry >= kThreshold) pro_hold |= 0x00010000u;
         if (ry <= -kThreshold) pro_hold |= 0x00040000u;
         if (lx <= -kThreshold) pro_hold |= 0x00200000u;
-        if (lx >= kThreshold)  pro_hold |= 0x00800000u;
-        if (ly >= kThreshold)  pro_hold |= 0x00100000u;
+        if (lx >= kThreshold) pro_hold |= 0x00800000u;
+        if (ly >= kThreshold) pro_hold |= 0x00100000u;
         if (ly <= -kThreshold) pro_hold |= 0x00400000u;
 
         static uint32_t s_p2_prev_hold = 0;
@@ -137,17 +139,22 @@ static void KPADReadEx(CPUState* cpu) {
 #endif
 
     // Not connected: clear first entry
-    for (uint32_t i = 0; i < 0xF0; i += 4)
-        rbrew_write32(MEM, buf + i, 0u);
+    for (uint32_t i = 0; i < 0xF0; i += 4) rbrew_write32(MEM, buf + i, 0u);
     RET = 0;
 }
 
 // KPADRead — same
-static void KPADRead(CPUState* cpu) { KPADReadEx(cpu); }
+static void KPADRead(CPUState* cpu) {
+    KPADReadEx(cpu);
+}
 
-static void WPADIsEnabled(CPUState* cpu)          { RET = 1; }
-static void WPADGetBatteryLevel(CPUState* cpu)    { RET = 4; } // 4 = full
-static void WPADControlMotor(CPUState* cpu)       {
+static void WPADIsEnabled(CPUState* cpu) {
+    RET = 1;
+}
+static void WPADGetBatteryLevel(CPUState* cpu) {
+    RET = 4;
+} // 4 = full
+static void WPADControlMotor(CPUState* cpu) {
     uint32_t chan = ARG0;
     uint32_t command = ARG1; // 0 = off, 1 = on
 #if defined(HAVE_SDL2)
@@ -159,13 +166,25 @@ static void WPADControlMotor(CPUState* cpu)       {
 #endif
     (void)cpu;
 }
-static void WPADGetInfoAsync(CPUState* cpu)       { (void)cpu; }
-static void WPADIsMplsAttached(CPUState* cpu)     { RET = 0; }
+static void WPADGetInfoAsync(CPUState* cpu) {
+    (void)cpu;
+}
+static void WPADIsMplsAttached(CPUState* cpu) {
+    RET = 0;
+}
 
-static void KPADGetUnifiedWpadStatus(CPUState* cpu) { RET = 0; }
-static void KPADSetPosPlayMode(CPUState* cpu)       { (void)cpu; }
-static void KPADEnableDPD(CPUState* cpu)            { (void)cpu; }
-static void KPADDisableDPD(CPUState* cpu)           { (void)cpu; }
+static void KPADGetUnifiedWpadStatus(CPUState* cpu) {
+    RET = 0;
+}
+static void KPADSetPosPlayMode(CPUState* cpu) {
+    (void)cpu;
+}
+static void KPADEnableDPD(CPUState* cpu) {
+    (void)cpu;
+}
+static void KPADDisableDPD(CPUState* cpu) {
+    (void)cpu;
+}
 
 // ---------------------------------------------------------------------------
 // Registration

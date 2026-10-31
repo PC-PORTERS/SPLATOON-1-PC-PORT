@@ -15,8 +15,8 @@ struct Gx2RegisterWrite {
 
 struct Gx2StaticListState {
     bool ok = false;
-    std::vector<Gx2RegisterWrite> writes;  // in list order
-    std::vector<uint32_t> other_opcodes;   // type-3 packets that are not register sets (not executed)
+    std::vector<Gx2RegisterWrite> writes; // in list order
+    std::vector<uint32_t> other_opcodes;  // type-3 packets that are not register sets (not executed)
 };
 
 // Register file size used by the renderer (indices must stay below it).

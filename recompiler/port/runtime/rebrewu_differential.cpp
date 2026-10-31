@@ -20,9 +20,7 @@ struct WriteJournal {
             journal.bits[byte >> 6] |= uint64_t(1) << (byte & 63u);
         }
     }
-    bool contains(uint32_t address) const noexcept {
-        return (bits[address >> 6] >> (address & 63u)) & 1u;
-    }
+    bool contains(uint32_t address) const noexcept { return (bits[address >> 6] >> (address & 63u)) & 1u; }
 };
 struct WriteObserverScope {
     RbrewMemoryWriteObserver previous;
@@ -32,11 +30,10 @@ struct WriteObserverScope {
     WriteObserverScope(const WriteObserverScope&) = delete;
     WriteObserverScope& operator=(const WriteObserverScope&) = delete;
 };
-}
+} // namespace
 
-RbrewDifferentialReport rbrew_ppc_compare(const CPUState& initial,
-    HostFunc native_callback, uint32_t entry, uint32_t return_pc,
-    const RbrewDifferentialOptions& options) {
+RbrewDifferentialReport rbrew_ppc_compare(const CPUState& initial, HostFunc native_callback, uint32_t entry,
+                                          uint32_t return_pc, const RbrewDifferentialOptions& options) {
     RbrewDifferentialReport report;
     if (!initial.mem || !native_callback || !initial.guest_memory_size ||
         initial.guest_memory_size > options.max_memory_bytes) {
@@ -71,8 +68,7 @@ RbrewDifferentialReport rbrew_ppc_compare(const CPUState& initial,
         }
         {
             WriteObserverScope reference_observer(interpreted.mem, interpreted_writes);
-            report.interpreter = rbrew_ppc_run(&interpreted, entry, return_pc,
-                options.instruction_budget, false);
+            report.interpreter = rbrew_ppc_run(&interpreted, entry, return_pc, options.instruction_budget, false);
         }
         if (report.interpreter.stop != RbrewHybridStop::Returned) {
             report.detail = "reference run stopped before the supplied return boundary";
@@ -83,8 +79,7 @@ RbrewDifferentialReport rbrew_ppc_compare(const CPUState& initial,
             return report;
         }
         report.comparable = true;
-        auto compare = [&](const char* component, uint32_t index,
-                           uint64_t expected, uint64_t actual) {
+        auto compare = [&](const char* component, uint32_t index, uint64_t expected, uint64_t actual) {
             if (expected == actual) return;
             ++report.mismatch_count;
             if (report.mismatches.size() < options.max_mismatches)
@@ -92,8 +87,7 @@ RbrewDifferentialReport rbrew_ppc_compare(const CPUState& initial,
         };
         for (unsigned i = 0; i < 32; ++i) {
             compare("GPR", i, interpreted.r[i], compiled.r[i]);
-            compare("FPR bits", i, std::bit_cast<uint64_t>(interpreted.f[i]),
-                std::bit_cast<uint64_t>(compiled.f[i]));
+            compare("FPR bits", i, std::bit_cast<uint64_t>(interpreted.f[i]), std::bit_cast<uint64_t>(compiled.f[i]));
         }
         for (unsigned i = 0; i < 8; ++i) compare("CR", i, interpreted.cr[i], compiled.cr[i]);
         compare("LR", 0, interpreted.lr, compiled.lr);
@@ -117,22 +111,26 @@ RbrewDifferentialReport rbrew_ppc_compare(const CPUState& initial,
                 if (!in_touched_range) {
                     report.touched_memory_ranges.push_back({i, i + 1u});
                     in_touched_range = true;
-                } else report.touched_memory_ranges.back().end = i + 1u;
-            } else in_touched_range = false;
+                } else
+                    report.touched_memory_ranges.back().end = i + 1u;
+            } else
+                in_touched_range = false;
             const bool changed = interpreted_memory[i] != baseline[i] || compiled_memory[i] != baseline[i];
             if (changed) {
                 ++report.changed_memory_bytes;
                 if (!in_range) {
                     report.changed_memory_ranges.push_back({i, i + 1u});
                     in_range = true;
-                } else report.changed_memory_ranges.back().end = i + 1u;
-            } else in_range = false;
+                } else
+                    report.changed_memory_ranges.back().end = i + 1u;
+            } else
+                in_range = false;
             if (touched || changed) compare("memory", i, interpreted_memory[i], compiled_memory[i]);
         }
         report.write_sets_match = report.write_set_mismatch_count == 0;
         report.matches = report.mismatch_count == 0;
-        report.detail = report.matches ? "architectural state and touched/changed memory agree" :
-            "architectural state or touched/changed memory differs";
+        report.detail = report.matches ? "architectural state and touched/changed memory agree"
+                                       : "architectural state or touched/changed memory differs";
         if (!report.write_sets_match && !options.compare_write_sets)
             report.detail += "; write sets differ (excluded from final-state match)";
     } catch (const std::exception& error) {

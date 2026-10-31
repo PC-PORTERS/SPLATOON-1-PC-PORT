@@ -23,12 +23,12 @@ namespace rebrewu::rpl {
 // but the semantics are subtly different (all exports are available at link
 // time, not resolved lazily).
 
-using RplExport  = rpx::RpxExport;
-using RplImport  = rpx::RpxImport;
+using RplExport = rpx::RpxExport;
+using RplImport = rpx::RpxImport;
 using RplSection = rpx::RpxSection;
-using RplSymbol  = rpx::RpxSymbol;
-using RplReloc   = rpx::RpxReloc;
-using RplFileInfo= rpx::RplFileInfo;
+using RplSymbol = rpx::RpxSymbol;
+using RplReloc = rpx::RpxReloc;
+using RplFileInfo = rpx::RplFileInfo;
 
 // ============================================================================
 // RplModule — fully loaded RPL shared library
@@ -37,15 +37,15 @@ using RplFileInfo= rpx::RplFileInfo;
 /// Decoded representation of a Wii U RPL binary.
 /// The linker aggregates multiple RplModules to resolve imports in an RPX.
 struct RplModule {
-    std::string name{};      // module name (no path, no .rpl extension)
+    std::string name{}; // module name (no path, no .rpl extension)
 
-    RplFileInfo             file_info{};
+    RplFileInfo file_info{};
 
     std::vector<RplSection> sections{};
-    std::vector<RplSymbol>  symbols{};
-    std::vector<RplReloc>   relocations{};
-    std::vector<RplExport>  exports{};
-    std::vector<RplImport>  imports{};   // RPLs may themselves import from other RPLs
+    std::vector<RplSymbol> symbols{};
+    std::vector<RplReloc> relocations{};
+    std::vector<RplExport> exports{};
+    std::vector<RplImport> imports{}; // RPLs may themselves import from other RPLs
 
     // -----------------------------------------------------------------
     // Lookups
@@ -70,9 +70,7 @@ struct RplModule {
     }
 
     /// Returns true if this RPL exports the named symbol (data or code).
-    bool has_export(std::string_view nm) const noexcept {
-        return export_named(nm) != nullptr;
-    }
+    bool has_export(std::string_view nm) const noexcept { return export_named(nm) != nullptr; }
 };
 
-}
+} // namespace rebrewu::rpl

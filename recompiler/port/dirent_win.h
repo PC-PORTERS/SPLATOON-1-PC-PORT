@@ -13,10 +13,10 @@ struct dirent {
 };
 
 struct DIR {
-    HANDLE          handle;
+    HANDLE handle;
     WIN32_FIND_DATAA data;
-    struct dirent   entry;
-    int             first;   // 1 = FindFirstFile result not yet returned
+    struct dirent entry;
+    int first; // 1 = FindFirstFile result not yet returned
 };
 
 static inline DIR* opendir(const char* path) {
@@ -25,7 +25,10 @@ static inline DIR* opendir(const char* path) {
     DIR* d = (DIR*)malloc(sizeof(DIR));
     if (!d) return nullptr;
     d->handle = FindFirstFileA(pattern, &d->data);
-    if (d->handle == INVALID_HANDLE_VALUE) { free(d); return nullptr; }
+    if (d->handle == INVALID_HANDLE_VALUE) {
+        free(d);
+        return nullptr;
+    }
     d->first = 1;
     return d;
 }

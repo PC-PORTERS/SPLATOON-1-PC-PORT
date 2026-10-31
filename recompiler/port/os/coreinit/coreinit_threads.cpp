@@ -35,9 +35,13 @@
 #include <stdexcept>
 #if defined(_WIN32)
 extern "C" __declspec(dllimport) unsigned long __stdcall GetCurrentThreadId(void);
-static unsigned long host_thread_id() { return GetCurrentThreadId(); }
+static unsigned long host_thread_id() {
+    return GetCurrentThreadId();
+}
 #else
-static unsigned long host_thread_id() { return 0; }
+static unsigned long host_thread_id() {
+    return 0;
+}
 #endif
 
 // ---------------------------------------------------------------------------
@@ -45,9 +49,9 @@ static unsigned long host_thread_id() { return 0; }
 // ---------------------------------------------------------------------------
 static constexpr uint32_t MAIN_THREAD_ADDR = 0x50000010u;
 
-static thread_local uint32_t t_osthread_addr    = 0;    // 0 → main thread
+static thread_local uint32_t t_osthread_addr = 0; // 0 → main thread
 static thread_local uint32_t t_thread_specific[16] = {};
-static thread_local bool     t_in_guest_thread  = false;
+static thread_local bool t_in_guest_thread = false;
 
 // Exception used to cleanly exit from a guest thread (OSExitThread).
 struct GuestThreadExit {};
@@ -56,9 +60,9 @@ struct GuestThreadExit {};
 // GuestThread — one per OSCreateThread call
 // ---------------------------------------------------------------------------
 struct GuestThread {
-    uint32_t    osthread_addr = 0;
-    uint32_t    entry_addr    = 0;
-    CPUState    cpu;              // own register file; shares mem/dispatch
+    uint32_t osthread_addr = 0;
+    uint32_t entry_addr = 0;
+    CPUState cpu; // own register file; shares mem/dispatch
     std::thread host_thread;
     std::atomic<bool> started{false};
     std::atomic<uint32_t> affinity{2}; // OSThread attr bits 0-2 (core 0/1/2)
@@ -69,10 +73,10 @@ struct GuestThread {
     GuestThread& operator=(const GuestThread&) = delete;
 };
 
-static std::mutex                              s_threads_mutex;
+static std::mutex s_threads_mutex;
 static std::unordered_map<uint32_t, GuestThread*> s_threads; // osthread_addr → GuestThread*
-static std::atomic<uint32_t> s_main_affinity{2}; // main thread: core 1
-static std::vector<GuestThread*> s_retired_threads; // replaced, never freed (see OSCreateThread)
+static std::atomic<uint32_t> s_main_affinity{2};             // main thread: core 1
+static std::vector<GuestThread*> s_retired_threads;          // replaced, never freed (see OSCreateThread)
 
 // Pick the core for an affinity set: stay on the preferred core when the set
 // allows it, otherwise use the lowest allowed core; an empty set keeps it.
@@ -93,24 +97,26 @@ static uint32_t current_affinity() {
 // ---------------------------------------------------------------------------
 static void OSCreateThread(CPUState* cpu) {
     uint32_t thread_addr = ARG0;
-    uint32_t entry_addr  = ARG1;
-    uint32_t int_arg     = ARG2;
-    uint32_t ptr_arg     = ARG3;
-    uint32_t stack_top   = ARG4; // r7 = high end of stack
+    uint32_t entry_addr = ARG1;
+    uint32_t int_arg = ARG2;
+    uint32_t ptr_arg = ARG3;
+    uint32_t stack_top = ARG4; // r7 = high end of stack
 
-    RBREW_LOGF(stderr, "[coreinit] OSCreateThread(thread=0x%08X entry=0x%08X)\n",
-            thread_addr, entry_addr);
+    RBREW_LOG_INFO("coreinit", "OSCreateThread(thread=0x%08X entry=0x%08X)\n", thread_addr, entry_addr);
 
-    if (!thread_addr || !entry_addr) { RET = 0; return; }
+    if (!thread_addr || !entry_addr) {
+        RET = 0;
+        return;
+    }
 
     auto* gt = new GuestThread();
     gt->osthread_addr = thread_addr;
-    gt->entry_addr    = entry_addr;
+    gt->entry_addr = entry_addr;
 
     // Share mem and dispatch table with the caller
-    gt->cpu.mem            = cpu->mem;
+    gt->cpu.mem = cpu->mem;
     gt->cpu.dispatch_table = cpu->dispatch_table;
-    gt->cpu.dispatch_size  = cpu->dispatch_size;
+    gt->cpu.dispatch_size = cpu->dispatch_size;
     gt->cpu.guest_memory_size = cpu->guest_memory_size;
 #ifdef RBREW_ENABLE_PPC_FALLBACK
     gt->cpu.guest_code_ranges = cpu->guest_code_ranges;
@@ -136,7 +142,7 @@ static void OSCreateThread(CPUState* cpu) {
     rbrew_init_thread_gqrs(&gt->cpu); // decaf OSCreateThread GQR2-5
 
     // Write READY state into guest OSThread struct (+0x10)
-    if (rbrew_memory_accessible(cpu->mem,thread_addr,0x20u))
+    if (rbrew_memory_accessible(cpu->mem, thread_addr, 0x20u))
         rbrew_write32(cpu->mem, thread_addr + 0x10u, 1u); // OS_THREAD_STATE_READY
 
     std::lock_guard<std::mutex> lk(s_threads_mutex);
@@ -163,33 +169,39 @@ static void OSResumeThread(CPUState* cpu) {
 
     std::lock_guard<std::mutex> lk(s_threads_mutex);
     auto it = s_threads.find(thread_addr);
-    if (it == s_threads.end()) { RET = -1; return; }
+    if (it == s_threads.end()) {
+        RET = -1;
+        return;
+    }
 
     GuestThread* gt = it->second;
-    if (gt->started.exchange(true)) { RET = 0; return; } // already running
+    if (gt->started.exchange(true)) {
+        RET = 0;
+        return;
+    } // already running
 
     // Mark RUNNING in guest struct
-    if (rbrew_memory_accessible(gt->cpu.mem,thread_addr,0x20u))
+    if (rbrew_memory_accessible(gt->cpu.mem, thread_addr, 0x20u))
         rbrew_write32(gt->cpu.mem, thread_addr + 0x10u, 2u); // OS_THREAD_STATE_RUNNING
 
     gt->host_thread = std::thread([gt]() {
-        t_osthread_addr   = gt->osthread_addr;
+        t_osthread_addr = gt->osthread_addr;
         t_in_guest_thread = true;
-        t_guest_thread    = gt;
+        t_guest_thread = gt;
         rbrew_thread_core_slot = &gt->core;
         memset(t_thread_specific, 0, sizeof(t_thread_specific));
 
-        RBREW_LOGF(stderr, "[coreinit] thread 0x%08X started (entry=0x%08X host_tid=%lu cpu=%p)\n",
-                gt->osthread_addr, gt->entry_addr, host_thread_id(), (void*)&gt->cpu);
+        RBREW_LOG_INFO("coreinit", "thread 0x%08X started (entry=0x%08X host_tid=%lu cpu=%p)\n", gt->osthread_addr,
+                       gt->entry_addr, host_thread_id(), (void*)&gt->cpu);
         try {
             rbrew_dispatch(&gt->cpu, gt->entry_addr);
         } catch (const GuestThreadExit&) {
             // OSExitThread was called — clean exit
         }
-        RBREW_LOGF(stderr, "[coreinit] thread 0x%08X finished\n", gt->osthread_addr);
+        RBREW_LOG_INFO("coreinit", "thread 0x%08X finished\n", gt->osthread_addr);
 
         // Mark MORIBUND in guest struct
-        if (rbrew_memory_accessible(gt->cpu.mem,gt->osthread_addr,0x20u))
+        if (rbrew_memory_accessible(gt->cpu.mem, gt->osthread_addr, 0x20u))
             rbrew_write32(gt->cpu.mem, gt->osthread_addr + 0x10u, 8u);
     });
 
@@ -209,8 +221,7 @@ static void OSJoinThread(CPUState* cpu) {
         auto it = s_threads.find(thread_addr);
         if (it != s_threads.end()) gt = it->second;
     }
-    if (gt && gt->host_thread.joinable())
-        gt->host_thread.join();
+    if (gt && gt->host_thread.joinable()) gt->host_thread.join();
 
     // Write exit value 0 to output ptr if given
     if (ARG1) rbrew_write32(MEM, ARG1, 0u);
@@ -249,7 +260,9 @@ static void OSSetThreadSpecific(CPUState* cpu) {
 // ---------------------------------------------------------------------------
 // Misc thread operations
 // ---------------------------------------------------------------------------
-static void OSSetThreadName(CPUState* cpu)     { (void)cpu; }
+static void OSSetThreadName(CPUState* cpu) {
+    (void)cpu;
+}
 // OSSetThreadAffinity(thread, affinity): the thread moves to an allowed core
 // (staying put when its current core is still allowed). Unknown threads are
 // the main thread (its OSThread is not tracked here).
@@ -269,11 +282,14 @@ static void OSSetThreadAffinity(CPUState* cpu) {
     rbrew_main_thread_core = pick_core(affinity, rbrew_main_thread_core.load());
     RET = 1;
 }
-static void OSSetThreadPriority(CPUState* cpu) { RET = 1; }
-static void OSGetThreadPriority(CPUState* cpu) { RET = 16; }
-static void OSInitThreadQueue(CPUState* cpu)   {
-    if (ARG0 && rbrew_memory_accessible(MEM,ARG0,8u))
-        memset(MEM + ARG0, 0, 8);
+static void OSSetThreadPriority(CPUState* cpu) {
+    RET = 1;
+}
+static void OSGetThreadPriority(CPUState* cpu) {
+    RET = 16;
+}
+static void OSInitThreadQueue(CPUState* cpu) {
+    if (ARG0 && rbrew_memory_accessible(MEM, ARG0, 8u)) memset(MEM + ARG0, 0, 8);
 }
 
 // RBREW_SLEEP_TRACE=<file>: total guest sleep time per guest call chain (the
@@ -284,13 +300,20 @@ static void trace_sleep(CPUState* cpu, uint64_t us) {
     std::array<uint32_t, 4> chain{cpu->lr};
     for (uint32_t i = 1, sp = cpu->r[1]; i < chain.size(); ++i) {
         if (!rbrew_memory_accessible(MEM, sp, 4)) break;
-        sp = rbrew_read32(MEM, sp);   // back chain
+        sp = rbrew_read32(MEM, sp); // back chain
         if (!sp || !rbrew_memory_accessible(MEM, sp + 4, 4)) break;
-        chain[i] = rbrew_read32(MEM, sp + 4);   // saved LR
+        chain[i] = rbrew_read32(MEM, sp + 4); // saved LR
     }
-    struct Hash { size_t operator()(const std::array<uint32_t, 4>& c) const { return c[0] ^ c[1] * 31 ^ c[2] * 131 ^ c[3] * 1031; } };
+    struct Hash {
+        size_t operator()(const std::array<uint32_t, 4>& c) const {
+            return c[0] ^ c[1] * 31 ^ c[2] * 131 ^ c[3] * 1031;
+        }
+    };
     static std::mutex lock;
-    struct Total { uint64_t calls = 0, us = 0; double first_s = 0, last_s = 0; };
+    struct Total {
+        uint64_t calls = 0, us = 0;
+        double first_s = 0, last_s = 0;
+    };
     static std::unordered_map<std::array<uint32_t, 4>, Total, Hash> totals;
     static const auto start = std::chrono::steady_clock::now();
     static auto last_dump = start;
@@ -299,7 +322,8 @@ static void trace_sleep(CPUState* cpu, uint64_t us) {
     const double seconds = std::chrono::duration<double>(now - start).count();
     auto& total = totals[chain];
     if (!total.calls++) total.first_s = seconds;
-    total.us += us; total.last_s = seconds;
+    total.us += us;
+    total.last_s = seconds;
     if (now - last_dump < std::chrono::seconds(2)) return;
     last_dump = now;
     if (FILE* f = std::fopen(path, "w")) {
@@ -316,10 +340,12 @@ static void OSSleepTicks(CPUState* cpu) {
     uint64_t ticks = ((uint64_t)ARG0 << 32) | (uint64_t)ARG1;
     uint64_t us = ticks / RBREW_TIMER_CLOCK * 1000000ULL + ticks % RBREW_TIMER_CLOCK * 1000000ULL / RBREW_TIMER_CLOCK;
     trace_sleep(cpu, us);
-    if (us > 0)
-        rbrew_host_sleep_for(us);
+    if (us > 0) rbrew_host_sleep_for(us);
 }
-static void OSYieldThread(CPUState* cpu)         { (void)cpu; std::this_thread::yield(); }
+static void OSYieldThread(CPUState* cpu) {
+    (void)cpu;
+    std::this_thread::yield();
+}
 // coreinit.rpl 0201FC1C / 0201FC38: three big-endian arrival words and a
 // self pointer, exactly 0x10 bytes. Arrival stays published until reinit.
 // The native condition variable supplies the original release/acquire barrier
@@ -329,42 +355,47 @@ struct RendezvousImpl {
     std::condition_variable arrived;
 };
 static std::mutex s_rendezvous_map_mutex;
-static std::unordered_map<const uint8_t*,std::unique_ptr<RendezvousImpl>> s_rendezvous;
-static RendezvousImpl& get_rendezvous(CPUState* cpu,uint32_t address) {
-    if(!address || uint64_t(address)+0x10>cpu->guest_memory_size ||
-       !rbrew_memory_accessible(MEM,address,0x10))
+static std::unordered_map<const uint8_t*, std::unique_ptr<RendezvousImpl>> s_rendezvous;
+static RendezvousImpl& get_rendezvous(CPUState* cpu, uint32_t address) {
+    if (!address || uint64_t(address) + 0x10 > cpu->guest_memory_size || !rbrew_memory_accessible(MEM, address, 0x10))
         throw std::runtime_error("Cafe rendezvous lies outside accessible guest memory");
     std::lock_guard lock(s_rendezvous_map_mutex);
-    auto& item=s_rendezvous[MEM+address];
-    if(!item) item=std::make_unique<RendezvousImpl>();
+    auto& item = s_rendezvous[MEM + address];
+    if (!item) item = std::make_unique<RendezvousImpl>();
     return *item;
 }
 static void OSInitRendezvous(CPUState* cpu) {
-    const uint32_t address=ARG0;
-    auto& rendezvous=get_rendezvous(cpu,address);
+    const uint32_t address = ARG0;
+    auto& rendezvous = get_rendezvous(cpu, address);
     {
         std::lock_guard lock(rendezvous.mutex);
-        for(unsigned core=0;core<3;++core) rbrew_write32(MEM,address+core*4,0);
-        rbrew_write32(MEM,address+12,address);
+        for (unsigned core = 0; core < 3; ++core) rbrew_write32(MEM, address + core * 4, 0);
+        rbrew_write32(MEM, address + 12, address);
     }
     rendezvous.arrived.notify_all();
 }
 static void OSWaitRendezvous(CPUState* cpu) {
-    const uint32_t address=ARG0,mask=ARG1&7,core=rbrew_current_core();
-    if(core>=3) throw std::runtime_error("Cafe rendezvous has an invalid caller core");
-    auto& rendezvous=get_rendezvous(cpu,address);
+    const uint32_t address = ARG0, mask = ARG1 & 7, core = rbrew_current_core();
+    if (core >= 3) throw std::runtime_error("Cafe rendezvous has an invalid caller core");
+    auto& rendezvous = get_rendezvous(cpu, address);
     std::unique_lock lock(rendezvous.mutex);
-    rbrew_write32(MEM,address+core*4,1);
+    rbrew_write32(MEM, address + core * 4, 1);
     rendezvous.arrived.notify_all();
-    rendezvous.arrived.wait(lock,[&] {
-        for(unsigned participant=0;participant<3;++participant)
-            if((mask&(1u<<participant)) && rbrew_read32(MEM,address+participant*4)!=1) return false;
+    rendezvous.arrived.wait(lock, [&] {
+        for (unsigned participant = 0; participant < 3; ++participant)
+            if ((mask & (1u << participant)) && rbrew_read32(MEM, address + participant * 4) != 1) return false;
         return true;
     });
-    RET=1;
+    RET = 1;
 }
-static void OSWaitEventWithTimeout(CPUState* cpu){ (void)cpu; RET = 0; }
-static void OSDriver_Register(CPUState* cpu)     { (void)cpu; RET = 0; }
+static void OSWaitEventWithTimeout(CPUState* cpu) {
+    (void)cpu;
+    RET = 0;
+}
+static void OSDriver_Register(CPUState* cpu) {
+    (void)cpu;
+    RET = 0;
+}
 
 // ---------------------------------------------------------------------------
 // Registration

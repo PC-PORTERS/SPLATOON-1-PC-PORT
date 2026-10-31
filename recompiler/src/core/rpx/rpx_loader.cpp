@@ -9,8 +9,7 @@
 
 namespace rebrewu::rpx {
 
-RpxLoader::RpxLoader(diagnostics::DiagEngine& diag) noexcept
-    : m_diag(diag), m_reader(diag) {}
+RpxLoader::RpxLoader(diagnostics::DiagEngine& diag) noexcept : m_diag(diag), m_reader(diag) {}
 
 std::optional<RpxModule> RpxLoader::load(const std::filesystem::path& path) {
     std::ifstream f(path, std::ios::binary | std::ios::ate);
@@ -28,8 +27,7 @@ std::optional<RpxModule> RpxLoader::load(const std::filesystem::path& path) {
     return load(buf, path.stem().string());
 }
 
-std::optional<RpxModule> RpxLoader::load(std::span<const uint8_t> bytes,
-                                          std::string module_name) {
+std::optional<RpxModule> RpxLoader::load(std::span<const uint8_t> bytes, std::string module_name) {
     auto img = m_reader.parse(bytes);
     if (!img) return {};
 
@@ -41,7 +39,7 @@ std::optional<RpxModule> RpxLoader::load(std::span<const uint8_t> bytes,
     if (!decode_sections(*img, bytes, out)) return {};
     if (!decode_symbols(*img, out)) return {};
     if (!decode_exports(*img, out)) return {};
-    if (!decode_relocs(*img, out))  return {};
+    if (!decode_relocs(*img, out)) return {};
     if (!decode_imports(*img, out)) return {};
 
     return out;
@@ -60,35 +58,33 @@ bool RpxLoader::decode_file_info(const elf::ElfImage& img, RpxModule& out) {
         return false;
     }
     auto& fi = out.file_info;
-    fi.text_size          = raw.get_text_size();
-    fi.data_size          = raw.get_data_size();
-    fi.sda_base           = raw.get_sda_base();
-    fi.sda2_base          = raw.get_sda2_base();
-    fi.stack_size         = raw.get_stack_size();
-    fi.flags              = raw.get_flags();
-    fi.heap_size          = raw.get_heap_size();
-    fi.min_version        = raw.get_min_version();
-    fi.cafe_sdk_version   = raw.get_cafe_sdk_version();
-    fi.cafe_sdk_revision  = raw.get_cafe_sdk_revision();
-    fi.tls_module_index   = raw.get_tls_module_index();
-    fi.tls_align_shift    = raw.get_tls_align_shift();
+    fi.text_size = raw.get_text_size();
+    fi.data_size = raw.get_data_size();
+    fi.sda_base = raw.get_sda_base();
+    fi.sda2_base = raw.get_sda2_base();
+    fi.stack_size = raw.get_stack_size();
+    fi.flags = raw.get_flags();
+    fi.heap_size = raw.get_heap_size();
+    fi.min_version = raw.get_min_version();
+    fi.cafe_sdk_version = raw.get_cafe_sdk_version();
+    fi.cafe_sdk_revision = raw.get_cafe_sdk_revision();
+    fi.tls_module_index = raw.get_tls_module_index();
+    fi.tls_align_shift = raw.get_tls_align_shift();
     return true;
 }
 
-bool RpxLoader::decode_sections(const elf::ElfImage& img,
-                                 std::span<const uint8_t> raw,
-                                 RpxModule& out) {
+bool RpxLoader::decode_sections(const elf::ElfImage& img, std::span<const uint8_t> raw, RpxModule& out) {
     for (uint32_t i = 0; i < img.sections.size(); ++i) {
         const auto& s = img.sections[i];
         if (!(s.header.flags() & elf::SHF_ALLOC)) continue;
 
         RpxSection sec;
-        sec.index   = i;
-        sec.name    = s.name;
+        sec.index = i;
+        sec.name = s.name;
         sec.address = s.header.addr();
-        sec.size    = s.header.size();
-        sec.flags   = s.header.flags();
-        sec.type    = s.header.type();
+        sec.size = s.header.size();
+        sec.flags = s.header.flags();
+        sec.type = s.header.type();
         sec.alignment = s.header.addralign();
 
         if (s.header.is_rpl_zlib_compressed()) {
@@ -144,19 +140,17 @@ bool RpxLoader::decode_symbols(const elf::ElfImage& img, RpxModule& out) {
 
     for (size_t i = 0; i < sym_count; ++i) {
         elf::Elf32_Sym raw_sym;
-        std::memcpy(&raw_sym, symtab->data.data() + i * sizeof(elf::Elf32_Sym),
-                    sizeof(raw_sym));
+        std::memcpy(&raw_sym, symtab->data.data() + i * sizeof(elf::Elf32_Sym), sizeof(raw_sym));
 
         RpxSymbol sym;
-        sym.address       = raw_sym.value();
-        sym.size          = raw_sym.size();
-        sym.binding       = raw_sym.bind();
-        sym.type          = raw_sym.type();
+        sym.address = raw_sym.value();
+        sym.size = raw_sym.size();
+        sym.binding = raw_sym.bind();
+        sym.type = raw_sym.type();
         sym.section_index = raw_sym.shndx();
 
         uint32_t name_off = raw_sym.name();
-        if (strings && name_off < str_size)
-            sym.name = strings + name_off;
+        if (strings && name_off < str_size) sym.name = strings + name_off;
 
         out.symbols.push_back(std::move(sym));
     }
@@ -174,10 +168,9 @@ bool RpxLoader::decode_exports(const elf::ElfImage& img, RpxModule& out) {
         for (uint32_t i = 0; i < count && (p + 12) <= sec.data.data() + sec.data.size(); ++i, p += 12) {
             RpxExport exp;
             exp.tls_offset = elf::from_be(*reinterpret_cast<const uint32_t*>(p));
-            exp.address    = elf::from_be(*reinterpret_cast<const uint32_t*>(p + 4));
+            exp.address = elf::from_be(*reinterpret_cast<const uint32_t*>(p + 4));
             uint32_t name_off = elf::from_be(*reinterpret_cast<const uint32_t*>(p + 8));
-            if (name_off < sec.data.size())
-                exp.name = reinterpret_cast<const char*>(sec.data.data() + name_off);
+            if (name_off < sec.data.size()) exp.name = reinterpret_cast<const char*>(sec.data.data() + name_off);
             exp.is_data = (exp.tls_offset & 1) != 0;
             exp.tls_offset &= ~1u;
             out.exports.push_back(std::move(exp));
@@ -197,8 +190,10 @@ std::optional<uint32_t> address_taken_import_slot(const RpxModule& m, size_t sym
         auto word = m.read_word(rel.offset & ~3u);
         if (!word) continue;
         const uint16_t half = (rel.offset & 2) ? uint16_t(*word) : uint16_t(*word >> 16);
-        if (rel.type == elf::R_PPC_ADDR16_HA) highs.insert(half);
-        else if (rel.type == elf::R_PPC_ADDR16_LO) lows.insert(half);
+        if (rel.type == elf::R_PPC_ADDR16_HA)
+            highs.insert(half);
+        else if (rel.type == elf::R_PPC_ADDR16_LO)
+            lows.insert(half);
     }
     if (highs.size() != 1 || lows.size() != 1) return std::nullopt;
     const uint32_t slot = (uint32_t(*highs.begin()) << 16) + uint32_t(int32_t(int16_t(*lows.begin())));
@@ -213,8 +208,7 @@ bool RpxLoader::decode_imports(const elf::ElfImage& img, RpxModule& out) {
     // tools/plt_resolver.py, to identify executable PLT thunks.
     for (size_t si = 0; si < out.symbols.size(); ++si) {
         const auto& sym = out.symbols[si];
-        if (sym.section_index >= img.sections.size() ||
-            sym.type == elf::STT_SECTION || sym.name.empty()) continue;
+        if (sym.section_index >= img.sections.size() || sym.type == elf::STT_SECTION || sym.name.empty()) continue;
         const auto& sec = img.sections[sym.section_index];
         if (sec.header.type() != elf::SHT_RPL_IMPORTS) continue;
         RpxImport base;
@@ -231,19 +225,20 @@ bool RpxLoader::decode_imports(const elf::ElfImage& img, RpxModule& out) {
                 int32_t displacement = static_cast<int32_t>(*word & 0x03FFFFFCu);
                 if (displacement & 0x02000000) displacement |= static_cast<int32_t>(0xFC000000u);
                 uint32_t target = (*word & 2) ? static_cast<uint32_t>(displacement)
-                    : rel.offset + static_cast<uint32_t>(displacement);
-                if (std::find(targets.begin(), targets.end(), target) == targets.end())
-                    targets.push_back(target);
+                                              : rel.offset + static_cast<uint32_t>(displacement);
+                if (std::find(targets.begin(), targets.end(), target) == targets.end()) targets.push_back(target);
             }
         }
         if (targets.empty() && !base.is_data)
             if (auto slot = address_taken_import_slot(out, si, sym.address)) targets.push_back(*slot);
-        if (targets.empty()) out.imports.push_back(base);
-        else for (uint32_t target : targets) {
-            auto imp = base;
-            imp.stub_address = target;
-            out.imports.push_back(std::move(imp));
-        }
+        if (targets.empty())
+            out.imports.push_back(base);
+        else
+            for (uint32_t target : targets) {
+                auto imp = base;
+                imp.stub_address = target;
+                out.imports.push_back(std::move(imp));
+            }
     }
     return true;
 }
@@ -256,12 +251,11 @@ bool RpxLoader::decode_relocs(const elf::ElfImage& img, RpxModule& out) {
             elf::Elf32_Rela raw;
             std::memcpy(&raw, sec.data.data() + i * sizeof(raw), sizeof(raw));
             RpxReloc r;
-            r.offset    = raw.offset();
+            r.offset = raw.offset();
             r.sym_index = raw.sym_index();
-            r.type      = raw.reloc_type();
-            r.addend    = raw.addend();
-            if (r.sym_index < out.symbols.size())
-                r.sym_name = out.symbols[r.sym_index].name;
+            r.type = raw.reloc_type();
+            r.addend = raw.addend();
+            if (r.sym_index < out.symbols.size()) r.sym_name = out.symbols[r.sym_index].name;
             out.relocations.push_back(std::move(r));
         }
     }
@@ -270,14 +264,11 @@ bool RpxLoader::decode_relocs(const elf::ElfImage& img, RpxModule& out) {
 
 std::vector<uint8_t> RpxLoader::decompress_section(const elf::RawSection& sec) {
     if (sec.data.size() < 4) return {};
-    uint32_t uncompressed_size = elf::from_be(
-        *reinterpret_cast<const uint32_t*>(sec.data.data()));
+    uint32_t uncompressed_size = elf::from_be(*reinterpret_cast<const uint32_t*>(sec.data.data()));
 
     std::vector<uint8_t> out(uncompressed_size);
     uLongf dest_len = uncompressed_size;
-    int ret = uncompress(out.data(), &dest_len,
-                         sec.data.data() + 4,
-                         static_cast<uLong>(sec.data.size() - 4));
+    int ret = uncompress(out.data(), &dest_len, sec.data.data() + 4, static_cast<uLong>(sec.data.size() - 4));
     if (ret != Z_OK) {
         m_diag.error("zlib decompress failed for section '" + sec.name + "'");
         return {};
@@ -286,4 +277,4 @@ std::vector<uint8_t> RpxLoader::decompress_section(const elf::RawSection& sec) {
     return out;
 }
 
-}
+} // namespace rebrewu::rpx

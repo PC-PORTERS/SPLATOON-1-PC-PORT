@@ -3,7 +3,9 @@
 #pragma once
 #include <cstdint>
 #include "vk/gx2_vk.h"
-namespace rbrew_settings { struct Values; }
+namespace rbrew_settings {
+struct Values;
+}
 namespace gx2weather {
 struct Camera;
 struct RainCover;
@@ -18,7 +20,7 @@ bool draw_sky(uint8_t* memory, VkCommandBuffer cb, const VkFormat* colors, VkFor
 void observe_draw(uint8_t* memory, uint32_t primitive, uint32_t count);
 // Cinema mode: true for HUD draws into the TV image after the scene.
 bool hud_hidden();
-bool apply(gx2vk::Image& color, gx2vk::Image& depth, const Camera& camera,
-           const rbrew_settings::Values& settings, double seconds, double cycle_seconds = -1);
+bool apply(gx2vk::Image& color, gx2vk::Image& depth, const Camera& camera, const rbrew_settings::Values& settings,
+           double seconds, double cycle_seconds = -1);
 void shutdown();
-}
+} // namespace gx2weather

@@ -1,6 +1,10 @@
 # Splatoon 1 PC Port
+## The original repo is https://github.com/ApfelTeeSaft/RebrewU , Our Splatoon 1 PC Port is simply a continuation of ApfelTeeSaft's RebrewU Project
 
-An unofficial native Windows port of **Splatoon (Wii U)**, made by statically recompiling the game's code into a Windows program, with a Vulkan renderer.
+# IF YOU WANT TO HELP US DM sussy_0897 IN DISCORD OR START A FORK (PREFERABLY DM ME ON DISCORD SINCE U MIGHT GET ADDED TO OUR TEAM)
+# IF YOU POST ANYTHING RELATED TO OUR PORT ON TIKTOK TAG @nevesboy67 @77emul AND @splatoon1multiplayer
+
+An unofficial native PC port of **Splatoon (Wii U)** for **Windows and Linux**, made by statically recompiling the game's code into a native program, with a Vulkan renderer. Windows is set up with `Setup.bat`; Linux is set up with CMake through `setup.sh` / `build.sh`.
 
 > **This project contains no Nintendo code, assets or game files.** You need your own copy of the game, dumped from your own Wii U. The setup builds the port on your PC from your files.
 
@@ -8,8 +12,30 @@ An unofficial native Windows port of **Splatoon (Wii U)**, made by statically re
 
 ## What's new
 
+**Realistic graphics (experimental, off by default)**
+
+Turn it on in the settings menu with *Graphics preset* (Balanced, Realistic or Cinematic); *Original* keeps the clean game at 60 FPS.
+- The game's own lights follow a **time of day**: sunrise, golden hour, sunset and night with moon and stars, or the PC clock
+- **Weather**: clear, overcast, rain, thunderstorm with lightning, after the rain (wet ground), or *Live*, where it changes by itself
+- A physically based **sky** with **volumetric clouds**, two towering cumulus clouds, silver linings and **light shafts** through cloud gaps
+- **Contact shadows**, ambient occlusion, bloom, edge smoothing (FXAA + TAA), motion blur, focus blur and colour controls (saturation, contrast, warmth, vignette, saved looks)
+- Runs in the **plaza, Octo Valley and the tutorial**; story levels keep their own sky and lights and get the picture effects only
+
+**Camera, cinema mode and PC controls**
+- Field of view, camera distance and height, and a hand-held camera wiggle
+- **Cinema mode**: no HUD and a free camera to fly anywhere for screenshots; **F12** saves a photo without menus
+- Direct **PC mouse aiming** (1:1, like a PC shooter) and a key for every GamePad input
+- Camera spots and character spawn points for testing
+
+**HD textures (optional, built on your PC)**
+- `HD-Textures.bat` upscales the textures you saw while playing with Real-ESRGAN into `Game\textures`; nothing is downloaded or shared
+
+**Releases for Windows and Linux**
+- Each version tag publishes a Windows .zip and a Linux .tar.gz on the [Releases page](https://github.com/NEVESYA/SPLATOON-1-PC-PORT/releases) (source and setup only; you build the game from your own dump)
+
 **Settings menu (Esc / controller touchpad)**
-- Render resolution, Plaza 60 FPS on/off, frame rate (30 / 60 / 120 / 180), G-Sync / FreeSync, fullscreen, FPS overlay
+- Render resolution, Plaza 60 FPS on/off, frame rate (30 / 60 / 120 / 180), G-Sync / FreeSync, fullscreen, performance overlay
+- **Graphics preset (experimental):** Original (the clean game at 60 FPS, the default), Balanced, Realistic, Cinematic; pages for graphics, weather & time, camera & mouse, and cinema/photo/hacks, with a help line for every option
 - Gyro on/off, gyro and mouse sensitivity, invert gyro, volume
 - Rebind every button for keyboard/mouse and controller
 - HOME moved from Esc to H
@@ -19,17 +45,23 @@ An unofficial native Windows port of **Splatoon (Wii U)**, made by statically re
 - New frame rates in the menu (experimental): 120 and 180 FPS with real extra frames between game steps (180 outside the plaza), 30 FPS for weak PCs; game speed stays normal in all
 - Fewer shader stutters, faster rendering in levels
 
+**Linux (CMake first)**
+- `setup.sh` builds the whole port natively on Linux with CMake; `build.sh` does incremental rebuilds
+- Dependencies come from your distribution plus pinned upstream sources (SDL2, glslang, volk) — no vcpkg, no Visual Studio
+- `Setup.bat` still drives the unchanged Windows build
+
 **Fix:** Setup now works when the folder path contains accents (issue #10) and retries a failed vcpkg download
 
 ---
 
 ## Requirements
 
-- **Windows 10 or 11, 64-bit**
+- **Windows 10 or 11, 64-bit**, or a **64-bit Linux distribution**
+- **Linux build tools** (the setup uses CMake end to end): CMake ≥ 3.20, Ninja or Make, GCC or Clang, Python ≥ 3.12, plus the `zlib`, `libcurl` and `vulkan-headers` development packages — Arch example: `sudo pacman -S --needed cmake ninja python gcc zlib curl vulkan-headers`. X11/Wayland headers are recommended so the game can open a window.
 - **GPU with Vulkan 1.3** and an up-to-date driver (developed on an RTX 5060 Ti; a modern NVIDIA is recommended)
 - **CPU:** modern 6–8 cores or more · **RAM:** 16 GB minimum, 32 GB recommended (building the game uses a lot of memory)
 - **Disk:** about 40 GB free during setup FINAL BUILD IS 6GB COUNTING THE SHADER CACHES
-- **Your own game dump:** Splatoon **EUR (AGMP01) with update v16**, with the folders `code`, `content` and `meta` (for example made with *Dumpling* on your Wii U). Other regions and versions are not supported yet.
+- **Your own game dump:** Supported Splatoon version (see VersionDb.md), with the folders `code`, `content` and `meta` (for example made with *Dumpling* on your Wii U).
 
 ## Installation (simple)
 
@@ -44,7 +76,7 @@ Setup creates the Wii U `mlc01` directory layout and the port's empty save folde
 
 Existing Mii graphics resources are detected automatically beside your game dump/repository, in `wiiu-system/mlc`, or in Cemu's default/configured MLC. These are optional to setup: missing resources produce a warning and may affect Mii graphics. Setup does not generate or download Nintendo's Mii graphics. Developers can optionally use `-Mlc "D:\My system dump"` to add a resource location; players are never prompted for it.
 
-**Updating:** download the new version, then run `Setup.bat` again. Your save (`Game\save`) and shader cache are kept.
+**Updating:** download the new version, then run `Setup.bat` (Windows) or `./setup.sh` (Linux) again. Your save (`Game/save`) and shader cache are kept.
 
 Options: `Setup.bat -Clean` rebuilds everything, and `-Output D:\Splatoon` picks a different game folder.
 
@@ -58,9 +90,51 @@ Setup.bat -GameDump "D:\My Wii U games\Splatoon [AGMP01]"
 
 Double-click `HD-Textures.bat`. The game starts; visit the places you want in HD and close it. The textures it showed are then upscaled (Real-ESRGAN) into `Game\textures` and load at the next start. Everything happens on your PC from your own copy of the game; the HD textures are never uploaded or shared, because they are derived from the game's files. Needs Python 3 (the script offers to install `torch`, `numpy` and `pillow`); an NVIDIA graphics card makes it much faster.
 
+## Installation (Linux, CMake)
+
+1. Install the build tools (see [Requirements](#requirements)), for example on Arch:
+   ```bash
+   sudo pacman -S --needed cmake ninja python gcc zlib curl vulkan-headers
+   ```
+2. Extract the repository (or `git clone` it) anywhere and run the setup with your dump folder:
+   ```bash
+   ./setup.sh --dump "/path/to/SplatoonDump"
+   ```
+   The dump must contain `code`, `content` and `meta`. Without `--dump`, the setup looks in `~/Downloads` and `./dump`, then asks for the folder. It creates the Wii U `mlc01` layout, downloads the Noto replacement fonts (checksum-pinned), builds the dependencies, the recompiler and the game. The first run takes **30–90 minutes**.
+3. Play: **`./Game/Splatoon`**.
+
+Options: `./setup.sh --clean` rebuilds everything, `--output ~/Games/Splatoon` picks a different game folder, `--mlc PATH` adds a system-resource location, `--jobs N` sets the compile parallelism. Re-running the setup keeps your save (`Game/save`) and shader cache; run it again after pulling updates.
+
+### Building with CMake directly
+
+`setup.sh` is a thin orchestrator over two CMake projects — `recompiler/` (the RebrewU tool) and `recompiler/port/` (the runtime and the game). The equivalent manual flow is:
+
+```bash
+# 1. RebrewU recompiler
+cmake -S recompiler -B build/rebrewu -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build/rebrewu --target rebrewu
+
+# 2. Recompile your dump into C++ (writes build/generated/Gambit).
+#    The RPX selects its manifest from Manifest/*.manifest automatically.
+build/rebrewu/bin/rebrewu recompile \
+    --rpx "/path/to/dump/code/Gambit.rpx" --output build/generated/Gambit \
+    --analyzer-entries profiles/agmp-v16.entries --hooks profiles/agmp-v16.hooks
+
+# 3. Game (after ./setup.sh has built the SDL2/glslang dependency profile)
+cmake -S recompiler/port -B build/game -G Ninja -DCMAKE_BUILD_TYPE=Release \
+    -DRBREW_GRAPHICS_BACKEND=Vulkan -DRBREW_BUILD_GAME=ON \
+    -DGAMBIT_GENERATED_DIR="$PWD/build/generated/Gambit" \
+    -DSDL2_DIR=... -Dglslang_DIR=... -DCMAKE_PREFIX_PATH=...
+cmake --build build/game --target Gambit
+```
+
+For incremental rebuilds just run **`./build.sh`** — it reuses the configured build trees and CMake re-runs itself when any `CMakeLists.txt` or `*.cmake` file changed.
+
 ## Controls
 
-**Esc** (or the touchpad button of a PlayStation controller) opens the port's settings menu: render resolution (applies at the next start), plaza 60 FPS on/off, 120 FPS mode on/off (see below), fullscreen, FPS overlay, controller gyro on/off, gyro sensitivity, inverted gyro up/down, mouse sensitivity, volume and quit. Two pages show and rebind every GamePad input for keyboard & mouse and for the controller: select a row, press Enter/Cross, then the new key or button (a key already in use swaps with the old one; Delete/Square clears; "Reset to defaults" restores the layout below). The game keeps running but gets no input while the menu is open. Choices are saved in `settings.ini` next to `Splatoon.exe`; an environment variable that is set (for example `RBREW_PLAZA_60FPS`, `RBREW_GYRO`, `RBREW_RENDER_RESOLUTION`) still wins over the file.
+**Esc** (or the touchpad button of a PlayStation controller) opens the port's settings menu (ImGui): render resolution (applies at the next start), the graphics preset, plaza 60 FPS on/off, frame rate, G-Sync / FreeSync, fullscreen, performance overlay, controller gyro on/off, gyro sensitivity, inverted gyro up/down, mouse sensitivity, volume and quit. Two pages show and rebind every GamePad input for keyboard & mouse and for the controller: select a row, press Enter/Cross, then the new key or button (a key already in use swaps with the old one; Delete/Square clears; "Reset to defaults" restores the layout below). The game keeps running but gets no input while the menu is open. Choices are saved in `settings.ini` next to the game executable (`Splatoon.exe` / `Splatoon`); an environment variable that is set (for example `RBREW_PLAZA_60FPS`, `RBREW_GYRO`, `RBREW_RENDER_RESOLUTION`) still wins over the file.
+
+**Graphics (experimental).** The default is the original look at 60 FPS. The *Graphics preset* turns on the new lighting: the game's own lights follow a time of day (sunrise, sunset, night with moon and stars) and the weather (clear, overcast, rain, thunderstorm, after the rain, or live), a physically based sky with volumetric clouds and light shafts, contact shadows, ambient occlusion, bloom, edge smoothing and colour controls. This runs in the plaza, Octo Valley and the tutorial; story levels keep their own sky and lights and get the picture effects only. The *Camera & mouse* page has direct PC mouse aiming (needs the game's Motion Controls on), field of view, camera distance/height and a camera wiggle. *Cinema, photo & hacks* hides the HUD and frees the camera (mouse to look, WASD to fly, Space/Ctrl up/down, Shift faster, F7 back), takes photos (**F12**, saved to `Screenshots`), and saves/restores camera spots and character spawn points. Every new effect has an environment switch back to the original behaviour (see `docs/performance.md`).
 
 The game starts in borderless fullscreen; **F11** switches to a 1280×720 window and back. The TV scene renders internally at the console's **1280×720** (light on the GPU) and is scaled to the window. For a sharper image set `RBREW_RENDER_RESOLUTION` before starting: `native` (your desktop resolution), `1080p`, `1440p` or any `WIDTHxHEIGHT`. The game's camera and UI keep their original layout.
 
@@ -84,9 +158,8 @@ Keyboard and mouse (default layout, rebindable in the menu):
 | Esc | Settings menu |
 | H | Home |
 | Tab | GamePad view (the mouse becomes the touch screen) NOT WORKING YET|
-| F3 | Show/hide the FPS overlay (translucent panel: FPS, frame time, 1% low, slowest frame, frame-time graph) and frame stats in the window title |
-| F4 | Detailed frame stats in the window title (1% low, P95/P99, RAM) |
-| F8 / F9 | Start/stop an extended diagnostic recording / save a diagnostic snapshot to `Game\Diagnostics` |
+| F3 | Show/hide the debug overlay (ImGui windows: FPS, frame time, 1% low, frame-time graph, waits, RAM, shader compiles and diagnostics). |
+| F8 / F9 | Start/stop an extended diagnostic recording / save a diagnostic snapshot to `Game/Diagnostics` |
 
 **120 FPS mode** (menu, off by default, experimental; `RBREW_FPS120=interp` turns it on): Splatoon advances its game logic by a fixed step per frame, so the port keeps 60 game steps per second and draws one extra real frame between two steps. The extra frame re-renders the scene with camera, object and bone matrices halfway between the two steps. It is not an image-blending "frame generation". When the PC cannot draw both frames in time, extra frames are left out (you see between 60 and 120 FPS), but the game speed never changes. It works in the plaza too. Expect about half a frame more input latency. On a monitor faster than 120 Hz, turn on G-Sync/FreeSync in your driver and "G-Sync / FreeSync" in the menu so every frame is shown for the same time.
 
@@ -100,7 +173,7 @@ With a DualShock 4 / DualSense, the controller's gyro aims wherever the game use
 
 `RBREW_PAIRED_INLINE=0` restores interpreted paired-single instructions for A/B comparisons. By default, generated code decodes common floating-point instruction words at compile time, preserving the existing rounding and memory access checks.
 
-Runtime switches for comparisons (set before starting the game): `RBREW_QUERY_ASYNC=0` (all queued occlusion-query reads wait), `RBREW_SCAN_COPY=0`, `RBREW_STICK_GYRO_YAW=1`, `RBREW_AC_CONNECT=ok` (old online attempt at boot), `RBREW_FPS_OVERLAY_STYLE=classic`, `RBREW_BLEND_COMBINE_OLD=1`, `RBREW_SCAN_SLICE_MATCH=0`, `RBREW_STREAMOUT_FLUSH_PUBLISH=1`, `RBREW_FRAME_PACING=0` (no flip pacing) / `=auto` (hold 30 FPS in heavy scenes) / `=vsync` (console-strict), `RBREW_AX_FILTERS=0`, `RBREW_GYRO_INVERT_PITCH=1` / `RBREW_GYRO_INVERT_YAW=1`, `RBREW_STREAMOUT_EAGER=1` (old per-draw stream-out readback), `RBREW_FPS_OVERLAY=0`, `RBREW_ASYNC_SHADERS=0` (wait for every shader compile instead of skipping the draw), `RBREW_PLAZA_60FPS=0` (plaza at the console's 30 FPS; `=1` fixed 60 FPS mode), `RBREW_QUERY_ASSUME_VISIBLE=0` (plaza waits for occlusion results), `RBREW_CONTEXT_STATE_SYNC=1`, `RBREW_SUBMIT_EVERY_DRAWS=0`, `SPLATOON_DIAGNOSTICS=off` (no automatic stutter reports).
+Runtime switches for comparisons (set before starting the game): `RBREW_QUERY_ASYNC=0` (all queued occlusion-query reads wait), `RBREW_SCAN_COPY=0`, `RBREW_STICK_GYRO_YAW=1`, `RBREW_AC_CONNECT=ok` (old online attempt at boot), `RBREW_BLEND_COMBINE_OLD=1`, `RBREW_SCAN_SLICE_MATCH=0`, `RBREW_STREAMOUT_FLUSH_PUBLISH=1`, `RBREW_FRAME_PACING=0` (no flip pacing) / `=auto` (hold 30 FPS in heavy scenes) / `=vsync` (console-strict), `RBREW_AX_FILTERS=0`, `RBREW_GYRO_INVERT_PITCH=1` / `RBREW_GYRO_INVERT_YAW=1`, `RBREW_STREAMOUT_EAGER=1` (old per-draw stream-out readback), `RBREW_FPS_OVERLAY=0`, `RBREW_ASYNC_SHADERS=0` (wait for every shader compile instead of skipping the draw), `RBREW_PLAZA_60FPS=0` (plaza at the console's 30 FPS; `=1` fixed 60 FPS mode), `RBREW_QUERY_ASSUME_VISIBLE=0` (plaza waits for occlusion results), `RBREW_CONTEXT_STATE_SYNC=1`, `RBREW_SUBMIT_EVERY_DRAWS=0`, `SPLATOON_DIAGNOSTICS=off` (no automatic stutter reports).
 
 Input recording and replay: `RBREW_INPUT_RECORD=<file>` records every frame's GamePad input (buttons, sticks, touch, controller gyro, motion time step) with scene-change marks; `RBREW_INPUT_REPLAY=<file>` plays it back, waiting at each scene change and each end of a loading screen until the game has caught up, and hands control back when the recording ends or the controller is used. `RBREW_SAVE_DIR=<dir>` uses another save folder than `save`, so a replay can start from the save it was recorded with.
 
@@ -111,13 +184,13 @@ This project follows the same approach as other recompilation and decompilation 
 - **No Nintendo material is in this repository.** There is no game code, no generated code, no textures, models, sounds, fonts, keys or firmware. It contains only original source code (the recompiler and the runtime) and open-source libraries under their own licenses (see `LICENSES/`).
 - **You supply the game.** The port only works with a copy that you dumped yourself from a console and a game you own. The setup refuses unknown files.
 - **The conversion happens on your own PC.** The recompiled code is created locally from your dump and is never uploaded or shared by this project.
-- **Interoperability.** The runtime re-implements the Wii U system services (Cafe OS) in original code, so your game runs on Windows. This is the same kind of interoperability work that emulators like Cemu do.
+- **Interoperability.** The runtime re-implements the Wii U system services (Cafe OS) in original code, so your game runs natively on your PC. This is the same kind of interoperability work that emulators like Cemu do.
 
 Do not share your game files or the generated `build` folder. This explanation is not legal advice, and laws differ between countries. Only use games you legally own.
 
 ## How the port works
 
-1. **Static recompilation (RebrewU).** The recompiler loads `Gambit.rpx`, the game's PowerPC executable. It discovers functions using the RPX and the supported version's checked boundary-address profile in `profiles/`, builds control-flow graphs, and translates PowerPC instructions into equivalent C++. The profile contains addresses, not game code. Setup checks that the supported function table is complete before building. The result is about 200 C++ files that the Microsoft C++ compiler builds into a native x64 program. No emulator CPU runs at play time.
+1. **Static recompilation (RebrewU).** The recompiler loads `Gambit.rpx`, the game's PowerPC executable. It discovers functions using the RPX and the supported version's checked boundary-address profile in `profiles/`, builds control-flow graphs, and translates PowerPC instructions into equivalent C++. The profile contains addresses, not game code. Setup checks that the supported function table is complete before building. The result is about 200 C++ files that CMake builds with MSVC (Windows) or GCC/Clang (Linux) into a native x64 program. No emulator CPU runs at play time.
 2. **Native Cafe OS runtime.** The game calls Wii U system libraries (coreinit, GX2, VPAD, sound and others). The runtime (`recompiler/port/os`) provides those functions natively: memory, threads, files (reading your `content` folder), saves, input through SDL2, and audio through miniaudio.
 3. **GX2 → Vulkan renderer.** The game's GPU commands are replayed on a dedicated render thread. Latte (Wii U GPU) shaders are translated to GLSL by a decompiler adapted from Cemu, then compiled to SPIR-V with glslang. Textures are detiled and uploaded, and render targets map to Vulkan images.
 4. **Performance work in this version:**

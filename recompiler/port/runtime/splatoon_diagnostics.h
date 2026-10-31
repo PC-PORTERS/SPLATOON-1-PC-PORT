@@ -24,12 +24,7 @@ enum class EventCategory : uint8_t {
     System = 7
 };
 
-enum class EventSeverity : uint8_t {
-    Info = 0,
-    Warning = 1,
-    Error = 2,
-    Critical = 3
-};
+enum class EventSeverity : uint8_t { Info = 0, Warning = 1, Error = 2, Critical = 3 };
 
 // 40-byte compact telemetry record per presented frame (lock-free bounded ring buffer)
 #pragma pack(push, 1)
@@ -93,10 +88,9 @@ void SetLevel(DiagnosticLevel level);
 DiagnosticLevel GetLevel();
 
 // Ultra-fast path (< 0.05 ms) - called once per presented frame in GX2SwapScanBuffers
-void RecordFrame(uint32_t frame_index, float frame_time_ms, float cpu_time_ms,
-                 float present_wait_ms, float vsync_wait_ms, float render_wait_ms,
-                 uint16_t draw_calls, uint16_t shader_compiles, uint16_t texture_uploads,
-                 uint8_t screen_mode);
+void RecordFrame(uint32_t frame_index, float frame_time_ms, float cpu_time_ms, float present_wait_ms,
+                 float vsync_wait_ms, float render_wait_ms, uint16_t draw_calls, uint16_t shader_compiles,
+                 uint16_t texture_uploads, uint8_t screen_mode);
 
 // Fast path - thread-safe, non-blocking, zero allocation event recorder
 void RecordEvent(EventCategory category, EventSeverity severity, int16_t code, const char* message);
@@ -107,14 +101,11 @@ void TriggerCapture(const char* reason_tag, const char* detail_description);
 // Heartbeat for watchdog freeze detection
 void Heartbeat();
 
-// Overlay management
-void ToggleOverlay();        // F3: off -> compact -> off
-void ToggleDetailedOverlay();// F4: off -> detailed -> off
-bool IsOverlayVisible();
-bool IsDetailedOverlay();
+// Live metrics for the ImGui performance overlay (F3)
 OverlayMetrics GetOverlayMetrics();
-void ManualCapture();        // F9: Save snapshot now
-void ToggleManualRecord();   // F8: Extended recording
+void ManualCapture();      // F9: Save snapshot now
+void ToggleManualRecord(); // F8: Extended recording
+bool IsManualRecording();
 
 // Offline analyzer (local diagnosis without internet or paid APIs)
 bool AnalyzeReport(const std::string& report_dir, std::string& out_summary, std::string& out_report);

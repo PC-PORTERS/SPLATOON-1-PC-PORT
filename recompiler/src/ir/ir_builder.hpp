@@ -67,18 +67,13 @@ public:
         emit_void(Opcode::Jump, {label(target_block_id)}, guest_addr);
     }
 
-    void create_branch(IROperand cond, uint32_t true_id, uint32_t false_id,
-                       uint32_t guest_addr = 0) {
+    void create_branch(IROperand cond, uint32_t true_id, uint32_t false_id, uint32_t guest_addr = 0) {
         emit_void(Opcode::Branch, {cond, label(true_id), label(false_id)}, guest_addr);
     }
 
-    void create_return(uint32_t guest_addr = 0) {
-        emit_void(Opcode::Return, {}, guest_addr);
-    }
+    void create_return(uint32_t guest_addr = 0) { emit_void(Opcode::Return, {}, guest_addr); }
 
-    void create_nop(uint32_t guest_addr = 0) {
-        emit_void(Opcode::Nop, {}, guest_addr);
-    }
+    void create_nop(uint32_t guest_addr = 0) { emit_void(Opcode::Nop, {}, guest_addr); }
 
     // -----------------------------------------------------------------
     // Raw emission
@@ -99,4 +94,4 @@ private:
     BasicBlock* m_block{nullptr};
 };
 
-}
+} // namespace rebrewu::ir

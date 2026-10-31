@@ -21,10 +21,10 @@ namespace rebrewu::linker {
 
 /// A node in the dependency graph.
 struct ModuleNode {
-    std::string                           name{};       // module name (no .rpl)
-    std::shared_ptr<rpl::RplModule>       module{};     // nullptr if not yet loaded
-    std::vector<std::string>              depends_on{}; // names of imported modules
-    std::vector<std::string>              depended_by{};// names of modules that import this
+    std::string name{};                       // module name (no .rpl)
+    std::shared_ptr<rpl::RplModule> module{}; // nullptr if not yet loaded
+    std::vector<std::string> depends_on{};    // names of imported modules
+    std::vector<std::string> depended_by{};   // names of modules that import this
 
     bool is_loaded() const noexcept { return module != nullptr; }
 };
@@ -45,8 +45,7 @@ public:
     void add_module(std::shared_ptr<rpl::RplModule> mod);
 
     /// Declare that `importer` depends on `exporter`.
-    void add_dependency(const std::string& importer,
-                        const std::string& exporter);
+    void add_dependency(const std::string& importer, const std::string& exporter);
 
     // -----------------------------------------------------------------
     // Queries
@@ -71,9 +70,8 @@ public:
 
 private:
     std::vector<ModuleNode> m_nodes{};
-    bool topo_visit(const std::string& name,
-                    std::unordered_map<std::string,int>& state,
+    bool topo_visit(const std::string& name, std::unordered_map<std::string, int>& state,
                     std::vector<std::string>& order) const;
 };
 
-}
+} // namespace rebrewu::linker

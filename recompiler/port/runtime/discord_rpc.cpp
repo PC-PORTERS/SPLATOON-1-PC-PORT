@@ -1,5 +1,6 @@
 #include "discord_rpc.h"
 #include "native_control_defaults.h"
+#include "rebrewu/logger.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -51,12 +52,18 @@ static std::string escape_json(const std::string& input) {
     std::string out;
     out.reserve(input.size() + 8);
     for (char c : input) {
-        if (c == '"') out += "\\\"";
-        else if (c == '\\') out += "\\\\";
-        else if (c == '\n') out += "\\n";
-        else if (c == '\r') out += "\\r";
-        else if (c == '\t') out += "\\t";
-        else out += c;
+        if (c == '"')
+            out += "\\\"";
+        else if (c == '\\')
+            out += "\\\\";
+        else if (c == '\n')
+            out += "\\n";
+        else if (c == '\r')
+            out += "\\r";
+        else if (c == '\t')
+            out += "\\t";
+        else
+            out += c;
     }
     return out;
 }
@@ -73,19 +80,18 @@ static std::string resolve_client_id(const char* explicit_id) {
     if (file.is_open()) {
         std::string line;
         while (std::getline(file, line)) {
-            while (!line.empty() && (line.back() == '\r' || line.back() == '\n' || line.back() == ' ' || line.back() == '\t'))
+            while (!line.empty() &&
+                   (line.back() == '\r' || line.back() == '\n' || line.back() == ' ' || line.back() == '\t'))
                 line.pop_back();
-            while (!line.empty() && (line.front() == ' ' || line.front() == '\t'))
-                line.erase(line.begin());
-            if (line.empty() || line[0] == '#' || (line.size() >= 2 && line[0] == '/' && line[1] == '/'))
-                continue;
+            while (!line.empty() && (line.front() == ' ' || line.front() == '\t')) line.erase(line.begin());
+            if (line.empty() || line[0] == '#' || (line.size() >= 2 && line[0] == '/' && line[1] == '/')) continue;
             if (line != "390198031590785024") {
                 return line;
             }
         }
     }
 
-    return kDefaultWorkingClientId;   // empty: Rich Presence stays off
+    return kDefaultWorkingClientId; // empty: Rich Presence stays off
 }
 
 static HANDLE open_discord_pipe() {
@@ -134,7 +140,8 @@ static bool pipe_read_all(HANDLE pipe, void* data, uint32_t bytes, unsigned time
             remaining -= bytes_read;
             ptr += bytes_read;
         } else {
-            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
+            auto elapsed =
+                std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
             if (elapsed > timeout_ms) return false;
             Sleep(20);
         }
@@ -155,7 +162,7 @@ static bool send_handshake(HANDLE pipe, const std::string& client_id) {
         if (resp_hdr.length > 0 && resp_hdr.length < 4096) {
             std::vector<char> buffer(resp_hdr.length + 1, 0);
             pipe_read_all(pipe, buffer.data(), resp_hdr.length, 1000);
-            fprintf(stderr, "[Discord RPC] Handshake error (opcode %u): %s\n", resp_hdr.opcode, buffer.data());
+            RBREW_LOG_ERROR("Discord RPC", "Handshake error (opcode %u): %s\n", resp_hdr.opcode, buffer.data());
         }
         return false;
     }
@@ -163,7 +170,7 @@ static bool send_handshake(HANDLE pipe, const std::string& client_id) {
         std::vector<char> buffer(resp_hdr.length + 1, 0);
         if (!pipe_read_all(pipe, buffer.data(), resp_hdr.length, 3000)) return false;
         if (strstr(buffer.data(), "DISPATCH") == nullptr && strstr(buffer.data(), "READY") == nullptr) {
-            fprintf(stderr, "[Discord RPC] Unexpected handshake response: %s\n", buffer.data());
+            RBREW_LOG_INFO("Discord RPC", "Unexpected handshake response: %s\n", buffer.data());
             return false;
         }
     }
@@ -173,11 +180,9 @@ static bool send_handshake(HANDLE pipe, const std::string& client_id) {
 static bool send_activity(HANDLE pipe, uint32_t nonce, const std::string& state, const std::string& details,
                           const std::string& large_image, const std::string& large_text, int64_t start_time) {
     const DWORD pid = GetCurrentProcessId();
-    std::string payload =
-        "{\"cmd\":\"SET_ACTIVITY\",\"args\":{\"pid\":" + std::to_string(pid) +
-        ",\"activity\":{\"state\":\"" + escape_json(state) +
-        "\",\"details\":\"" + escape_json(details) +
-        "\",\"timestamps\":{\"start\":" + std::to_string(start_time) + "}";
+    std::string payload = "{\"cmd\":\"SET_ACTIVITY\",\"args\":{\"pid\":" + std::to_string(pid) +
+                          ",\"activity\":{\"state\":\"" + escape_json(state) + "\",\"details\":\"" +
+                          escape_json(details) + "\",\"timestamps\":{\"start\":" + std::to_string(start_time) + "}";
 
     if (!large_image.empty()) {
         payload += ",\"assets\":{\"large_image\":\"" + escape_json(large_image) + "\"";
@@ -218,14 +223,15 @@ static void discord_worker() {
                     CloseHandle(pipe);
                     pipe = INVALID_HANDLE_VALUE;
                     if (!fallback_tried && *kDefaultWorkingClientId && current_id != kDefaultWorkingClientId) {
-                        fprintf(stderr, "[Discord RPC] Configured ID %s failed handshake, falling back to %s\n",
-                                current_id.c_str(), kDefaultWorkingClientId);
+                        RBREW_LOG_ERROR("Discord RPC", "Configured ID %s failed handshake, falling back to %s\n",
+                                        current_id.c_str(), kDefaultWorkingClientId);
                         current_id = kDefaultWorkingClientId;
                         fallback_tried = true;
                         continue;
                     }
                 } else {
-                    fprintf(stderr, "[Discord RPC] Connected and active on Discord! (Client ID: %s)\n", current_id.c_str());
+                    RBREW_LOG_INFO("Discord RPC", "Connected and active on Discord! (Client ID: %s)\n",
+                                   current_id.c_str());
                     std::lock_guard<std::mutex> lock(s_mutex);
                     s_dirty = true;
                 }
@@ -257,9 +263,8 @@ static void discord_worker() {
 
         // Wait up to 15 seconds or until signaled
         std::unique_lock<std::mutex> lock(s_mutex);
-        s_cv.wait_for(lock, std::chrono::seconds(pipe != INVALID_HANDLE_VALUE ? 15 : 5), [&] {
-            return !s_running.load() || s_dirty;
-        });
+        s_cv.wait_for(lock, std::chrono::seconds(pipe != INVALID_HANDLE_VALUE ? 15 : 5),
+                      [&] { return !s_running.load() || s_dirty; });
     }
 
     if (pipe != INVALID_HANDLE_VALUE) {
@@ -273,15 +278,15 @@ void discord_rpc_init(const char* custom_client_id) {
 
     s_configured_client_id = resolve_client_id(custom_client_id);
     if (s_configured_client_id.empty()) return;
-    s_start_time = std::chrono::duration_cast<std::chrono::seconds>(
-        std::chrono::system_clock::now().time_since_epoch()).count();
+    s_start_time =
+        std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     s_running.store(true);
     s_dirty = true;
     s_worker = std::thread(discord_worker);
 }
 
-void discord_rpc_update_activity(const char* state, const char* details,
-                                 const char* large_image, const char* large_text) {
+void discord_rpc_update_activity(const char* state, const char* details, const char* large_image,
+                                 const char* large_text) {
     std::lock_guard<std::mutex> lock(s_mutex);
     if (state && *state) s_state = state;
     if (details && *details) s_details = details;

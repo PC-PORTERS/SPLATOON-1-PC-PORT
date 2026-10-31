@@ -41,20 +41,38 @@ void write_mii(CPUState* cpu, uint32_t address) {
     for (uint32_t i = 0; i < mii.size(); ++i) rbrew_write8(cpu->mem, address + i, mii[i]);
 }
 
-void Initialize(CPUState* cpu) { ++g_initialize_count; cpu->r[3] = 0; }
+void Initialize(CPUState* cpu) {
+    ++g_initialize_count;
+    cpu->r[3] = 0;
+}
 void Finalize(CPUState* cpu) {
     uint32_t count = g_initialize_count.load();
     while (count && !g_initialize_count.compare_exchange_weak(count, count - 1)) {}
     cpu->r[3] = 0;
 }
-void GetSlotNo(CPUState* cpu) { cpu->r[3] = 1; }
-void IsSlotOccupied(CPUState* cpu) { cpu->r[3] = slot_occupied(cpu->r[3]) ? 1 : 0; }
-void IsNetworkAccount(CPUState* cpu) { cpu->r[3] = 0; }
+void GetSlotNo(CPUState* cpu) {
+    cpu->r[3] = 1;
+}
+void IsSlotOccupied(CPUState* cpu) {
+    cpu->r[3] = slot_occupied(cpu->r[3]) ? 1 : 0;
+}
+void IsNetworkAccount(CPUState* cpu) {
+    cpu->r[3] = 0;
+}
 // Cemu returns 1; with 0 Splatoon attempts nn_fp.RegisterAccount.
-void HasNfsAccount(CPUState* cpu) { cpu->r[3] = 1; }
-void GetPrincipalId(CPUState* cpu) { cpu->r[3] = 0; }
-void GetSimpleAddressId(CPUState* cpu) { cpu->r[3] = 0; }
-void GetMii(CPUState* cpu) { write_mii(cpu, cpu->r[3]); cpu->r[3] = 0; }
+void HasNfsAccount(CPUState* cpu) {
+    cpu->r[3] = 1;
+}
+void GetPrincipalId(CPUState* cpu) {
+    cpu->r[3] = 0;
+}
+void GetSimpleAddressId(CPUState* cpu) {
+    cpu->r[3] = 0;
+}
+void GetMii(CPUState* cpu) {
+    write_mii(cpu, cpu->r[3]);
+    cpu->r[3] = 0;
+}
 void GetMiiEx(CPUState* cpu) {
     if (!slot_occupied(cpu->r[4])) {
         cpu->r[3] = RBREW_ACT_RESULT_ACCOUNT_DOES_NOT_EXIST; // output untouched
@@ -102,17 +120,19 @@ void GetAccountId(CPUState* cpu) {
 // account has no NNID, so fail like a console without a network account.
 // RBREW_NEX_TOKEN=stub restores the old behaviour.
 void AcquireNexServiceToken(CPUState* cpu) {
-    static const bool stub = [] { const char* v = std::getenv("RBREW_NEX_TOKEN"); return v && std::string_view(v) == "stub"; }();
+    static const bool stub = [] {
+        const char* v = std::getenv("RBREW_NEX_TOKEN");
+        return v && std::string_view(v) == "stub";
+    }();
     if (stub) return;
     cpu->r[3] = RBREW_ACT_RESULT_NEX_UNAVAILABLE;
 }
-}
+} // namespace
 
 uint16_t rbrew_ffl_crc16(const uint8_t* data, size_t length) {
     uint16_t crc = 0;
     for (size_t c = 0; c < length; ++c) {
-        for (int bit = 0; bit < 8; ++bit)
-            crc = (crc & 0x8000) ? uint16_t((crc << 1) ^ 0x1021) : uint16_t(crc << 1);
+        for (int bit = 0; bit < 8; ++bit) crc = (crc & 0x8000) ? uint16_t((crc << 1) ^ 0x1021) : uint16_t(crc << 1);
         crc ^= data[c];
     }
     return crc;
@@ -133,20 +153,26 @@ RbrewFflStoreData rbrew_act_default_mii(std::u16string_view name) {
     put_le16(0x02, 1 | (1 << 12));
     put_le16(0x3A, 1 | (3 << 9));
     // 0x00033334 as big-endian bytes 00 03 33 34, then halfword-swapped.
-    mii[0x08] = 0x03; mii[0x09] = 0x00; mii[0x0A] = 0x34; mii[0x0B] = 0x33;
-    for (size_t i = 0; i < RBREW_ACT_MII_NAME_MAX; ++i)
-        put_le16(0x1A + i * 2, i < name.size() ? uint16_t(name[i]) : 0);
+    mii[0x08] = 0x03;
+    mii[0x09] = 0x00;
+    mii[0x0A] = 0x34;
+    mii[0x0B] = 0x33;
+    for (size_t i = 0; i < RBREW_ACT_MII_NAME_MAX; ++i) put_le16(0x1A + i * 2, i < name.size() ? uint16_t(name[i]) : 0);
     // Search the big-endian counter at +0x04 until the CRC over the full
     // record (including its trailing CRC halfword) is zero.
     for (uint32_t counter = 0;; ++counter) {
-        mii[4] = uint8_t(counter >> 24); mii[5] = uint8_t(counter >> 16);
-        mii[6] = uint8_t(counter >> 8);  mii[7] = uint8_t(counter);
+        mii[4] = uint8_t(counter >> 24);
+        mii[5] = uint8_t(counter >> 16);
+        mii[6] = uint8_t(counter >> 8);
+        mii[7] = uint8_t(counter);
         if (rbrew_ffl_crc16(mii.data(), mii.size()) == 0) return mii;
         if (counter == UINT32_MAX) throw std::runtime_error("No CRC-valid default Mii exists");
     }
 }
 
-void rbrew_act_reset_for_tests() { g_initialize_count = 0; }
+void rbrew_act_reset_for_tests() {
+    g_initialize_count = 0;
+}
 
 #define ACT_REG(fn, mangled) rbrew_register_func(cpu, ADDR_##mangled, fn)
 void nn_act_register(CPUState* cpu) {

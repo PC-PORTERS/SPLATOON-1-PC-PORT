@@ -9,9 +9,16 @@
 
 namespace {
 constexpr uint32_t kEntrySize = 0x1C, kEntries = 4, kDataStart = 0x70;
-void be32(uint8_t* p, uint32_t v) { p[0] = uint8_t(v >> 24); p[1] = uint8_t(v >> 16); p[2] = uint8_t(v >> 8); p[3] = uint8_t(v); }
-uint32_t rd32(const uint8_t* p) { return uint32_t(p[0]) << 24 | uint32_t(p[1]) << 16 | uint32_t(p[2]) << 8 | p[3]; }
+void be32(uint8_t* p, uint32_t v) {
+    p[0] = uint8_t(v >> 24);
+    p[1] = uint8_t(v >> 16);
+    p[2] = uint8_t(v >> 8);
+    p[3] = uint8_t(v);
 }
+uint32_t rd32(const uint8_t* p) {
+    return uint32_t(p[0]) << 24 | uint32_t(p[1]) << 16 | uint32_t(p[2]) << 8 | p[3];
+}
+} // namespace
 
 bool rbrew_shared_data_build(uint8_t* area, uint32_t area_size, uint32_t base,
                              const std::array<std::vector<uint8_t>, 4>& fonts) {
@@ -24,8 +31,8 @@ bool rbrew_shared_data_build(uint8_t* area, uint32_t area_size, uint32_t base,
         std::memcpy(area + offset, fonts[i].data(), fonts[i].size());
         uint8_t* e = area + row++ * kEntrySize;
         be32(e + 0x00, 0xFFCAFE01u + i);
-        be32(e + 0x04, 2);                       // file type: font
-        be32(e + 0x0C, base + offset);           // data
+        be32(e + 0x04, 2);             // file type: font
+        be32(e + 0x0C, base + offset); // data
         be32(e + 0x10, uint32_t(fonts[i].size()));
         offset = (offset + uint32_t(fonts[i].size()) + 63u) & ~63u;
     }
@@ -57,20 +64,29 @@ static void load_shared_fonts(uint8_t* mem) {
     for (int i = 0; i < 4; ++i) {
         auto path = std::filesystem::path(root) / "sys/title/0005001b/10042400/content" / names[i];
         std::ifstream in(path, std::ios::binary);
-        if (!in) { RBREW_LOGF(stderr, "[coreinit] shared font missing: %s\n", path.string().c_str()); continue; }
+        if (!in) {
+            RBREW_LOG_ERROR("coreinit", "shared font missing: %s\n", path.string().c_str());
+            continue;
+        }
         fonts[i].assign(std::istreambuf_iterator<char>(in), {});
     }
     if (!rbrew_shared_data_build(mem + RBREW_SHARED_DATA_BASE, RBREW_SHARED_DATA_SIZE, RBREW_SHARED_DATA_BASE, fonts))
-        RBREW_LOGF(stderr, "[coreinit] shared fonts do not fit the shared-data area\n");
+        RBREW_LOG_INFO("coreinit", "shared fonts do not fit the shared-data area\n");
 }
 
 static void OSGetSharedData(CPUState* cpu) {
     const uint32_t type = ARG0, ptr_out = ARG2, size_out = ARG3;
-    if (!ptr_out || !size_out) { RET = 0; return; }           // console: OSPanic, returns 0
+    if (!ptr_out || !size_out) {
+        RET = 0;
+        return;
+    } // console: OSPanic, returns 0
     static std::once_flag once;
     std::call_once(once, [&] { load_shared_fonts(MEM); });
     uint32_t ptr = 0, size = 0;
-    if (!rbrew_shared_data_lookup(MEM + RBREW_SHARED_DATA_BASE, type, &ptr, &size)) { RET = 0; return; }
+    if (!rbrew_shared_data_lookup(MEM + RBREW_SHARED_DATA_BASE, type, &ptr, &size)) {
+        RET = 0;
+        return;
+    }
     rbrew_write32(MEM, ptr_out, ptr);
     rbrew_write32(MEM, size_out, size);
     RET = 1;

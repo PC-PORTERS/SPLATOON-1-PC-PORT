@@ -32,30 +32,21 @@ include(cmake/CompilerOptions.cmake)
 
 find_package(ZLIB REQUIRED)
 
-if(EXISTS "${CMAKE_SOURCE_DIR}/third_party/nlohmann/json.hpp")
-    message(STATUS "nlohmann/json: using bundled header "
-        "(third_party/nlohmann/json.hpp)")
-    add_library(nlohmann_json INTERFACE)
-    add_library(nlohmann_json::nlohmann_json ALIAS nlohmann_json)
-    target_include_directories(nlohmann_json
-        INTERFACE "${CMAKE_SOURCE_DIR}/third_party")
-else()
-    message(STATUS "nlohmann/json: bundled header absent – fetching v3.11.3 "
-        "via FetchContent (will be cached in third_party/nlohmann/)")
-    include(FetchContent)
-    FetchContent_Declare(
-        nlohmann_json_dl
-        URL      https://github.com/nlohmann/json/releases/download/v3.11.3/json.hpp
-        URL_HASH SHA256=9bea4c8066ef4a1c206b2be5a36302f8926f7fdc6087af5d20b417d0cf103ea6
-        DOWNLOAD_NO_EXTRACT TRUE
-        DOWNLOAD_DIR        "${CMAKE_SOURCE_DIR}/third_party/nlohmann"
-    )
-    FetchContent_MakeAvailable(nlohmann_json_dl)
-    add_library(nlohmann_json INTERFACE)
-    add_library(nlohmann_json::nlohmann_json ALIAS nlohmann_json)
-    target_include_directories(nlohmann_json
-        INTERFACE "${CMAKE_SOURCE_DIR}/third_party")
-endif()
+# nlohmann/json
+message(STATUS "nlohmann/json: fetching v3.11.3")
+include(FetchContent)
+FetchContent_Declare(
+    nlohmann_json_dl
+    URL      https://github.com/nlohmann/json/releases/download/v3.11.3/json.hpp
+    URL_HASH SHA256=9bea4c8066ef4a1c206b2be5a36302f8926f7fdc6087af5d20b417d0cf103ea6
+    DOWNLOAD_NO_EXTRACT TRUE
+    DOWNLOAD_DIR        "${CMAKE_SOURCE_DIR}/third_party/nlohmann"
+)
+FetchContent_MakeAvailable(nlohmann_json_dl)
+add_library(nlohmann_json INTERFACE)
+add_library(nlohmann_json::nlohmann_json ALIAS nlohmann_json)
+target_include_directories(nlohmann_json
+    INTERFACE "${CMAKE_SOURCE_DIR}/third_party")
 
 add_subdirectory(src/ir)            # INTERFACE – headers only; no external deps
 add_subdirectory(src/diagnostics)   # lightweight; no external deps

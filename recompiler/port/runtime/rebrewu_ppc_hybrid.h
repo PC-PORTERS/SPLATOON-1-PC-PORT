@@ -14,8 +14,8 @@ struct RbrewHybridResult {
 // Native bridging occurs only on explicit taken transfers, never fallthrough.
 // The budget covers interpreter instructions across nested fallback calls;
 // existing whole-function native code/HLE cannot yet be preempted here.
-RbrewHybridResult rbrew_ppc_run(CPUState* cpu, uint32_t entry, uint32_t return_pc,
-    uint64_t budget, bool bridge_native = true);
+RbrewHybridResult rbrew_ppc_run(CPUState* cpu, uint32_t entry, uint32_t return_pc, uint64_t budget,
+                                bool bridge_native = true);
 
 class RbrewHybridFailure : public std::exception {
 public:

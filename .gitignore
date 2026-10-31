@@ -1,7 +1,12 @@
-# Build outputs, downloads and the installed game are created by Setup.bat
-# and must never be committed (they contain or derive from your game files).
+# Build outputs, downloads and the installed game are created by Setup.bat /
+# setup.sh and must never be committed (they contain or derive from your game
+# files).
 /build/
 /Game/
+
+# Auto-fetched third-party headers
+recompiler/third_party/nlohmann/
+recompiler/third_party/miniaudio.h
 
 # Never commit game files
 *.rpx
@@ -20,10 +25,22 @@ save/
 
 /Gambit/
 
+# Generated from Manifest/ at build time by recompiler/tools/plt_resolver.py.
+# The manifest is the source of truth; these files are outputs and must never
+# be committed. A clean checkout regenerates them when the port is configured.
+/recompiler/port/os/gambit_plt_auto.cpp
+/recompiler/port/os/coreinit/coreinit_addrs.h
+/recompiler/port/os/gx2/gx2_addrs.h
+/recompiler/port/os/padscore/padscore_addrs.h
+/recompiler/port/os/snd_core/snd_core_addrs.h
+/recompiler/port/os/stubs/stubs_addrs.h
+/recompiler/port/os/vpad/vpad_addrs.h
+
 # Tools
 __pycache__/
 *.pyc
 .vs/
+.vscode/
 
 # Local developer artifacts: screenshots, frame dumps, logs and backups made
 # while testing. They stay on disk but are never committed.
@@ -44,3 +61,6 @@ __pycache__/
 /scripts/*
 !/scripts/Setup.ps1
 !/scripts/hd_textures.py
+!/scripts/install-hooks.sh
+!/scripts/git-hooks/
+!/scripts/git-hooks/*

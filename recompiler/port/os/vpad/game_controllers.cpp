@@ -38,8 +38,8 @@ void controller_log(const char* fmt, ...) {
 #endif
 
     char formatted[1200];
-    snprintf(formatted, sizeof(formatted), "[%02d:%02d:%02d.%03d] [controller] %s",
-             tm_buf.tm_hour, tm_buf.tm_min, tm_buf.tm_sec, (int)ms.count(), buffer);
+    snprintf(formatted, sizeof(formatted), "[%02d:%02d:%02d.%03d] [controller] %s", tm_buf.tm_hour, tm_buf.tm_min,
+             tm_buf.tm_sec, (int)ms.count(), buffer);
 
     fputs(formatted, stderr);
 
@@ -57,7 +57,7 @@ void controller_log(const char* fmt, ...) {
     }
     if (s_log_file) {
         fputs(formatted, s_log_file);
-        fflush(s_log_file);   // rare messages; keep them if the game crashes
+        fflush(s_log_file); // rare messages; keep them if the game crashes
     }
 }
 
@@ -66,11 +66,11 @@ static void update_controllers_locked() {
     for (int p = 0; p < 2; ++p) {
         if (s_devices[p].gc) {
             if (!SDL_GameControllerGetAttached(s_devices[p].gc)) {
-                controller_log("Controller detached: Player %d [%s] (instance %d)\n",
-                               p + 1, s_devices[p].name, s_devices[p].instance_id);
+                controller_log("Controller detached: Player %d [%s] (instance %d)\n", p + 1, s_devices[p].name,
+                               s_devices[p].instance_id);
                 SplatoonDiagnostics::RecordEvent(SplatoonDiagnostics::EventCategory::Input,
-                                                SplatoonDiagnostics::EventSeverity::Info,
-                                                s_devices[p].instance_id, "Controller detached");
+                                                 SplatoonDiagnostics::EventSeverity::Info, s_devices[p].instance_id,
+                                                 "Controller detached");
                 SDL_GameControllerClose(s_devices[p].gc);
                 s_devices[p] = {};
             }
@@ -110,8 +110,8 @@ static void update_controllers_locked() {
                 dev.gc = gc;
                 dev.instance_id = SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(gc));
                 const char* gc_name = SDL_GameControllerName(gc);
-                strncpy_s(dev.name, sizeof(dev.name), gc_name ? gc_name : (joy_name ? joy_name : "Unknown"), _TRUNCATE);
-                strncpy_s(dev.guid_str, sizeof(dev.guid_str), guid_str, _TRUNCATE);
+                std::snprintf(dev.name, sizeof(dev.name), "%s", gc_name ? gc_name : (joy_name ? joy_name : "Unknown"));
+                std::snprintf(dev.guid_str, sizeof(dev.guid_str), "%s", guid_str);
 
                 // Check and activate sensors (gyro & accelerometer)
                 if (SDL_GameControllerHasSensor(gc, SDL_SENSOR_GYRO)) {
@@ -127,13 +127,11 @@ static void update_controllers_locked() {
                                "    GUID: %s\n"
                                "    Instance ID: %d\n"
                                "    Sensors: Gyro=%s, Accel=%s\n",
-                               i, dev.name, dev.guid_str, dev.instance_id,
-                               dev.has_gyro ? "ENABLED" : "NO",
+                               i, dev.name, dev.guid_str, dev.instance_id, dev.has_gyro ? "ENABLED" : "NO",
                                dev.has_accel ? "ENABLED" : "NO");
 
                 SplatoonDiagnostics::RecordEvent(SplatoonDiagnostics::EventCategory::Input,
-                                                SplatoonDiagnostics::EventSeverity::Info,
-                                                dev.instance_id, dev.name);
+                                                 SplatoonDiagnostics::EventSeverity::Info, dev.instance_id, dev.name);
 
                 available_controllers.push_back(dev);
             }
@@ -149,19 +147,19 @@ static void update_controllers_locked() {
     if (available_controllers.size() >= 2) {
         if (s_devices[0].gc != available_controllers[0].gc) {
             s_devices[0] = available_controllers[0];
-            controller_log("Assigned Player 1 (GamePad) -> [%s] (ID %d)\n",
-                           s_devices[0].name, s_devices[0].instance_id);
+            controller_log("Assigned Player 1 (GamePad) -> [%s] (ID %d)\n", s_devices[0].name,
+                           s_devices[0].instance_id);
         }
         if (s_devices[1].gc != available_controllers[1].gc) {
             s_devices[1] = available_controllers[1];
-            controller_log("Assigned Player 2 (Battle Dojo) -> [%s] (ID %d)\n",
-                           s_devices[1].name, s_devices[1].instance_id);
+            controller_log("Assigned Player 2 (Battle Dojo) -> [%s] (ID %d)\n", s_devices[1].name,
+                           s_devices[1].instance_id);
         }
     } else if (available_controllers.size() == 1) {
         if (s_devices[0].gc != available_controllers[0].gc) {
             s_devices[0] = available_controllers[0];
-            controller_log("Assigned Player 1 (GamePad) -> [%s] (ID %d)\n",
-                           s_devices[0].name, s_devices[0].instance_id);
+            controller_log("Assigned Player 1 (GamePad) -> [%s] (ID %d)\n", s_devices[0].name,
+                           s_devices[0].instance_id);
         }
         if (s_devices[1].gc != nullptr) {
             s_devices[1] = {};
@@ -215,14 +213,38 @@ void init_game_controllers() {
 
     // Windows fallback mappings for PS4 DualShock 4 and PS5 DualSense
     static const char* const kFallbackMappings[] = {
-        "030000004c050000c405000000007701,PS4 Controller,a:b1,b:b2,back:b8,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,guide:b12,leftshoulder:b4,leftstick:b10,lefttrigger:a3,leftx:a0,lefty:a1,rightshoulder:b5,rightstick:b11,righttrigger:a4,rightx:a2,righty:a5,start:b9,x:b0,y:b3,platform:Windows,",
-        "030000004c050000cc09000000007701,PS4 Controller,a:b1,b:b2,back:b8,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,guide:b12,leftshoulder:b4,leftstick:b10,lefttrigger:a3,leftx:a0,lefty:a1,rightshoulder:b5,rightstick:b11,righttrigger:a4,rightx:a2,righty:a5,start:b9,x:b0,y:b3,platform:Windows,",
-        "030000004c050000c405000000000000,PS4 Controller,a:b1,b:b2,back:b8,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,guide:b12,leftshoulder:b4,leftstick:b10,lefttrigger:a3,leftx:a0,lefty:a1,rightshoulder:b5,rightstick:b11,righttrigger:a4,rightx:a2,righty:a5,start:b9,x:b0,y:b3,platform:Windows,",
-        "030000004c050000cc09000000000000,PS4 Controller,a:b1,b:b2,back:b8,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,guide:b12,leftshoulder:b4,leftstick:b10,lefttrigger:a3,leftx:a0,lefty:a1,rightshoulder:b5,rightstick:b11,righttrigger:a4,rightx:a2,righty:a5,start:b9,x:b0,y:b3,platform:Windows,",
-        "4c05c405000000000000504944564944,PS4 Controller (DInput),a:b1,b:b2,back:b8,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,guide:b12,leftshoulder:b4,leftstick:b10,lefttrigger:a3,leftx:a0,lefty:a1,rightshoulder:b5,rightstick:b11,righttrigger:a4,rightx:a2,righty:a5,start:b9,x:b0,y:b3,platform:Windows,",
-        "4c05cc09000000000000504944564944,PS4 Controller (DInput),a:b1,b:b2,back:b8,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,guide:b12,leftshoulder:b4,leftstick:b10,lefttrigger:a3,leftx:a0,lefty:a1,rightshoulder:b5,rightstick:b11,righttrigger:a4,rightx:a2,righty:a5,start:b9,x:b0,y:b3,platform:Windows,",
-        "030000004c050000e60c000000007701,PS5 DualSense,a:b1,b:b2,back:b8,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,guide:b12,leftshoulder:b4,leftstick:b10,lefttrigger:a3,leftx:a0,lefty:a1,rightshoulder:b5,rightstick:b11,righttrigger:a4,rightx:a2,righty:a5,start:b9,x:b0,y:b3,platform:Windows,",
-        "4c05e60c000000000000504944564944,PS5 DualSense (DInput),a:b1,b:b2,back:b8,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,guide:b12,leftshoulder:b4,leftstick:b10,lefttrigger:a3,leftx:a0,lefty:a1,rightshoulder:b5,rightstick:b11,righttrigger:a4,rightx:a2,righty:a5,start:b9,x:b0,y:b3,platform:Windows,",
+        "030000004c050000c405000000007701,PS4 "
+        "Controller,a:b1,b:b2,back:b8,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,guide:b12,leftshoulder:b4,"
+        "leftstick:b10,lefttrigger:a3,leftx:a0,lefty:a1,rightshoulder:b5,rightstick:b11,righttrigger:a4,rightx:a2,"
+        "righty:a5,start:b9,x:b0,y:b3,platform:Windows,",
+        "030000004c050000cc09000000007701,PS4 "
+        "Controller,a:b1,b:b2,back:b8,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,guide:b12,leftshoulder:b4,"
+        "leftstick:b10,lefttrigger:a3,leftx:a0,lefty:a1,rightshoulder:b5,rightstick:b11,righttrigger:a4,rightx:a2,"
+        "righty:a5,start:b9,x:b0,y:b3,platform:Windows,",
+        "030000004c050000c405000000000000,PS4 "
+        "Controller,a:b1,b:b2,back:b8,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,guide:b12,leftshoulder:b4,"
+        "leftstick:b10,lefttrigger:a3,leftx:a0,lefty:a1,rightshoulder:b5,rightstick:b11,righttrigger:a4,rightx:a2,"
+        "righty:a5,start:b9,x:b0,y:b3,platform:Windows,",
+        "030000004c050000cc09000000000000,PS4 "
+        "Controller,a:b1,b:b2,back:b8,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,guide:b12,leftshoulder:b4,"
+        "leftstick:b10,lefttrigger:a3,leftx:a0,lefty:a1,rightshoulder:b5,rightstick:b11,righttrigger:a4,rightx:a2,"
+        "righty:a5,start:b9,x:b0,y:b3,platform:Windows,",
+        "4c05c405000000000000504944564944,PS4 Controller "
+        "(DInput),a:b1,b:b2,back:b8,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,guide:b12,leftshoulder:b4,leftstick:"
+        "b10,lefttrigger:a3,leftx:a0,lefty:a1,rightshoulder:b5,rightstick:b11,righttrigger:a4,rightx:a2,righty:a5,"
+        "start:b9,x:b0,y:b3,platform:Windows,",
+        "4c05cc09000000000000504944564944,PS4 Controller "
+        "(DInput),a:b1,b:b2,back:b8,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,guide:b12,leftshoulder:b4,leftstick:"
+        "b10,lefttrigger:a3,leftx:a0,lefty:a1,rightshoulder:b5,rightstick:b11,righttrigger:a4,rightx:a2,righty:a5,"
+        "start:b9,x:b0,y:b3,platform:Windows,",
+        "030000004c050000e60c000000007701,PS5 "
+        "DualSense,a:b1,b:b2,back:b8,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,guide:b12,leftshoulder:b4,"
+        "leftstick:b10,lefttrigger:a3,leftx:a0,lefty:a1,rightshoulder:b5,rightstick:b11,righttrigger:a4,rightx:a2,"
+        "righty:a5,start:b9,x:b0,y:b3,platform:Windows,",
+        "4c05e60c000000000000504944564944,PS5 DualSense "
+        "(DInput),a:b1,b:b2,back:b8,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,guide:b12,leftshoulder:b4,leftstick:"
+        "b10,lefttrigger:a3,leftx:a0,lefty:a1,rightshoulder:b5,rightstick:b11,righttrigger:a4,rightx:a2,righty:a5,"
+        "start:b9,x:b0,y:b3,platform:Windows,",
     };
     for (const char* mapping : kFallbackMappings) {
         SDL_GameControllerAddMapping(mapping);
@@ -277,11 +299,15 @@ void log_controller_input(int player, uint32_t buttons, float, float, float, flo
 
 void controller_log(const char*, ...) {}
 void init_game_controllers() {}
-ControllerDevice* get_controller(int) { return nullptr; }
+ControllerDevice* get_controller(int) {
+    return nullptr;
+}
 void on_controller_device_added(int) {}
 void on_controller_device_removed(int) {}
 void check_controller_hotplug_periodic() {}
-int get_connected_controller_count() { return 0; }
+int get_connected_controller_count() {
+    return 0;
+}
 void log_controller_input(int, uint32_t, float, float, float, float, bool, const float*) {}
 
 #endif

@@ -7,40 +7,40 @@
 #include <filesystem>
 
 namespace rebrewu::config {
-  struct SymbolOverride {
+struct SymbolOverride {
     std::string name;
     uint32_t address;
     std::optional<uint32_t> size;
     bool force_function{false};
     bool ignore{false};
-  };
+};
 
-  struct FunctionBoundaryOverride {
+struct FunctionBoundaryOverride {
     uint32_t start;
-    uint32_t end;  // 0 = auto
+    uint32_t end; // 0 = auto
     std::string name;
-  };
+};
 
-  struct JumpTableHint {
+struct JumpTableHint {
     uint32_t dispatch_addr;
     uint32_t table_addr;
     uint32_t num_entries;
-  };
+};
 
-  struct IgnoredRegion {
+struct IgnoredRegion {
     uint32_t start;
     uint32_t end;
     std::string reason;
-  };
+};
 
-  struct RelocOverride {
+struct RelocOverride {
     uint32_t address;
     uint8_t type;
     std::string symbol;
     int32_t addend;
-  };
+};
 
-  struct RebrewConfig {
+struct RebrewConfig {
     // General
     std::string output_dir{"output"};
     bool verbose{false};
@@ -67,10 +67,10 @@ namespace rebrewu::config {
 
     // Build
     std::vector<std::string> rpl_paths;
-  };
+};
 
-  class ConfigLoader {
-  public:
+class ConfigLoader {
+public:
     // Load from JSON file
     static std::optional<RebrewConfig> load_json(const std::filesystem::path& path, std::string& error);
     // Load from TOML file
@@ -79,5 +79,5 @@ namespace rebrewu::config {
     static std::optional<RebrewConfig> load(const std::filesystem::path& path, std::string& error);
     // Write default config
     static bool write_default(const std::filesystem::path& path, std::string& error);
-  };
-}
+};
+} // namespace rebrewu::config

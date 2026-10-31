@@ -8,10 +8,8 @@
 // not a claim about the console's physical/virtual memory map.
 constexpr uint32_t RBREW_APPLICATION_HEAP_BASE = 0x28000000u;
 constexpr uint32_t RBREW_APPLICATION_HEAP_SIZE = 0x40000000u;
-constexpr uint32_t RBREW_APPLICATION_ARENA_END =
-    RBREW_APPLICATION_HEAP_BASE + RBREW_APPLICATION_HEAP_SIZE;
-static_assert(uint64_t(RBREW_APPLICATION_HEAP_BASE) + RBREW_APPLICATION_HEAP_SIZE
-    == RBREW_APPLICATION_ARENA_END);
+constexpr uint32_t RBREW_APPLICATION_ARENA_END = RBREW_APPLICATION_HEAP_BASE + RBREW_APPLICATION_HEAP_SIZE;
+static_assert(uint64_t(RBREW_APPLICATION_HEAP_BASE) + RBREW_APPLICATION_HEAP_SIZE == RBREW_APPLICATION_ARENA_END);
 
 // Cafe's optional OverlayArena is a separate virtual mapping, not additional
 // capacity for the native application allocator. Reserve the aperture without

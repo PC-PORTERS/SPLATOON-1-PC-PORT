@@ -26,11 +26,11 @@ namespace rebrewu::linker {
 
 /// A fully resolved inter-module symbol reference.
 struct ResolvedSymbol {
-    std::string from_module{};  // importing module name
-    std::string to_module{};    // exporting module name
-    std::string name{};         // symbol name
-    uint32_t    address{0};     // virtual address in the exporting module
-    bool        is_data{false}; // data symbol vs function symbol
+    std::string from_module{}; // importing module name
+    std::string to_module{};   // exporting module name
+    std::string name{};        // symbol name
+    uint32_t address{0};       // virtual address in the exporting module
+    bool is_data{false};       // data symbol vs function symbol
 };
 
 /// Configuration for the linker.
@@ -50,8 +50,7 @@ struct LinkerConfig {
 ///   4. Use resolve() to look up any symbol at code-generation time.
 class Linker {
 public:
-    explicit Linker(diagnostics::DiagEngine& diag,
-                    LinkerConfig cfg = {}) noexcept;
+    explicit Linker(diagnostics::DiagEngine& diag, LinkerConfig cfg = {}) noexcept;
 
     // -----------------------------------------------------------------
     // Setup
@@ -77,8 +76,7 @@ public:
     // -----------------------------------------------------------------
 
     /// Look up a symbol by (module, name).  Returns its virtual address.
-    std::optional<uint32_t> resolve(const std::string& module_name,
-                                    const std::string& sym_name) const noexcept;
+    std::optional<uint32_t> resolve(const std::string& module_name, const std::string& sym_name) const noexcept;
 
     /// Look up a symbol by name across all modules.
     std::optional<ResolvedSymbol> resolve_any(const std::string& sym_name) const noexcept;
@@ -86,28 +84,25 @@ public:
     /// Returns the name of the module that exports a given address.
     std::optional<std::string> module_for_addr(uint32_t addr) const noexcept;
 
-    const ModuleGraph& graph()   const noexcept { return m_graph; }
+    const ModuleGraph& graph() const noexcept { return m_graph; }
 
     /// All resolved symbols produced by the last link() call.
-    const std::vector<ResolvedSymbol>& resolved_symbols() const noexcept {
-        return m_resolved;
-    }
+    const std::vector<ResolvedSymbol>& resolved_symbols() const noexcept { return m_resolved; }
 
     // -----------------------------------------------------------------
     // Symbol resolver callback (for RelocationProcessor)
     // -----------------------------------------------------------------
 
     /// Returns a SymbolResolver functor bound to this linker.
-    std::function<std::optional<uint32_t>(const std::string&, const std::string&)>
-    make_resolver() const;
+    std::function<std::optional<uint32_t>(const std::string&, const std::string&)> make_resolver() const;
 
 private:
     bool resolve_module_imports(rpx::RpxModule& rpx);
 
-    diagnostics::DiagEngine&    m_diag;
-    LinkerConfig                m_cfg;
-    ModuleGraph                 m_graph;
+    diagnostics::DiagEngine& m_diag;
+    LinkerConfig m_cfg;
+    ModuleGraph m_graph;
     std::vector<ResolvedSymbol> m_resolved{};
 };
 
-}
+} // namespace rebrewu::linker

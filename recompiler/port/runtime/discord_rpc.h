@@ -11,8 +11,8 @@ namespace rbrew {
 void discord_rpc_init(const char* custom_client_id = nullptr);
 
 // Updates the presence status (state, details, large_image, large_text).
-void discord_rpc_update_activity(const char* state, const char* details = nullptr,
-                                 const char* large_image = nullptr, const char* large_text = nullptr);
+void discord_rpc_update_activity(const char* state, const char* details = nullptr, const char* large_image = nullptr,
+                                 const char* large_text = nullptr);
 
 // Non-blocking poll called periodically (e.g. once every 60 frames) to check active scene and update RPC.
 void discord_rpc_poll_game_state(uint8_t* guest_mem, uint32_t frame_count);

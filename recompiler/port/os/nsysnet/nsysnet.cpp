@@ -24,26 +24,26 @@
 #include "../os_common.h"
 
 #if defined(_WIN32)
-#  include <winsock2.h>
-#  include <ws2tcpip.h>
-#  pragma comment(lib, "ws2_32")
-typedef int              socklen_t;
-typedef unsigned short   sa_family_t;
-typedef int              ssize_t;
-#  define CLOSE_SOCKET(fd) closesocket(fd)
-#  define SOCK_ERRNO       WSAGetLastError()
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "ws2_32")
+typedef int socklen_t;
+typedef unsigned short sa_family_t;
+typedef int ssize_t;
+#define CLOSE_SOCKET(fd) closesocket(fd)
+#define SOCK_ERRNO WSAGetLastError()
 #else
-#  include <sys/socket.h>
-#  include <netinet/in.h>
-#  include <arpa/inet.h>
-#  include <netdb.h>
-#  include <unistd.h>
-#  include <fcntl.h>
-#  include <errno.h>
-#  include <poll.h>
-#  define CLOSE_SOCKET(fd) close(fd)
-#  define SOCK_ERRNO       errno
-#  define INVALID_SOCKET   (-1)
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <poll.h>
+#define CLOSE_SOCKET(fd) close(fd)
+#define SOCK_ERRNO errno
+#define INVALID_SOCKET (-1)
 #endif
 
 #include <string.h>
@@ -59,45 +59,41 @@ typedef int              ssize_t;
 static constexpr uint32_t NET_SCRATCH_BASE = 0x00100000u; // safely below game code
 
 // hostent scratch (128 bytes)
-static constexpr uint32_t HE_BASE          = NET_SCRATCH_BASE + 0x000u;
-static constexpr uint32_t HE_ALIASES_ARR   = NET_SCRATCH_BASE + 0x020u; // uint32[2] = {0,0}
-static constexpr uint32_t HE_ADDRLIST_ARR  = NET_SCRATCH_BASE + 0x028u; // uint32[2] = {addr,0}
-static constexpr uint32_t HE_ADDR          = NET_SCRATCH_BASE + 0x030u; // 4-byte IP
-static constexpr uint32_t HE_NAME_STR      = NET_SCRATCH_BASE + 0x040u; // hostname (64 chars)
+static constexpr uint32_t HE_BASE = NET_SCRATCH_BASE + 0x000u;
+static constexpr uint32_t HE_ALIASES_ARR = NET_SCRATCH_BASE + 0x020u;  // uint32[2] = {0,0}
+static constexpr uint32_t HE_ADDRLIST_ARR = NET_SCRATCH_BASE + 0x028u; // uint32[2] = {addr,0}
+static constexpr uint32_t HE_ADDR = NET_SCRATCH_BASE + 0x030u;         // 4-byte IP
+static constexpr uint32_t HE_NAME_STR = NET_SCRATCH_BASE + 0x040u;     // hostname (64 chars)
 
 // addrinfo scratch (up to 4 entries, each 32-byte struct + 16-byte sockaddr_in)
-static constexpr uint32_t AI_BASE          = NET_SCRATCH_BASE + 0x100u;
-static constexpr uint32_t AI_ENTRY_STRIDE  = 48u; // 32 (addrinfo) + 16 (sockaddr_in)
-static constexpr uint32_t AI_MAX_ENTRIES   = 4u;
-static constexpr uint32_t AI_CANON_STR     = NET_SCRATCH_BASE + 0x200u; // 64 chars
+static constexpr uint32_t AI_BASE = NET_SCRATCH_BASE + 0x100u;
+static constexpr uint32_t AI_ENTRY_STRIDE = 48u; // 32 (addrinfo) + 16 (sockaddr_in)
+static constexpr uint32_t AI_MAX_ENTRIES = 4u;
+static constexpr uint32_t AI_CANON_STR = NET_SCRATCH_BASE + 0x200u; // 64 chars
 
 // inet_ntoa result buffer (cycling through 4 slots to match POSIX static behaviour)
-static constexpr uint32_t INET_NTOA_BASE   = NET_SCRATCH_BASE + 0x280u;
-static constexpr uint32_t INET_NTOA_SLOT   = 20u; // max "255.255.255.255\0" = 16 chars
-static uint32_t           s_ntoa_slot      = 0;
+static constexpr uint32_t INET_NTOA_BASE = NET_SCRATCH_BASE + 0x280u;
+static constexpr uint32_t INET_NTOA_SLOT = 20u; // max "255.255.255.255\0" = 16 chars
+static uint32_t s_ntoa_slot = 0;
 
 // ---------------------------------------------------------------------------
 // sockaddr_in guest ↔ host conversion
 // ---------------------------------------------------------------------------
-static void guest_to_host_sockaddr(const uint8_t* mem, uint32_t gptr,
-                                   struct sockaddr_in* out)
-{
+static void guest_to_host_sockaddr(const uint8_t* mem, uint32_t gptr, struct sockaddr_in* out) {
     memset(out, 0, sizeof(*out));
     if (!gptr) return;
-    out->sin_family = (sa_family_t)mem[gptr + 1]; // byte 1 = sin_family
-    memcpy(&out->sin_port,         mem + gptr + 2, 2); // already network order
-    memcpy(&out->sin_addr.s_addr,  mem + gptr + 4, 4); // already network order
+    out->sin_family = (sa_family_t)mem[gptr + 1];     // byte 1 = sin_family
+    memcpy(&out->sin_port, mem + gptr + 2, 2);        // already network order
+    memcpy(&out->sin_addr.s_addr, mem + gptr + 4, 4); // already network order
 }
 
-static void host_to_guest_sockaddr(uint8_t* mem, uint32_t gptr,
-                                   const struct sockaddr_in* in)
-{
+static void host_to_guest_sockaddr(uint8_t* mem, uint32_t gptr, const struct sockaddr_in* in) {
     if (!gptr) return;
-    mem[gptr + 0] = 0x10;                          // sin_len = 16
-    mem[gptr + 1] = (uint8_t)in->sin_family;       // sin_family
-    memcpy(mem + gptr + 2, &in->sin_port,          2); // network order
-    memcpy(mem + gptr + 4, &in->sin_addr.s_addr,   4); // network order
-    memset(mem + gptr + 8, 0, 8);                  // sin_zero
+    mem[gptr + 0] = 0x10;                            // sin_len = 16
+    mem[gptr + 1] = (uint8_t)in->sin_family;         // sin_family
+    memcpy(mem + gptr + 2, &in->sin_port, 2);        // network order
+    memcpy(mem + gptr + 4, &in->sin_addr.s_addr, 4); // network order
+    memset(mem + gptr + 8, 0, 8);                    // sin_zero
 }
 
 // ---------------------------------------------------------------------------
@@ -105,26 +101,26 @@ static void host_to_guest_sockaddr(uint8_t* mem, uint32_t gptr,
 // ---------------------------------------------------------------------------
 static int map_level(int wii_level) {
     if (wii_level == 0xFFFF) return SOL_SOCKET;
-    if (wii_level == 6)      return IPPROTO_TCP;
-    if (wii_level == 0)      return IPPROTO_IP;
+    if (wii_level == 6) return IPPROTO_TCP;
+    if (wii_level == 0) return IPPROTO_IP;
     return wii_level;
 }
 
 static int map_so_option(int wii_opt) {
     // Map BSD SOL_SOCKET option values (Wii U) to Linux equivalents
     switch (wii_opt) {
-        case 0x0001: return SO_DEBUG;
-        case 0x0004: return SO_REUSEADDR;
-        case 0x0008: return SO_KEEPALIVE;
-        case 0x0010: return SO_DONTROUTE;
-        case 0x0020: return SO_BROADCAST;
-        case 0x0080: return SO_LINGER;
-        case 0x0100: return SO_OOBINLINE;
-        case 0x1001: return SO_SNDBUF;
-        case 0x1002: return SO_RCVBUF;
-        case 0x1007: return SO_ERROR;
-        case 0x1008: return SO_TYPE;
-        default:     return wii_opt;
+    case 0x0001: return SO_DEBUG;
+    case 0x0004: return SO_REUSEADDR;
+    case 0x0008: return SO_KEEPALIVE;
+    case 0x0010: return SO_DONTROUTE;
+    case 0x0020: return SO_BROADCAST;
+    case 0x0080: return SO_LINGER;
+    case 0x0100: return SO_OOBINLINE;
+    case 0x1001: return SO_SNDBUF;
+    case 0x1002: return SO_RCVBUF;
+    case 0x1007: return SO_ERROR;
+    case 0x1008: return SO_TYPE;
+    default: return wii_opt;
     }
 }
 
@@ -161,14 +157,19 @@ static void fdset_to_guest(uint8_t* mem, uint32_t gptr, const fd_set* s) {
 static void socket_lib_init(CPUState* cpu) {
 #if defined(_WIN32)
     WSADATA wd;
-    WSAStartup(MAKEWORD(2,2), &wd);
+    WSAStartup(MAKEWORD(2, 2), &wd);
 #endif
-    RBREW_LOGF(stderr, "[nsysnet] socket_lib_init\n");
+    RBREW_LOG_INFO("nsysnet", "socket_lib_init\n");
     RET = 0;
 }
 
-static void NSSLInit(CPUState* cpu)             { (void)cpu; RET = 0; }
-static void set_resolver_allocator(CPUState* cpu){ (void)cpu; }
+static void NSSLInit(CPUState* cpu) {
+    (void)cpu;
+    RET = 0;
+}
+static void set_resolver_allocator(CPUState* cpu) {
+    (void)cpu;
+}
 
 // ---------------------------------------------------------------------------
 // mw_socket / socketclose
@@ -232,7 +233,10 @@ static void getsockname_(CPUState* cpu) {
 static void send_(CPUState* cpu) {
     // ARG0=fd, ARG1=buf_guest_ptr, ARG2=len, ARG3=flags
     uint32_t len = ARG2;
-    if (!ARG1 || !rbrew_memory_accessible(MEM,ARG1,len)) { RET = (uint32_t)-1; return; }
+    if (!ARG1 || !rbrew_memory_accessible(MEM, ARG1, len)) {
+        RET = (uint32_t)-1;
+        return;
+    }
     ssize_t n = send((int)ARG0, (const char*)(MEM + ARG1), (int)len, (int)ARG3);
     RET = (uint32_t)n;
 }
@@ -240,7 +244,10 @@ static void send_(CPUState* cpu) {
 static void recv_(CPUState* cpu) {
     // ARG0=fd, ARG1=buf_guest_ptr, ARG2=len, ARG3=flags
     uint32_t len = ARG2;
-    if (!ARG1 || !rbrew_memory_accessible(MEM,ARG1,len)) { RET = (uint32_t)-1; return; }
+    if (!ARG1 || !rbrew_memory_accessible(MEM, ARG1, len)) {
+        RET = (uint32_t)-1;
+        return;
+    }
     ssize_t n = recv((int)ARG0, (char*)(MEM + ARG1), (int)len, (int)ARG3);
     RET = (uint32_t)n;
 }
@@ -248,32 +255,42 @@ static void recv_(CPUState* cpu) {
 static void sendto_(CPUState* cpu) {
     // ARG0=fd, ARG1=buf, ARG2=len, ARG3=flags, ARG4=dest_addr, ARG5=addrlen
     uint32_t len = ARG2;
-    if (!ARG1 || !rbrew_memory_accessible(MEM,ARG1,len)) { RET = (uint32_t)-1; return; }
+    if (!ARG1 || !rbrew_memory_accessible(MEM, ARG1, len)) {
+        RET = (uint32_t)-1;
+        return;
+    }
     struct sockaddr_in sa;
     guest_to_host_sockaddr(MEM, ARG4, &sa);
-    ssize_t n = sendto((int)ARG0, (const char*)(MEM + ARG1), (int)len, (int)ARG3,
-                       (struct sockaddr*)&sa, (socklen_t)sizeof(sa));
+    ssize_t n =
+        sendto((int)ARG0, (const char*)(MEM + ARG1), (int)len, (int)ARG3, (struct sockaddr*)&sa, (socklen_t)sizeof(sa));
     RET = (uint32_t)n;
 }
 
 static void recvfrom_(CPUState* cpu) {
     // ARG0=fd, ARG1=buf, ARG2=len, ARG3=flags, ARG4=src_addr_out, ARG5=addrlen_out
     uint32_t len = ARG2;
-    if (!ARG1 || !rbrew_memory_accessible(MEM,ARG1,len)) { RET = (uint32_t)-1; return; }
+    if (!ARG1 || !rbrew_memory_accessible(MEM, ARG1, len)) {
+        RET = (uint32_t)-1;
+        return;
+    }
     struct sockaddr_in sa;
     socklen_t slen = sizeof(sa);
-    ssize_t n = recvfrom((int)ARG0, (char*)(MEM + ARG1), (int)len, (int)ARG3,
-                         (struct sockaddr*)&sa, &slen);
+    ssize_t n = recvfrom((int)ARG0, (char*)(MEM + ARG1), (int)len, (int)ARG3, (struct sockaddr*)&sa, &slen);
     if (n >= 0 && ARG4) host_to_guest_sockaddr(MEM, ARG4, &sa);
-    if (ARG5)            rbrew_write32(MEM, ARG5, 16u);
+    if (ARG5) rbrew_write32(MEM, ARG5, 16u);
     RET = (uint32_t)n;
 }
 
 // recvfrom_ex is Wii U extension for receiving with extended info — treat as recvfrom
-static void recvfrom_ex(CPUState* cpu) { recvfrom_(cpu); }
+static void recvfrom_ex(CPUState* cpu) {
+    recvfrom_(cpu);
+}
 
 // sendto_multi: not emulated; return 0
-static void sendto_multi(CPUState* cpu) { (void)cpu; RET = 0; }
+static void sendto_multi(CPUState* cpu) {
+    (void)cpu;
+    RET = 0;
+}
 
 // ---------------------------------------------------------------------------
 // select
@@ -288,17 +305,13 @@ static void select_(CPUState* cpu) {
     fd_set efds = guest_to_fdset(MEM, ARG3);
 
     struct timeval tv, *tvp = nullptr;
-    if (ARG4 && rbrew_memory_accessible(MEM,ARG4,8u)) {
-        tv.tv_sec  = (long)(int32_t)rbrew_read32(MEM, ARG4 + 0u);
+    if (ARG4 && rbrew_memory_accessible(MEM, ARG4, 8u)) {
+        tv.tv_sec = (long)(int32_t)rbrew_read32(MEM, ARG4 + 0u);
         tv.tv_usec = (long)(int32_t)rbrew_read32(MEM, ARG4 + 4u);
         tvp = &tv;
     }
 
-    int rc = select(nfds,
-                    ARG1 ? &rfds : nullptr,
-                    ARG2 ? &wfds : nullptr,
-                    ARG3 ? &efds : nullptr,
-                    tvp);
+    int rc = select(nfds, ARG1 ? &rfds : nullptr, ARG2 ? &wfds : nullptr, ARG3 ? &efds : nullptr, tvp);
 
     if (rc >= 0) {
         fdset_to_guest(MEM, ARG1, &rfds);
@@ -313,16 +326,19 @@ static void select_(CPUState* cpu) {
 // ARG0=fd, ARG1=level, ARG2=optname, ARG3=optval_ptr, ARG4=optlen
 // ---------------------------------------------------------------------------
 static void setsockopt_(CPUState* cpu) {
-    int fd      = (int)ARG0;
-    int wlevel  = (int)ARG1;
-    int wopt    = (int)ARG2;
+    int fd = (int)ARG0;
+    int wlevel = (int)ARG1;
+    int wopt = (int)ARG2;
     uint32_t vp = ARG3;
     uint32_t vl = ARG4;
 
     int hlevel = map_level(wlevel);
-    int hopt   = (hlevel == SOL_SOCKET) ? map_so_option(wopt) : wopt;
+    int hopt = (hlevel == SOL_SOCKET) ? map_so_option(wopt) : wopt;
 
-    if (!vp || vl == 0 || !rbrew_memory_accessible(MEM,vp,vl)) { RET = 0; return; }
+    if (!vp || vl == 0 || !rbrew_memory_accessible(MEM, vp, vl)) {
+        RET = 0;
+        return;
+    }
 
     // The optval is a 4-byte integer for most options (endian-swap from BE guest)
     int val_host = (int)rbrew_read32(MEM, vp);
@@ -335,10 +351,18 @@ static void setsockopt_(CPUState* cpu) {
 // Byte-order functions: on Wii U (big-endian) these are all identity ops.
 // The guest calls them with values already in "host" (= network) byte order.
 // ---------------------------------------------------------------------------
-static void htonl_(CPUState* cpu)  { RET = ARG0; }
-static void htons_(CPUState* cpu)  { RET = ARG0 & 0xFFFFu; }
-static void ntohl_(CPUState* cpu)  { RET = ARG0; }
-static void ntohs_(CPUState* cpu)  { RET = ARG0 & 0xFFFFu; }
+static void htonl_(CPUState* cpu) {
+    RET = ARG0;
+}
+static void htons_(CPUState* cpu) {
+    RET = ARG0 & 0xFFFFu;
+}
+static void ntohl_(CPUState* cpu) {
+    RET = ARG0;
+}
+static void ntohs_(CPUState* cpu) {
+    RET = ARG0 & 0xFFFFu;
+}
 
 // ---------------------------------------------------------------------------
 // inet_ntoa(in_addr)
@@ -355,12 +379,12 @@ static void inet_ntoa_(CPUState* cpu) {
     // Extract octets from big-endian representation
     uint8_t b0 = (uint8_t)(addr_be >> 24);
     uint8_t b1 = (uint8_t)(addr_be >> 16);
-    uint8_t b2 = (uint8_t)(addr_be >>  8);
-    uint8_t b3 = (uint8_t)(addr_be      );
+    uint8_t b2 = (uint8_t)(addr_be >> 8);
+    uint8_t b3 = (uint8_t)(addr_be);
 
     char buf[20];
     int len = snprintf(buf, sizeof(buf), "%u.%u.%u.%u", b0, b1, b2, b3);
-    if (len > 0 && rbrew_memory_accessible(MEM,gptr,uint64_t(len)+1u)) {
+    if (len > 0 && rbrew_memory_accessible(MEM, gptr, uint64_t(len) + 1u)) {
         memcpy(MEM + gptr, buf, (size_t)len + 1u);
         RET = gptr;
     } else {
@@ -373,8 +397,14 @@ static void inet_ntoa_(CPUState* cpu) {
 // ARG0=AF_INET, ARG1=src_str (guest ptr), ARG2=dst (guest ptr, 4 bytes for AF_INET)
 // ---------------------------------------------------------------------------
 static void inet_pton_(CPUState* cpu) {
-    if (ARG0 != 2u) { RET = 0; return; } // only AF_INET supported
-    if (!ARG1 || !ARG2) { RET = 0; return; }
+    if (ARG0 != 2u) {
+        RET = 0;
+        return;
+    } // only AF_INET supported
+    if (!ARG1 || !ARG2) {
+        RET = 0;
+        return;
+    }
 
     // Read the string from guest memory (up to 64 chars)
     char buf[64] = {};
@@ -385,7 +415,7 @@ static void inet_pton_(CPUState* cpu) {
 
     struct in_addr addr;
     int rc = inet_pton(AF_INET, buf, &addr);
-    if (rc == 1 && rbrew_memory_accessible(MEM,ARG2,4u)) {
+    if (rc == 1 && rbrew_memory_accessible(MEM, ARG2, 4u)) {
         memcpy(MEM + ARG2, &addr.s_addr, 4); // network-order bytes
     }
     RET = (uint32_t)rc; // 1=success, 0=invalid, -1=unsupported family
@@ -396,7 +426,10 @@ static void inet_pton_(CPUState* cpu) {
 // Returns guest ptr to the hostent struct, or 0 on failure.
 // ---------------------------------------------------------------------------
 static void gethostbyname_(CPUState* cpu) {
-    if (!ARG0) { RET = 0; return; }
+    if (!ARG0) {
+        RET = 0;
+        return;
+    }
 
     // Read hostname from guest memory
     char hostname[256] = {};
@@ -407,7 +440,7 @@ static void gethostbyname_(CPUState* cpu) {
 
     struct hostent* he = gethostbyname(hostname);
     if (!he || he->h_addrtype != AF_INET || !he->h_addr_list || !he->h_addr_list[0]) {
-        RBREW_LOGF(stderr, "[nsysnet] gethostbyname(\"%s\"): failed\n", hostname);
+        RBREW_LOG_ERROR("nsysnet", "gethostbyname(\"%s\"): failed\n", hostname);
         RET = 0;
         return;
     }
@@ -428,15 +461,14 @@ static void gethostbyname_(CPUState* cpu) {
     rbrew_write32(MEM, HE_ADDRLIST_ARR + 4u, 0u);
 
     // hostent struct
-    rbrew_write32(MEM, HE_BASE + 0x00u, HE_NAME_STR);      // h_name
-    rbrew_write32(MEM, HE_BASE + 0x04u, HE_ALIASES_ARR);   // h_aliases
-    rbrew_write32(MEM, HE_BASE + 0x08u, 2u);               // h_addrtype = AF_INET
-    rbrew_write32(MEM, HE_BASE + 0x0Cu, 4u);               // h_length
-    rbrew_write32(MEM, HE_BASE + 0x10u, HE_ADDRLIST_ARR);  // h_addr_list
+    rbrew_write32(MEM, HE_BASE + 0x00u, HE_NAME_STR);     // h_name
+    rbrew_write32(MEM, HE_BASE + 0x04u, HE_ALIASES_ARR);  // h_aliases
+    rbrew_write32(MEM, HE_BASE + 0x08u, 2u);              // h_addrtype = AF_INET
+    rbrew_write32(MEM, HE_BASE + 0x0Cu, 4u);              // h_length
+    rbrew_write32(MEM, HE_BASE + 0x10u, HE_ADDRLIST_ARR); // h_addr_list
 
-    RBREW_LOGF(stderr, "[nsysnet] gethostbyname(\"%s\") → %u.%u.%u.%u\n",
-            hostname,
-            MEM[HE_ADDR], MEM[HE_ADDR+1], MEM[HE_ADDR+2], MEM[HE_ADDR+3]);
+    RBREW_LOG_INFO("nsysnet", "gethostbyname(\"%s\") → %u.%u.%u.%u\n", hostname, MEM[HE_ADDR], MEM[HE_ADDR + 1],
+                   MEM[HE_ADDR + 2], MEM[HE_ADDR + 3]);
 
     RET = HE_BASE;
 }
@@ -456,7 +488,10 @@ static void gethostbyname_(CPUState* cpu) {
 //   +0x1C: uint32 ai_next     (guest ptr)
 // ---------------------------------------------------------------------------
 static void getaddrinfo_(CPUState* cpu) {
-    if (!ARG0 && !ARG1) { RET = (uint32_t)-1; return; }
+    if (!ARG0 && !ARG1) {
+        RET = (uint32_t)-1;
+        return;
+    }
 
     // Read hostname
     char hostname[256] = {};
@@ -482,16 +517,13 @@ static void getaddrinfo_(CPUState* cpu) {
 
     // Resolve via host
     struct addrinfo hints_h = {};
-    hints_h.ai_family   = AF_INET;
+    hints_h.ai_family = AF_INET;
     hints_h.ai_socktype = hint_socktype ? hint_socktype : SOCK_STREAM;
 
     struct addrinfo* res = nullptr;
-    int rc = getaddrinfo(*hostname ? hostname : nullptr,
-                         *servname ? servname : nullptr,
-                         &hints_h, &res);
+    int rc = getaddrinfo(*hostname ? hostname : nullptr, *servname ? servname : nullptr, &hints_h, &res);
     if (rc != 0 || !res) {
-        RBREW_LOGF(stderr, "[nsysnet] getaddrinfo(\"%s\",\"%s\"): %s\n",
-                hostname, servname, gai_strerror(rc));
+        RBREW_LOG_INFO("nsysnet", "getaddrinfo(\"%s\",\"%s\"): %s\n", hostname, servname, gai_strerror(rc));
         RET = (uint32_t)(rc ? rc : -1);
         return;
     }
@@ -503,7 +535,7 @@ static void getaddrinfo_(CPUState* cpu) {
         if (a->ai_family != AF_INET) continue;
 
         uint32_t entry_base = AI_BASE + count * AI_ENTRY_STRIDE;
-        uint32_t sa_base    = entry_base + 32u; // sockaddr_in follows the addrinfo
+        uint32_t sa_base = entry_base + 32u; // sockaddr_in follows the addrinfo
 
         // Write sockaddr_in
         struct sockaddr_in* sin = (struct sockaddr_in*)a->ai_addr;
@@ -519,39 +551,46 @@ static void getaddrinfo_(CPUState* cpu) {
         }
 
         // Write addrinfo struct
-        rbrew_write32(MEM, entry_base + 0x00u, 0u);             // ai_flags
-        rbrew_write32(MEM, entry_base + 0x04u, 2u);             // ai_family = AF_INET
+        rbrew_write32(MEM, entry_base + 0x00u, 0u); // ai_flags
+        rbrew_write32(MEM, entry_base + 0x04u, 2u); // ai_family = AF_INET
         rbrew_write32(MEM, entry_base + 0x08u, (uint32_t)a->ai_socktype);
         rbrew_write32(MEM, entry_base + 0x0Cu, (uint32_t)a->ai_protocol);
-        rbrew_write32(MEM, entry_base + 0x10u, 16u);            // ai_addrlen
-        rbrew_write32(MEM, entry_base + 0x14u, AI_CANON_STR);   // ai_canonname
-        rbrew_write32(MEM, entry_base + 0x18u, sa_base);        // ai_addr
-        rbrew_write32(MEM, entry_base + 0x1Cu, 0u);             // ai_next (filled below)
+        rbrew_write32(MEM, entry_base + 0x10u, 16u);          // ai_addrlen
+        rbrew_write32(MEM, entry_base + 0x14u, AI_CANON_STR); // ai_canonname
+        rbrew_write32(MEM, entry_base + 0x18u, sa_base);      // ai_addr
+        rbrew_write32(MEM, entry_base + 0x1Cu, 0u);           // ai_next (filled below)
 
         // Link previous entry to this one
-        if (prev_guest)
-            rbrew_write32(MEM, prev_guest + 0x1Cu, entry_base);
+        if (prev_guest) rbrew_write32(MEM, prev_guest + 0x1Cu, entry_base);
         prev_guest = entry_base;
     }
     freeaddrinfo(res);
 
-    if (count == 0) { RET = (uint32_t)-1; return; }
+    if (count == 0) {
+        RET = (uint32_t)-1;
+        return;
+    }
 
     // Write *res = first entry
     if (ARG3) rbrew_write32(MEM, ARG3, AI_BASE);
 
-    RBREW_LOGF(stderr, "[nsysnet] getaddrinfo(\"%s\",\"%s\") → %u entr%s\n",
-            hostname, servname, count, count == 1 ? "y" : "ies");
+    RBREW_LOG_INFO("nsysnet", "getaddrinfo(\"%s\",\"%s\") → %u entr%s\n", hostname, servname, count,
+                   count == 1 ? "y" : "ies");
     RET = 0;
 }
 
 // freeaddrinfo — results are in a static scratch area, nothing to free
-static void freeaddrinfo_(CPUState* cpu) { (void)cpu; }
+static void freeaddrinfo_(CPUState* cpu) {
+    (void)cpu;
+}
 
 // ---------------------------------------------------------------------------
 // nn_ac (network availability) — always report connected
 // ---------------------------------------------------------------------------
-static void ac_Initialize(CPUState* cpu)               { (void)cpu; RET = 0; }
+static void ac_Initialize(CPUState* cpu) {
+    (void)cpu;
+    RET = 0;
+}
 // Connect() reported success while IsApplicationConnected() reported offline.
 // Gambit (02A7B5A4) then started its NEX/Pia online login, found no server
 // and the boot loading screen waited for the game's 30 s online timeout. Like a
@@ -560,17 +599,32 @@ static void ac_Initialize(CPUState* cpu)               { (void)cpu; RET = 0; }
 // RBREW_AC_CONNECT=ok restores the old success result.
 static constexpr uint32_t kAcResultNotConnected = 0xA0D1F400u;
 static void ac_Connect(CPUState* cpu) {
-    static const bool ok = [] { const char* v = std::getenv("RBREW_AC_CONNECT"); return v && !strcmp(v, "ok"); }();
+    static const bool ok = [] {
+        const char* v = std::getenv("RBREW_AC_CONNECT");
+        return v && !strcmp(v, "ok");
+    }();
     RET = ok ? 0u : kAcResultNotConnected;
 }
-static void ac_Close(CPUState* cpu)                    { (void)cpu; RET = 0; }
-static void ac_GetLastErrorCode(CPUState* cpu)         { if (ARG0) rbrew_write32(MEM, ARG0, 0u); RET = 0; }
-static void ac_GetAssignedAddress(CPUState* cpu)       { if (ARG0) rbrew_write32(MEM, ARG0, 0u); RET = 0; }
-static void ac_GetAssignedSubnet(CPUState* cpu)        { if (ARG0) rbrew_write32(MEM, ARG0, 0u); RET = 0; }
+static void ac_Close(CPUState* cpu) {
+    (void)cpu;
+    RET = 0;
+}
+static void ac_GetLastErrorCode(CPUState* cpu) {
+    if (ARG0) rbrew_write32(MEM, ARG0, 0u);
+    RET = 0;
+}
+static void ac_GetAssignedAddress(CPUState* cpu) {
+    if (ARG0) rbrew_write32(MEM, ARG0, 0u);
+    RET = 0;
+}
+static void ac_GetAssignedSubnet(CPUState* cpu) {
+    if (ARG0) rbrew_write32(MEM, ARG0, 0u);
+    RET = 0;
+}
 
 // IsApplicationConnected(bool* result)  → *result = FALSE (offline mode); return 0
 static void ac_IsApplicationConnected(CPUState* cpu) {
-    if (ARG0 && rbrew_memory_accessible(MEM,ARG0,1u))
+    if (ARG0 && rbrew_memory_accessible(MEM, ARG0, 1u))
         MEM[ARG0] = 0u; // *result = false (offline mode: prevents lobby network hangs)
     RET = 0;
 }
@@ -581,8 +635,13 @@ static void ac_IsApplicationConnected(CPUState* cpu) {
 // it directly via its own thunks.  For the PLT stubs we only need no-ops for
 // the two global lifecycle calls.
 // ---------------------------------------------------------------------------
-static void curl_global_init_mem_(CPUState* cpu)  { (void)cpu; RET = 0; } // CURLE_OK
-static void curl_global_cleanup_(CPUState* cpu)   { (void)cpu; }
+static void curl_global_init_mem_(CPUState* cpu) {
+    (void)cpu;
+    RET = 0;
+} // CURLE_OK
+static void curl_global_cleanup_(CPUState* cpu) {
+    (void)cpu;
+}
 
 // ---------------------------------------------------------------------------
 // Registration
@@ -592,60 +651,67 @@ static void curl_global_cleanup_(CPUState* cpu)   { (void)cpu; }
 // RBREW_NET_TRACE=<file>: every socket/nn_ac call with its arguments, result
 // and host error, plus a timestamp, for diagnosing network waits.
 static void net_trace(const char* name, CPUState* cpu, uint32_t a0, uint32_t a1, uint32_t a2) {
-    static FILE* const file = [] { const char* p = std::getenv("RBREW_NET_TRACE"); return p && *p ? std::fopen(p, "w") : nullptr; }();
+    static FILE* const file = [] {
+        const char* p = std::getenv("RBREW_NET_TRACE");
+        return p && *p ? std::fopen(p, "w") : nullptr;
+    }();
     if (!file) return;
     const int error = SOCK_ERRNO;
     static const auto start = std::chrono::steady_clock::now();
     static std::mutex lock;
     std::lock_guard guard(lock);
     std::fprintf(file, "%9.3f %-24s %08X %08X %08X -> %08X err=%d\n",
-                 std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(),
-                 name, a0, a1, a2, RET, error);
+                 std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(), name, a0, a1, a2, RET,
+                 error);
     std::fflush(file);
 }
-#define NET_REG(addr, fn) rbrew_register_func(cpu, addr, [](CPUState* cpu) { \
-        const uint32_t a0 = ARG0, a1 = ARG1, a2 = ARG2; fn(cpu); net_trace(#fn, cpu, a0, a1, a2); })
+#define NET_REG(addr, fn)                                                                                              \
+    rbrew_register_func(cpu, addr, [](CPUState* cpu) {                                                                 \
+        const uint32_t a0 = ARG0, a1 = ARG1, a2 = ARG2;                                                                \
+        fn(cpu);                                                                                                       \
+        net_trace(#fn, cpu, a0, a1, a2);                                                                               \
+    })
 
 void nsysnet_register(CPUState* cpu) {
     // nsysnet core
-    NET_REG(ADDR_socket_lib_init,       socket_lib_init);
-    NET_REG(ADDR_NSSLInit,              NSSLInit);
-    NET_REG(ADDR_set_resolver_allocator,set_resolver_allocator);
-    NET_REG(ADDR_mw_socket,             mw_socket);
-    NET_REG(ADDR_socketclose,           socketclose);
-    NET_REG(ADDR_socketlasterr,         socketlasterr);
-    NET_REG(ADDR_bind,                  bind_);
-    NET_REG(ADDR_shutdown,              shutdown_);
-    NET_REG(ADDR_getsockname,           getsockname_);
-    NET_REG(ADDR_send,                  send_);
-    NET_REG(ADDR_recv,                  recv_);
-    NET_REG(ADDR_sendto,                sendto_);
-    NET_REG(ADDR_recvfrom,              recvfrom_);
-    NET_REG(ADDR_recvfrom_ex,           recvfrom_ex);
-    NET_REG(ADDR_sendto_multi,          sendto_multi);
-    NET_REG(ADDR_select,                select_);
-    NET_REG(ADDR_setsockopt,            setsockopt_);
+    NET_REG(ADDR_socket_lib_init, socket_lib_init);
+    NET_REG(ADDR_NSSLInit, NSSLInit);
+    NET_REG(ADDR_set_resolver_allocator, set_resolver_allocator);
+    NET_REG(ADDR_mw_socket, mw_socket);
+    NET_REG(ADDR_socketclose, socketclose);
+    NET_REG(ADDR_socketlasterr, socketlasterr);
+    NET_REG(ADDR_bind, bind_);
+    NET_REG(ADDR_shutdown, shutdown_);
+    NET_REG(ADDR_getsockname, getsockname_);
+    NET_REG(ADDR_send, send_);
+    NET_REG(ADDR_recv, recv_);
+    NET_REG(ADDR_sendto, sendto_);
+    NET_REG(ADDR_recvfrom, recvfrom_);
+    NET_REG(ADDR_recvfrom_ex, recvfrom_ex);
+    NET_REG(ADDR_sendto_multi, sendto_multi);
+    NET_REG(ADDR_select, select_);
+    NET_REG(ADDR_setsockopt, setsockopt_);
     // Note: connect/accept/listen are not in this game's PLT
-    NET_REG(ADDR_htonl,                 htonl_);
-    NET_REG(ADDR_htons,                 htons_);
-    NET_REG(ADDR_ntohl,                 ntohl_);
-    NET_REG(ADDR_ntohs,                 ntohs_);
-    NET_REG(ADDR_inet_ntoa,             inet_ntoa_);
-    NET_REG(ADDR_inet_pton,             inet_pton_);
-    NET_REG(ADDR_gethostbyname,         gethostbyname_);
-    NET_REG(ADDR_getaddrinfo,           getaddrinfo_);
-    NET_REG(ADDR_freeaddrinfo,          freeaddrinfo_);
+    NET_REG(ADDR_htonl, htonl_);
+    NET_REG(ADDR_htons, htons_);
+    NET_REG(ADDR_ntohl, ntohl_);
+    NET_REG(ADDR_ntohs, ntohs_);
+    NET_REG(ADDR_inet_ntoa, inet_ntoa_);
+    NET_REG(ADDR_inet_pton, inet_pton_);
+    NET_REG(ADDR_gethostbyname, gethostbyname_);
+    NET_REG(ADDR_getaddrinfo, getaddrinfo_);
+    NET_REG(ADDR_freeaddrinfo, freeaddrinfo_);
 
     // nn_ac (C++ mangled names → use addresses directly)
-    NET_REG(ADDR_Initialize__Q2_2nn2acFv,              ac_Initialize);
-    NET_REG(ADDR_Connect__Q2_2nn2acFv,                 ac_Connect);
-    NET_REG(ADDR_Close__Q2_2nn2acFv,                   ac_Close);
-    NET_REG(ADDR_GetLastErrorCode__Q2_2nn2acFPUi,      ac_GetLastErrorCode);
-    NET_REG(ADDR_GetAssignedAddress__Q2_2nn2acFPUl,    ac_GetAssignedAddress);
-    NET_REG(ADDR_GetAssignedSubnet__Q2_2nn2acFPUl,     ac_GetAssignedSubnet);
+    NET_REG(ADDR_Initialize__Q2_2nn2acFv, ac_Initialize);
+    NET_REG(ADDR_Connect__Q2_2nn2acFv, ac_Connect);
+    NET_REG(ADDR_Close__Q2_2nn2acFv, ac_Close);
+    NET_REG(ADDR_GetLastErrorCode__Q2_2nn2acFPUi, ac_GetLastErrorCode);
+    NET_REG(ADDR_GetAssignedAddress__Q2_2nn2acFPUl, ac_GetAssignedAddress);
+    NET_REG(ADDR_GetAssignedSubnet__Q2_2nn2acFPUl, ac_GetAssignedSubnet);
     NET_REG(ADDR_IsApplicationConnected__Q2_2nn2acFPb, ac_IsApplicationConnected);
 
     // nlibcurl lifecycle
-    NET_REG(ADDR_curl_global_init_mem,  curl_global_init_mem_);
-    NET_REG(ADDR_curl_global_cleanup,   curl_global_cleanup_);
+    NET_REG(ADDR_curl_global_init_mem, curl_global_init_mem_);
+    NET_REG(ADDR_curl_global_cleanup, curl_global_cleanup_);
 }

@@ -1,0 +1,148 @@
+name: Linux CI
+
+on:
+  push:
+    branches: [ '**' ]
+  pull_request:
+    branches: [ '**' ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build & Test (Linux)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate shell scripts syntax
+        run: |
+          bash -n setup.sh build.sh
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install system build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake \
+            ninja-build \
+            build-essential \
+            pkg-config \
+            libvulkan-dev \
+            vulkan-tools \
+            mesa-vulkan-drivers \
+            libcurl4-openssl-dev \
+            zlib1g-dev \
+            libx11-dev \
+            libxext-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxrandr-dev \
+            libxfixes-dev \
+            libxss-dev \
+            libxkbcommon-dev \
+            libwayland-dev \
+            wayland-protocols \
+            libasound2-dev \
+            libpulse-dev \
+            xvfb
+
+      - name: Cache dependencies profile
+        id: cache-deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/deps
+            build/downloads
+            build/cache/deps
+          key: linux-deps-${{ hashFiles('recompiler/tools/build_vulkan_dependencies.py') }}
+
+      - name: Install Vulkan-Headers
+        run: |
+          if [ ! -f "build/deps/VulkanHeaders/share/cmake/VulkanHeaders/VulkanHeadersConfig.cmake" ]; then
+            mkdir -p build/downloads build/vulkan-headers-src build/vulkan-headers-build
+            curl -fL --retry 3 https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/vulkan-sdk-1.4.304.0.tar.gz -o build/downloads/vulkan-headers.tar.gz
+            tar -xzf build/downloads/vulkan-headers.tar.gz -C build/vulkan-headers-src --strip-components=1
+            cmake -S build/vulkan-headers-src -B build/vulkan-headers-build -G Ninja \
+              -DCMAKE_INSTALL_PREFIX="$PWD/build/deps/VulkanHeaders"
+            cmake --build build/vulkan-headers-build --target install
+          fi
+
+      - name: Install Vulkan meta-loader (volk)
+        run: |
+          if [ ! -f "build/deps/volk/lib/cmake/volk/volkConfig.cmake" ]; then
+            mkdir -p build/downloads build/volk-source build/volk-build
+            curl -fL --retry 3 https://github.com/zeux/volk/archive/refs/tags/vulkan-sdk-1.4.363.0.tar.gz -o build/downloads/volk.tar.gz
+            tar -xzf build/downloads/volk.tar.gz -C build/volk-source --strip-components=1
+            cmake -S build/volk-source -B build/volk-build -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DVOLK_INSTALL=ON \
+              -DCMAKE_INSTALL_PREFIX="$PWD/build/deps/volk"
+            cmake --build build/volk-build --target install
+          fi
+
+      - name: Build window and shader compiler libraries (SDL2, glslang)
+        run: |
+          mkdir -p build/downloads
+          if [ ! -f "build/downloads/SDL2-2.32.10.zip" ]; then
+            curl -fL --retry 3 https://github.com/libsdl-org/SDL/releases/download/release-2.32.10/SDL2-2.32.10.zip -o build/downloads/SDL2-2.32.10.zip
+          fi
+          if [ ! -f "build/downloads/glslang-16.4.0.tar.gz" ]; then
+            curl -fL --retry 3 https://github.com/KhronosGroup/glslang/archive/refs/tags/16.4.0.tar.gz -o build/downloads/glslang-16.4.0.tar.gz
+          fi
+          if [ ! -d "build/downloads/SDL2-2.32.10" ]; then
+            python3 -c 'import zipfile; zipfile.ZipFile("build/downloads/SDL2-2.32.10.zip").extractall("build/downloads")'
+          fi
+          python3 recompiler/tools/build_vulkan_dependencies.py \
+            --sdl-source "build/downloads/SDL2-2.32.10" \
+            --glslang-archive "build/downloads/glslang-16.4.0.tar.gz" \
+            --build-root "build/deps-build" \
+            --prefix "build/deps" \
+            --generator "Ninja" \
+            --cmake "$(which cmake)" \
+            --cache-dir "build/cache/deps"
+
+      - name: Build RebrewU recompiler
+        run: |
+          cmake -S recompiler -B build/rebrewu -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/rebrewu --target rebrewu
+
+      - name: Verify RebrewU recompiler CLI and profiles
+        run: |
+          ./build/rebrewu/bin/rebrewu 2>&1 | grep "Usage:"
+          test -s profiles/agmp-v16.entries
+          test -s profiles/agmp-v16.hooks
+          # Confirm rebrewu safely handles invalid / empty binaries
+          ! ./build/rebrewu/bin/rebrewu inspect /dev/null
+
+      - name: Configure & build port runtime and regression tests
+        run: |
+          SDL2_CONFIG="$(find "$PWD/build/deps/sdl2-vulkan" -name SDL2Config.cmake -print -quit)"
+          test -n "$SDL2_CONFIG"
+          SDL2_DIR="$(dirname -- "$SDL2_CONFIG")"
+          GLSLANG_DIR="$PWD/build/deps/glslang-vulkan/lib/cmake/glslang"
+          VOLK_DIR="$PWD/build/deps/volk"
+          VULKAN_HEADERS_DIR="$PWD/build/deps/VulkanHeaders"
+
+          cmake -S recompiler/port -B build/port -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DRBREW_GRAPHICS_BACKEND=Vulkan \
+            -DRBREW_BUILD_GAME=OFF \
+            -DRBREW_BUILD_TESTS=ON \
+            -DSDL2_DIR="$SDL2_DIR" \
+            -Dglslang_DIR="$GLSLANG_DIR" \
+            -DCMAKE_PREFIX_PATH="$VOLK_DIR;$VULKAN_HEADERS_DIR"
+
+          cmake --build build/port
+
+      - name: Run offline regression test suite (CTest)
+        run: |
+          xvfb-run ctest --test-dir build/port --output-on-failure -E guest_paired_equivalence

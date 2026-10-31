@@ -16,11 +16,11 @@ namespace rebrewu::ir {
 
 /// A single recompiled function represented as a CFG of BasicBlocks.
 struct IRFunction {
-    std::string  name{};
-    uint32_t     entry_addr{0};   // guest address of function entry
+    std::string name{};
+    uint32_t entry_addr{0}; // guest address of function entry
 
-    std::deque<BasicBlock>          blocks{};  // deque preserves refs/ptrs on push_back
-    std::unordered_map<uint32_t,uint32_t> addr_to_block{}; // guest addr -> block id
+    std::deque<BasicBlock> blocks{};                        // deque preserves refs/ptrs on push_back
+    std::unordered_map<uint32_t, uint32_t> addr_to_block{}; // guest addr -> block id
     // BCTR guest PC -> verified local inline branch-table entry addresses.
     // These are blocks within the active frame, not callable function entries.
     std::unordered_map<uint32_t, std::vector<uint32_t>> indirect_jump_targets{};
@@ -34,11 +34,10 @@ struct IRFunction {
 
     BasicBlock& add_block(uint32_t guest_start = 0) {
         BasicBlock blk;
-        blk.id          = next_block_id++;
+        blk.id = next_block_id++;
         blk.guest_start = guest_start;
         blocks.push_back(std::move(blk));
-        if (guest_start)
-            addr_to_block[guest_start] = blocks.back().id;
+        if (guest_start) addr_to_block[guest_start] = blocks.back().id;
         return blocks.back();
     }
 
@@ -78,4 +77,4 @@ struct IRFunction {
     }
 };
 
-}
+} // namespace rebrewu::ir

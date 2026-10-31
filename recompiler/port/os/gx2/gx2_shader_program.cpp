@@ -19,8 +19,7 @@ GX2ShaderProgram gx2_shader_program(std::span<const uint8_t> mem, uint32_t addr,
     }
     p.mode = read(size_offset + 8);
     p.attribute_count = pixel ? 0 : read(0x104);
-    if (!p.address || !size || (size & 7) || size > UINT32_MAX ||
-        uint64_t(p.address) + size > mem.size()) return {};
+    if (!p.address || !size || (size & 7) || size > UINT32_MAX || uint64_t(p.address) + size > mem.size()) return {};
     p.size = uint32_t(size);
     return p;
 }

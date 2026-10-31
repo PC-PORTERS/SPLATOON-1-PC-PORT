@@ -2,6 +2,11 @@
 // License, v. 2.0. See LICENSE.txt. Extracted from Cemu LatteShader.cpp.
 #include "Standalone.h"
 #include "Cafe/HW/Latte/Core/LatteShader.h"
+
+thread_local ShaderHostState LatteGPUState;
+static thread_local LatteShaderPSInputTable s_ps_inputs;
+LatteShaderPSInputTable* LatteSHRC_GetPSInputTable() { return &s_ps_inputs; }
+
 void LatteShader_CreatePSInputTable(LatteShaderPSInputTable* psInputTable, uint32* contextRegisters)
 {
     // PS control

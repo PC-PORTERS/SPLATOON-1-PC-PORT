@@ -20,7 +20,9 @@ struct ModuleRecord {
     uint32_t references{};
     std::array<ExportMap, 2> exports;
 };
-struct ArenaRegistry { std::unordered_map<std::string, ModuleRecord> modules; };
+struct ArenaRegistry {
+    std::unordered_map<std::string, ModuleRecord> modules;
+};
 struct RegistryOwner {
     std::mutex mutex;
     std::unordered_map<uint8_t*, ArenaRegistry> arenas;
@@ -36,8 +38,7 @@ RegistryOwner& registry_owner() {
 
 bool valid_range(const CPUState* cpu, uint32_t address, uint32_t size) {
     return cpu && cpu->mem && cpu->guest_memory_size <= WIIU_MEM_SIZE &&
-        uint64_t(address) + size <= cpu->guest_memory_size &&
-        rbrew_memory_accessible(cpu->mem,address,size);
+           uint64_t(address) + size <= cpu->guest_memory_size && rbrew_memory_accessible(cpu->mem, address, size);
 }
 
 bool valid_output(const CPUState* cpu, uint32_t address) {
@@ -50,7 +51,7 @@ bool read_string(const CPUState* cpu, uint32_t address, std::string& result) {
     // Scan only this declared guest arena; no host strlen or arbitrary bound
     // that might change valid Cafe strings. Strings are byte-encoded API names.
     for (uint64_t cursor = address; cursor < cpu->guest_memory_size; ++cursor) {
-        if (!rbrew_memory_accessible(cpu->mem,uint32_t(cursor),1)) return false;
+        if (!rbrew_memory_accessible(cpu->mem, uint32_t(cursor), 1)) return false;
         const char value = static_cast<char>(cpu->mem[cursor]);
         if (!value) return true;
         result.push_back(value);
@@ -59,8 +60,7 @@ bool read_string(const CPUState* cpu, uint32_t address, std::string& result) {
 }
 
 void write_output(CPUState* cpu, uint32_t address, uint32_t value) {
-    const uint8_t bytes[] = {uint8_t(value >> 24), uint8_t(value >> 16),
-        uint8_t(value >> 8), uint8_t(value)};
+    const uint8_t bytes[] = {uint8_t(value >> 24), uint8_t(value >> 16), uint8_t(value >> 8), uint8_t(value)};
     rbrew_write_memory(cpu->mem, address, bytes, 4);
 }
 
@@ -73,8 +73,8 @@ uint32_t fresh_handle() {
 }
 
 HostFunc registered_function(const CPUState* cpu, uint32_t address) {
-    if (!cpu || !address || (address & 3u) || !cpu->dispatch_table ||
-        (address >> 2) >= cpu->dispatch_size) return nullptr;
+    if (!cpu || !address || (address & 3u) || !cpu->dispatch_table || (address >> 2) >= cpu->dispatch_size)
+        return nullptr;
     return cpu->dispatch_table[address >> 2];
 }
 
@@ -83,12 +83,11 @@ ModuleRecord* find_handle(ArenaRegistry& registry, uint32_t handle) {
         if (module.handle == handle && module.references) return &module;
     return nullptr;
 }
-}
+} // namespace
 
 uint32_t rbrew_dynload_register_module(CPUState* cpu, std::string_view module_name,
-    std::span<const RbrewDynLoadExport> exports) {
-    if (!cpu || !cpu->mem || !cpu->guest_memory_size ||
-        cpu->guest_memory_size > WIIU_MEM_SIZE || module_name.empty() ||
+                                       std::span<const RbrewDynLoadExport> exports) {
+    if (!cpu || !cpu->mem || !cpu->guest_memory_size || cpu->guest_memory_size > WIIU_MEM_SIZE || module_name.empty() ||
         module_name.find('\0') != std::string_view::npos)
         throw std::invalid_argument("native module declaration requires a valid arena and exact name");
     std::array<ExportMap, 2> maps;
@@ -112,8 +111,7 @@ uint32_t rbrew_dynload_register_module(CPUState* cpu, std::string_view module_na
     auto& modules = owner.arenas[cpu->mem].modules;
     const std::string name(module_name);
     if (const auto existing = modules.find(name); existing != modules.end()) {
-        if (existing->second.exports != maps)
-            throw std::invalid_argument("conflicting native module declaration");
+        if (existing->second.exports != maps) throw std::invalid_argument("conflicting native module declaration");
         if (!existing->second.handle) existing->second.handle = fresh_handle();
         return existing->second.handle;
     }
@@ -184,13 +182,13 @@ void rbrew_dynload_find_export(CPUState* cpu) {
     }
     const auto& map = module->exports[kind];
     if (map.empty()) {
-        cpu->r[3] = kind ? rbrew_dynload_error::module_has_no_data_exports
-                        : rbrew_dynload_error::module_has_no_code_exports;
+        cpu->r[3] =
+            kind ? rbrew_dynload_error::module_has_no_data_exports : rbrew_dynload_error::module_has_no_code_exports;
         return;
     }
     const auto entry = map.find(name);
-    if (entry == map.end() || (kind == 0 &&
-        registered_function(cpu, entry->second.address) != entry->second.function)) {
+    if (entry == map.end() ||
+        (kind == 0 && registered_function(cpu, entry->second.address) != entry->second.function)) {
         cpu->r[3] = rbrew_dynload_error::export_not_found;
         return;
     }

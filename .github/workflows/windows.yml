@@ -1,0 +1,145 @@
+name: Windows CI
+
+on:
+  push:
+    branches: [ '**' ]
+  pull_request:
+    branches: [ '**' ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build & Test (Windows)
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Cache vcpkg binary artifacts
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/vcpkg_cache
+          key: windows-vcpkg-${{ hashFiles('scripts/Setup.ps1') }}
+
+      - name: Install vcpkg dependencies
+        shell: pwsh
+        env:
+          VCPKG_DEFAULT_BINARY_CACHE: ${{ runner.temp }}/vcpkg_cache
+        run: |
+          New-Item -ItemType Directory -Force -Path "${{ runner.temp }}/vcpkg_cache"
+          vcpkg install zlib curl volk vulkan-headers --triplet x64-windows --disable-metrics
+
+      - name: Cache dependencies profile
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/deps
+            build/downloads
+            build/cache/deps
+          key: windows-deps-${{ hashFiles('recompiler/tools/build_vulkan_dependencies.py') }}
+
+      - name: Build window and shader compiler libraries (SDL2, glslang)
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -format json | ConvertFrom-Json | Select-Object -First 1
+          $vsMajor = [int]($vs.installationVersion.Split('.')[0])
+          switch ($vsMajor) {
+              18 { $generator = 'Visual Studio 18 2026' }
+              default { $generator = 'Visual Studio 17 2022' }
+          }
+          Write-Host "Using generator: $generator"
+
+          $downloads = "build/downloads"
+          New-Item -ItemType Directory -Force -Path $downloads
+          $sdlZip = "$downloads/SDL2.zip"
+          $glslangTar = "$downloads/glslang.tar.gz"
+
+          if (-not (Test-Path -LiteralPath $sdlZip)) {
+            Invoke-WebRequest -Uri "https://github.com/libsdl-org/SDL/releases/download/release-2.32.10/SDL2-2.32.10.zip" -OutFile $sdlZip
+          }
+          if (-not (Test-Path -LiteralPath $glslangTar)) {
+            Invoke-WebRequest -Uri "https://github.com/KhronosGroup/glslang/archive/refs/tags/16.4.0.tar.gz" -OutFile $glslangTar
+          }
+          if (-not (Test-Path -LiteralPath "$downloads/SDL2-2.32.10")) {
+            Expand-Archive -Path $sdlZip -DestinationPath $downloads -Force
+          }
+
+          python recompiler/tools/build_vulkan_dependencies.py `
+            --sdl-source "$downloads/SDL2-2.32.10" `
+            --glslang-archive $glslangTar `
+            --build-root "build/deps-build" `
+            --prefix "build/deps" `
+            --generator $generator `
+            --cmake cmake `
+            --cache-dir "build/cache/deps"
+
+      - name: Build RebrewU recompiler
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -format json | ConvertFrom-Json | Select-Object -First 1
+          $vsMajor = [int]($vs.installationVersion.Split('.')[0])
+          switch ($vsMajor) {
+              18 { $generator = 'Visual Studio 18 2026' }
+              default { $generator = 'Visual Studio 17 2022' }
+          }
+
+          cmake -S recompiler -B build/rebrewu `
+            -G $generator -A x64 `
+            "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows `
+            -DREBREWU_BUILD_TESTS=OFF
+          cmake --build build/rebrewu --config Release --target rebrewu --parallel
+
+      - name: Verify RebrewU recompiler CLI and profiles
+        shell: pwsh
+        run: |
+          $rebrewu = (Get-ChildItem -Path build/rebrewu -Recurse -Filter rebrewu.exe | Select-Object -First 1).FullName
+          $output = (& $rebrewu 2>&1 | Out-String)
+          $global:LASTEXITCODE = 0
+          if ($output -notmatch "Usage:") { throw "rebrewu CLI did not output usage" }
+          if (-not (Test-Path "profiles/agmp-v16.entries")) { throw "Missing entries profile" }
+          if (-not (Test-Path "profiles/agmp-v16.hooks")) { throw "Missing hooks profile" }
+
+      - name: Configure & build port runtime and regression tests
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -format json | ConvertFrom-Json | Select-Object -First 1
+          $vsMajor = [int]($vs.installationVersion.Split('.')[0])
+          switch ($vsMajor) {
+              18 { $generator = 'Visual Studio 18 2026' }
+              default { $generator = 'Visual Studio 17 2022' }
+          }
+
+          $sdlMarker = (Get-ChildItem -Path "build/deps" -Recurse -Filter "SDL2VulkanOnly.cmake" | Select-Object -First 1).FullName
+          $glslangMarker = (Get-ChildItem -Path "build/deps" -Recurse -Filter "GlslangVulkanOnly.cmake" | Select-Object -First 1).FullName
+          $sdlDir = Split-Path $sdlMarker
+          $glslangDir = Split-Path $glslangMarker
+
+          cmake -S recompiler/port -B build/port `
+            -G $generator -A x64 `
+            "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows `
+            -DRBREW_GRAPHICS_BACKEND=Vulkan `
+            -DRBREW_BUILD_GAME=OFF `
+            -DRBREW_BUILD_TESTS=ON `
+            "-DSDL2_DIR=$sdlDir" `
+            "-Dglslang_DIR=$glslangDir"
+
+          cmake --build build/port --config Release --parallel
+
+      - name: Run offline regression test suite (CTest)
+        shell: pwsh
+        run: |
+          ctest --test-dir build/port -C Release --output-on-failure -E "guest_paired_equivalence|streaming_textures|streaming_edgecases|shader_gpu|shader_gpu_memory|advanced_pipeline_gpu|memory_allocator|memory_transfers|efficiency_shader"
