@@ -145,6 +145,7 @@ class Manifest:
         self.patches = []
         self.stored = {}
         self.computed = {}
+        self.ignored = set()
         self.errors = []
         self.warnings = []
 
@@ -284,6 +285,9 @@ def parse_manifest(text, path):
         if name not in sections:
             continue
         pairs = sections[name]
+        if "hash" in pairs and pairs["hash"].strip().lower() == "undefined":
+            m.ignored.add(name)
+            continue
         m.computed[name] = section_hash(pairs)
         if "hash" not in pairs:
             m.warnings.append("section [%s] has no hash line" % name)
@@ -308,6 +312,8 @@ def load_manifest(path):
 def verify_hashes(m):
     ok = not m.errors
     for name, computed in m.computed.items():
+        if name in m.ignored:
+            continue
         if name not in m.stored:
             m.errors.append("[%s] has no hash line (run 'seal')" % name)
             ok = False
@@ -449,12 +455,12 @@ def seal_file(path):
             flush()
             output.append(line)
             current = bare[1:-1].strip().lower()
-            if current in HASHED_SECTIONS and current not in parsed.stored:
+            if current in HASHED_SECTIONS and current not in parsed.stored and current not in parsed.ignored:
                 pending = True
             continue
         if "=" in bare:
             key = bare.split("=", 1)[0].strip().lower()
-            if key == "hash" and current in parsed.computed:
+            if key == "hash" and current in parsed.computed and current not in parsed.ignored:
                 output.append("hash = " + format_hash(parsed.computed[current]))
                 continue
         output.append(line)
