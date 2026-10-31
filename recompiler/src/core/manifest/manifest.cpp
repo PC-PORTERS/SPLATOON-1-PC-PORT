@@ -74,6 +74,11 @@ std::string normalize_value(const std::string& raw) {
     return normalize_atom(v);
 }
 
+// An explicit `Undefined` hash opts a section out of verification.
+bool is_undefined_hash(const std::string& raw) {
+    return lower(trim(raw)) == "undefined";
+}
+
 bool parse_hex_u32(const std::string& raw, uint32_t& out) {
     std::string t = trim(raw);
     if (t.size() > 2 && t[0] == '0' && (t[1] == 'x' || t[1] == 'X')) t = t.substr(2);
@@ -447,11 +452,16 @@ Manifest parse_text(const std::string& text, const std::string& path) {
     std::sort(m.hooks.begin(), m.hooks.end());
     std::sort(m.patches.begin(), m.patches.end(), [](const Patch& a, const Patch& b) { return a.address < b.address; });
 
-    // Per-section hashes: only the section's own pairs contribute.
+    // Per-section hashes: only the section's own pairs contribute. A section
+    // whose hash is `Undefined` is explicitly opted out of verification.
     for (const auto& [name, pairs] : sections) {
         if (!is_hashed_section(name)) continue;
-        m.computed_hashes[name] = section_hash(pairs);
         const auto stored = pairs.find("hash");
+        if (stored != pairs.end() && is_undefined_hash(stored->second)) {
+            m.ignored_hashes.insert(name);
+            continue;
+        }
+        m.computed_hashes[name] = section_hash(pairs);
         if (stored == pairs.end()) {
             m.warnings.push_back("section [" + name + "] has no hash line");
             continue;
@@ -480,6 +490,7 @@ std::optional<Manifest> parse_file(const std::string& path, std::string* error) 
 bool verify_hashes(Manifest& m) {
     bool ok = m.errors.empty();
     for (const auto& [name, computed] : m.computed_hashes) {
+        if (m.ignored_hashes.contains(name)) continue;
         const auto stored = m.stored_hashes.find(name);
         if (stored == m.stored_hashes.end()) {
             m.errors.push_back("[" + name + "] has no hash line (run 'manifest seal')");
@@ -536,7 +547,9 @@ bool seal_file(const std::string& path, std::string* error) {
             output.push_back(line);
             const std::string name = lower(trim(std::string_view(bare).substr(1, bare.size() - 2)));
             // Insert a hash line for a hashed section that never had one.
-            if (is_hashed_section(name) && !parsed.stored_hashes.contains(name)) {
+            // An ignored `hash = Undefined` line is preserved as written.
+            if (is_hashed_section(name) && !parsed.stored_hashes.contains(name) &&
+                !parsed.ignored_hashes.contains(name)) {
                 current = name;
                 pending_hash = true;
             } else {

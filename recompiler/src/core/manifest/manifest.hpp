@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -56,6 +57,8 @@ struct Manifest {
     // section name -> hash stored in the file / recomputed from content
     std::map<std::string, uint64_t> stored_hashes;
     std::map<std::string, uint64_t> computed_hashes;
+    // sections whose `hash` line is `Undefined`: never verified, never resealed
+    std::set<std::string> ignored_hashes;
 
     std::vector<std::string> errors;
     std::vector<std::string> warnings;

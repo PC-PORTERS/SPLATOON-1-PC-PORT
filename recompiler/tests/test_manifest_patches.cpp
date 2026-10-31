@@ -4,6 +4,8 @@
 #include "patches/manifest_patches.hpp"
 #include "ppc/assembler/ppc_asm.hpp"
 #include <cstdio>
+#include <initializer_list>
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -94,6 +96,19 @@ int main() {
                                                          "0x0261c918 = blr\n",
                                                          "test");
     check(!duplicate.errors.empty(), "duplicate patch address accepted");
+
+    const std::map<std::string, std::string> empty_section;
+    const std::string empty_hash = rebrewu::manifest::format_hash(rebrewu::manifest::section_hash(empty_section));
+    std::string ignored_text = "[manifest]\n";
+    for (const char* section : {"identity", "modules", "imports", "entries", "hooks"})
+        ignored_text += "[" + std::string(section) + "]\nhash = " + empty_hash + "\n";
+    ignored_text += "[patches]\nhash = Undefined\n0x0261C918 = nop\n";
+    const auto ignored_hash = rebrewu::manifest::parse_text(ignored_text, "test");
+    check(ignored_hash.errors.empty(), "undefined patch hash rejected");
+    check(ignored_hash.ignored_hashes.contains("patches"), "undefined patch hash not marked ignored");
+    check(!ignored_hash.computed_hashes.contains("patches"), "undefined patch hash still computed");
+    auto ignored_manifest = ignored_hash;
+    check(rebrewu::manifest::verify_hashes(ignored_manifest), "undefined patch hash was verified");
 
     const auto entries = rebrewu::manifest::parse_text("[manifest]\n"
                                                        "[entries]\n"

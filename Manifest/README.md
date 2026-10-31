@@ -48,6 +48,10 @@ that **section's own key/value pairs only**, with:
 - comments and blank lines stripped,
 - the `hash` line itself excluded.
 
+A section can opt out of verification by writing `hash = Undefined`
+(case-insensitive). Such a section is ignored by `verify`, `emit` and `seal`,
+which preserves the line as written.
+
 Consequences, and this is the point:
 
 - adding a comment, blank line, or reordering entries changes nothing;
