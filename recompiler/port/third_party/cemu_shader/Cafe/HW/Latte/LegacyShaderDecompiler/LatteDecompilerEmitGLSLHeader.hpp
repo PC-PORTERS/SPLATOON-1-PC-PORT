@@ -365,6 +365,8 @@ namespace LatteDecompiler
 		auto* src = shaderContext->shaderSource;
 		LatteShaderPSInputTable* psInputTable = LatteSHRC_GetPSInputTable();
 		auto parameterMask = shaderContext->shader->outputParameterMask;
+		// Port fix: two export slots can share a semantic; declare it once.
+		bool declared[256]{};
 		for (uint32 i = 0; i < 32; i++)
 		{
 			if ((parameterMask&(1 << i)) == 0)
@@ -384,6 +386,9 @@ namespace LatteDecompiler
 			}
 			if (psInputIndex == -1)
 				continue; // no ps input
+			if (declared[vsSemanticId & 0xFF])
+				continue;
+			declared[vsSemanticId & 0xFF] = true;
 
 			src->addFmt("layout(location = {}) ", psInputIndex);
 			if (psInputTable->import[psInputIndex].isFlat)

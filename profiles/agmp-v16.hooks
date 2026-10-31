@@ -11,3 +11,5 @@
 025D0750
 025D07F8
 025D08B0
+0281ADB4 # sead::LookAtCamera::doUpdateMatrix (gx2_env_light.cpp: camera distance, height, fly camera)
+0200F24C # agl camera: set field of view in degrees (gx2_env_light.cpp widens the plaza camera)

@@ -48,6 +48,7 @@ bool gx2_render_query_result(uint32_t, uint32_t output, uint8_t* mem) {
 }
 void gx2_render_query_poll() {}
 void gx2_render_query_poll_completed() {}
+void gx2_render_query_service_waiter() {}
 void gx2_render_conditional_begin(uint32_t, uint32_t, bool, bool, uint8_t*) {}
 void gx2_render_conditional_end() {}
 uint64_t gx2_render_state_query_count() {
@@ -67,6 +68,7 @@ void gx2_render_upload_texture(uint32_t, uint32_t, uint8_t*, const uint8_t*) {}
 void gx2_render_bind_texture(uint32_t, uint32_t, uint8_t*, const uint8_t*) {}
 void gx2_render_copy_to_scan(uint32_t, uint32_t, uint8_t*, const uint8_t*) {}
 void gx2_render_set_scan_format(bool, uint32_t) {}
+void gx2_render_request_photo() {}
 void gx2_render_present(void*, bool) {}
 void gx2_render_save_fetch_shader(uint32_t, uint32_t, uint32_t, uint8_t*) {}
 void gx2_render_set_active_fetch_shader(uint32_t) {}

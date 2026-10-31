@@ -1,5 +1,6 @@
 #include "../../../runtime/rbrew_diagnostics.h"
 #include "../../../runtime/texture_diagnostics.h"
+#include "../../../runtime/port_settings.h"
 #include "gx2_vk.h"
 #include "gx2_vk_memory.h"
 #include "gx2_imgui_overlay.h"
@@ -279,6 +280,7 @@ struct Swapchain {
     std::array<uint64_t, 3> slot_serial{};
     unsigned slot = 0;
     VkPresentModeKHR mode = VK_PRESENT_MODE_FIFO_KHR;
+    bool gsync = false; // the menu setting the swapchain was built for
 };
 Swapchain s_swapchain;
 uint64_t s_presents = 0;
@@ -361,12 +363,18 @@ bool create_swapchain() {
     // FIFO is the last resort (the native graphics path requests swap interval 0).
     VkPresentModeKHR mode = VK_PRESENT_MODE_FIFO_KHR;
     auto has = [&](VkPresentModeKHR m) { return std::find(modes.begin(), modes.end(), m) != modes.end(); };
-    if (const char* forced = std::getenv("RBREW_VK_PRESENT_MODE")) {
+    // G-Sync/FreeSync (menu): IMMEDIATE hands each frame to the display at
+    // once and the display's refresh follows it. MAILBOX keeps the fixed
+    // refresh (no tearing without VRR).
+    const bool gsync = rbrew_settings::g_gsync.load(std::memory_order_relaxed);
+    if (const char* forced = std::getenv("RBREW_VK_PRESENT_MODE"); forced && *forced) {
         if (!std::strcmp(forced, "immediate") && has(VK_PRESENT_MODE_IMMEDIATE_KHR))
             mode = VK_PRESENT_MODE_IMMEDIATE_KHR;
         else if (!std::strcmp(forced, "mailbox") && has(VK_PRESENT_MODE_MAILBOX_KHR))
             mode = VK_PRESENT_MODE_MAILBOX_KHR;
-    } else if (has(VK_PRESENT_MODE_MAILBOX_KHR))
+    } else if (gsync && has(VK_PRESENT_MODE_IMMEDIATE_KHR))
+        mode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+    else if (has(VK_PRESENT_MODE_MAILBOX_KHR))
         mode = VK_PRESENT_MODE_MAILBOX_KHR;
     else if (has(VK_PRESENT_MODE_IMMEDIATE_KHR))
         mode = VK_PRESENT_MODE_IMMEDIATE_KHR;
@@ -401,6 +409,7 @@ bool create_swapchain() {
     s_swapchain.format = chosen.format;
     s_swapchain.extent = extent;
     s_swapchain.mode = mode;
+    s_swapchain.gsync = gsync;
     vkGetSwapchainImagesKHR(s_device, created, &count, nullptr);
     s_swapchain.images.resize(count);
     vkGetSwapchainImagesKHR(s_device, created, &count, s_swapchain.images.data());
@@ -409,9 +418,9 @@ bool create_swapchain() {
     for (auto& s : s_swapchain.rendered) vkCreateSemaphore(s_device, &semaphore, nullptr, &s);
     for (auto& s : s_swapchain.acquired)
         if (!s) vkCreateSemaphore(s_device, &semaphore, nullptr, &s);
-    static bool reported = false;
-    if (!reported) {
-        reported = true;
+    static VkPresentModeKHR reported = VK_PRESENT_MODE_MAX_ENUM_KHR;
+    if (reported != mode) {
+        reported = mode;
         RBREW_LOG_INFO("vk", "swapchain %ux%u format=%d images=%u present mode=%s\n", extent.width, extent.height,
                        int(chosen.format), count,
                        mode == VK_PRESENT_MODE_MAILBOX_KHR     ? "MAILBOX"
@@ -1776,6 +1785,16 @@ bool wait_serial(uint64_t serial, uint64_t timeout_ns) {
 void defer(std::function<void()> f) {
     s_deferred.push_back({s_next_serial, std::move(f)});
 }
+// 120 FPS replay (gx2_vk_capture.h): frame N's spans and resources stay until
+// the submission now being recorded, which holds the in-between frame.
+void retain_until_current_submission(uint64_t since_serial) {
+    // Only what frame N used (its serials): retaining every chunk each frame
+    // kept all of them busy and allocated new 32 MB chunks every frame.
+    for (auto& chunk : s_chunks)
+        if (chunk.last_serial >= since_serial) chunk.last_serial = std::max(chunk.last_serial, s_next_serial);
+    for (auto& entry : s_deferred)
+        if (entry.serial >= since_serial) entry.serial = std::max(entry.serial, s_next_serial);
+}
 
 namespace {
 VkCommandBuffer begin_command_buffer() {
@@ -2441,7 +2460,8 @@ bool present(Image& source, uint32_t width, uint32_t height) {
     int w = 0, h = 0;
     SDL_Vulkan_GetDrawableSize(s_window, &w, &h);
     if (w <= 0 || h <= 0) return false;
-    if (!s_swapchain.swapchain || uint32_t(w) != s_swapchain.extent.width || uint32_t(h) != s_swapchain.extent.height) {
+    if (!s_swapchain.swapchain || uint32_t(w) != s_swapchain.extent.width || uint32_t(h) != s_swapchain.extent.height ||
+        s_swapchain.gsync != rbrew_settings::g_gsync.load(std::memory_order_relaxed)) {
         vkQueueWaitIdle(s_queue);
         if (!create_swapchain()) return false;
     }
@@ -2490,6 +2510,18 @@ bool present(Image& source, uint32_t width, uint32_t height) {
                        &blit, VK_FILTER_LINEAR);
     } else {
         vkCmdClearColorImage(cb, target, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &black, 1, &range);
+    }
+    // RBREW_PRESENT_LOG=<file> (diagnostics): one line per present, microseconds.
+    static FILE* present_log = [] {
+        const char* p = std::getenv("RBREW_PRESENT_LOG");
+        return p && *p ? std::fopen(p, "w") : nullptr;
+    }();
+    if (present_log) {
+        std::fprintf(present_log, "%lld\n",
+                     (long long)std::chrono::duration_cast<std::chrono::microseconds>(
+                         std::chrono::steady_clock::now().time_since_epoch())
+                         .count());
+        if ((s_presents & 63) == 0) std::fflush(present_log);
     }
     // Captured presents feed exact image tests: they never carry an overlay.
     if (!s_capture_presents) {

@@ -6,6 +6,7 @@
 // action mailbox. Settings are read and written through rbrew_settings
 // (mutex-protected), so either thread may persist them.
 #include "gx2_imgui_overlay.h"
+#include "gx2_graphics_menu.h"
 
 #include "rebrewu/logger.hpp"
 #include "gx2_vk.h"
@@ -23,6 +24,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <mutex>
 #include <string>
@@ -83,6 +85,7 @@ void update_shader_activity() {
 
 enum class MenuPage { Main, Keyboard, Controller };
 MenuPage s_menu_page = MenuPage::Main;
+gx2_graphics_menu::Page s_graphics_page = gx2_graphics_menu::Page::None; // graphics/weather/camera/cinema page
 bool s_prev_menu_open = false;
 bool s_capture = false; // waiting for the key/button of the selected action
 MenuPage s_capture_page = MenuPage::Keyboard;
@@ -163,7 +166,9 @@ bool backend_init(SDL_Window* window, VkInstance instance, VkPhysicalDevice phys
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad | ImGuiConfigFlags_DockingEnable;
+    // Keyboard too: arrows/Tab move through the menu, Enter/Space change.
+    io.ConfigFlags |=
+        ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad | ImGuiConfigFlags_DockingEnable;
     io.IniFilename = nullptr; // no imgui.ini next to the game; layout lives for the session
     ImGui::StyleColorsDark();
 
@@ -216,6 +221,7 @@ void backend_shutdown() {
     s_shader_last_change = -1.0e9;
     s_shader_compiling = false;
     s_menu_page = MenuPage::Main;
+    s_graphics_page = gx2_graphics_menu::Page::None;
     s_capture = false;
     s_focused_action = -1;
     s_quit_armed_at = -1.0;
@@ -282,7 +288,9 @@ void process_nav_event(const SDL_Event& e) {
     const bool back = (e.type == SDL_KEYDOWN && !e.key.repeat && e.key.keysym.scancode == SDL_SCANCODE_BACKSPACE) ||
                       (e.type == SDL_CONTROLLERBUTTONDOWN && e.cbutton.button == SDL_CONTROLLER_BUTTON_B);
     if (back) {
-        if (s_menu_page != MenuPage::Main)
+        if (s_graphics_page != gx2_graphics_menu::Page::None)
+            s_graphics_page = gx2_graphics_menu::Page::None;
+        else if (s_menu_page != MenuPage::Main)
             s_menu_page = MenuPage::Main;
         else
             set_menu_open(false);
@@ -485,11 +493,20 @@ void build_settings_window() {
     ImGui::SetNextWindowPos(center, ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSize(ImVec2(560, 640), ImGuiCond_FirstUseEver);
     bool open = true;
-    if (!ImGui::Begin(s_menu_page == MenuPage::Main       ? "Settings"
-                      : s_menu_page == MenuPage::Keyboard ? "Keyboard & mouse controls"
-                                                          : "Controller controls",
-                      &open)) {
+    // One window ID for every page (the title shows the page).
+    const char* title = s_graphics_page != gx2_graphics_menu::Page::None ? gx2_graphics_menu::title(s_graphics_page)
+                        : s_menu_page == MenuPage::Main                  ? "Settings"
+                        : s_menu_page == MenuPage::Keyboard              ? "Keyboard & mouse controls"
+                                                                         : "Controller controls";
+    const std::string window = std::string(title) + "###settings";
+    if (!ImGui::Begin(window.c_str(), &open)) {
         ImGui::End();
+        return;
+    }
+    if (s_graphics_page != gx2_graphics_menu::Page::None) {
+        if (gx2_graphics_menu::build_page(s_graphics_page)) s_graphics_page = gx2_graphics_menu::Page::None;
+        ImGui::End();
+        if (!open) set_menu_open(false);
         return;
     }
     if (s_menu_page != MenuPage::Main) {
@@ -501,6 +518,8 @@ void build_settings_window() {
     auto v = rs::get();
     bool dirty = false;
     if (ImGui::Button("Resume")) set_menu_open(false);
+    if (const auto page = gx2_graphics_menu::build_main_rows(v, dirty); page != gx2_graphics_menu::Page::None)
+        s_graphics_page = page;
     int resolution = v.resolution;
     if (ImGui::Combo("Render resolution", &resolution, kResolutionLabels, rs::kResolutionCount)) {
         v.resolution = resolution;
@@ -593,9 +612,22 @@ bool consume_menu_changed() {
 }
 
 bool menu_blocks_input(bool any_input_held) {
-    if (s_menu_open.load(std::memory_order_relaxed)) return true;
+    // The press that closed the menu must not reach the game, but the block
+    // never outlasts half a second: a stick resting off centre (drift) or a
+    // key held on purpose kept it forever and the keyboard seemed dead.
+    static std::chrono::steady_clock::time_point closed_at;
+    static bool was_open = false;
+    if (s_menu_open.load(std::memory_order_relaxed)) {
+        was_open = true;
+        return true;
+    }
+    if (was_open) {
+        closed_at = std::chrono::steady_clock::now();
+        was_open = false;
+    }
     const bool blocked = s_block_until_released.load(std::memory_order_relaxed);
-    if (blocked && !any_input_held) s_block_until_released.store(false, std::memory_order_relaxed);
+    if (blocked && (!any_input_held || std::chrono::steady_clock::now() - closed_at > std::chrono::milliseconds(500)))
+        s_block_until_released.store(false, std::memory_order_relaxed);
     return blocked;
 }
 
@@ -685,6 +717,7 @@ ImDrawData* begin_frame(VkExtent2D extent) {
     s_prev_menu_open = show_menu;
     if (fresh_menu) {
         s_menu_page = MenuPage::Main;
+        s_graphics_page = gx2_graphics_menu::Page::None;
         s_capture = false;
         s_quit_armed_at = -1.0;
     }

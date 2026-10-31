@@ -10,6 +10,10 @@
 // replay in gx2_render_vk_capture.cpp.
 #include "gx2_render.h"
 #include "gx2_pm4_state.h"
+#include "gx2_frame_interp.h"
+#include "gx2_weather.h"
+#include "gx2_texture_pack.h"
+#include "vk/gx2_vk_capture.h"
 #include "gx2_detile.h"
 #include "gx2_endian.h"
 #include "gx2_surface.h"
@@ -660,9 +664,12 @@ static void copy_depth_to_color_alias(DepthTarget& depth, ColorTarget& color) {
         return;
     const VkDeviceSize bytes = VkDeviceSize(depth.image.desc.width) * depth.image.desc.height * bpp;
     if (s_alias_staging.size < bytes) {
+        const VkBuffer old_staging = s_alias_staging.buffer;
         if (s_alias_staging.buffer) gx2vk::destroy_buffer(s_alias_staging);
         s_alias_staging = gx2vk::create_buffer(
             bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, gx2vk::MemoryUse::DeviceLocal);
+        gx2vk::capture::register_staging(s_alias_staging.buffer,
+                                         old_staging); // 120 FPS replay may repeat the round trip
         if (!s_alias_staging.buffer) return;
     }
     end_rendering();
@@ -708,6 +715,7 @@ void gx2_render_shutdown() {
     if (!gx2vk::ready()) return;
     end_rendering();
     gx2vk::finish();
+    gx2weather::shutdown();
     TXDIAG(txdiag::drain_probes(true));
     s_clear_color_as_depth = false;
     s_color_as_depth_keys.clear();
@@ -1876,11 +1884,13 @@ void gx2_render_upload_texture(uint32_t tex_addr, uint32_t slot, uint8_t* mem, c
                     static gx2vk::Buffer s_block_staging;
                     const VkDeviceSize bytes = VkDeviceSize(cb.width) * cb.height * 16;
                     if (s_block_staging.size < bytes) {
+                        const VkBuffer old_staging = s_block_staging.buffer;
                         gx2vk::destroy_buffer(s_block_staging);
                         s_block_staging =
                             gx2vk::create_buffer(std::max<VkDeviceSize>(bytes, 1 << 16),
                                                  VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                                                  gx2vk::MemoryUse::DeviceLocal);
+                        gx2vk::capture::register_staging(s_block_staging.buffer, old_staging);
                     }
                     if (s_block_staging.buffer) {
                         VkBufferImageCopy out{};
@@ -1999,8 +2009,38 @@ void gx2_render_upload_texture(uint32_t tex_addr, uint32_t slot, uint8_t* mem, c
         // every helper-thread write. No temporary linear texture is needed.
         const bool storage_ok =
             (!vf.compressed || pixels) && (target != wire::TEXTURE_CUBE_MAP_ARRAY || layers % 6 == 0);
-        const bool storage_ready =
-            storage_ok && ensure_texture_storage(entry, target, vf.format, w, h, layers, mip_levels, vf.depth);
+        entry.tex.content_hash = entry.hash_valid ? entry.content_hash : 0;
+        // HD texture packs (gx2_texture_pack.h): a 2x/4x/8x replacement takes
+        // over the whole texture, its mip chain included.
+        bool hd_done = false;
+        if (gx2texpack::replacing() && storage_ok && target == wire::TEXTURE_2D && layers == 1 && !vf.depth &&
+            !vf.integer) {
+            const uint64_t pack_hash = entry.tex.content_hash;
+            gx2texpack::HdTexture hd;
+            if (pack_hash && gx2texpack::hd_replacement(pack_hash, vf.format, w, h, hd) &&
+                ensure_texture_storage(entry, target, hd.format, hd.width, hd.height, 1, uint32_t(hd.levels.size()),
+                                       false)) {
+                for (uint32_t level = 0; level < hd.levels.size(); ++level)
+                    upload_image_level(entry.image, level, 0, 1, std::max(1u, hd.width >> level),
+                                       std::max(1u, hd.height >> level), 1, hd.levels[level].data(),
+                                       hd.levels[level].size(), 0);
+                entry.tex.view_format = hd.format;
+                entry.tex.levels = uint32_t(hd.levels.size());
+                entry.tex.layers = 1;
+                entry.tex.integer = false;
+                entry.tex.depth = false;
+                entry.tex.compressed = hd.format == vf.format && vf.compressed;
+                entry.tex.complete_storage = true;
+                entry.tex.params.mag_filter = wire::LINEAR;
+                entry.tex.params.min_filter = hd.levels.size() > 1 ? wire::LINEAR_MIPMAP_LINEAR : wire::LINEAR;
+                entry.tex.params.wrap_s = entry.tex.params.wrap_t = wire::CLAMP_TO_EDGE;
+                entry.tex.params.base_level = 0;
+                entry.tex.params.max_level = uint32_t(hd.levels.size()) - 1;
+                hd_done = true;
+            }
+        }
+        const bool storage_ready = !hd_done && storage_ok &&
+                                   ensure_texture_storage(entry, target, vf.format, w, h, layers, mip_levels, vf.depth);
         std::vector<uint8_t> linear;
         gx2vk::Span decoded_span;
         bool detiled = false;
@@ -2087,6 +2127,20 @@ void gx2_render_upload_texture(uint32_t tex_addr, uint32_t slot, uint8_t* mem, c
                 }
             } else {
                 clear_image_color(entry.image, zero_color());
+            }
+            // Texture packs (gx2_texture_pack.h): level 0 by content hash.
+            if (gx2texpack::dumping() && target == wire::TEXTURE_2D && layers == 1 && !vf.depth && level0 &&
+                (detiled || level0_bytes <= img_sz)) {
+                uint64_t pack_hash = 0;
+                if (texture_content_hash(mem, data, pack_hash))
+                    gx2texpack::dump(pack_hash, vf.format, w, h, level0, level0_bytes);
+            }
+            if (gx2texpack::replacing() && target == wire::TEXTURE_2D && layers == 1 && !vf.depth) {
+                uint64_t pack_hash = 0;
+                std::vector<uint8_t> replaced;
+                if (texture_content_hash(mem, data, pack_hash) &&
+                    gx2texpack::replacement(pack_hash, vf.format, w, h, level0_bytes, replaced))
+                    upload_image_level(entry.image, 0, 0, 1, w, h, 1, replaced.data(), replaced.size(), 0);
             }
             entry.tex.params.min_filter = entry.tex.params.mag_filter = vf.integer ? wire::NEAREST : wire::LINEAR;
             entry.tex.params.wrap_s = entry.tex.params.wrap_t = wire::CLAMP_TO_EDGE;
@@ -2404,6 +2458,7 @@ bool copy_cpu_surface(const uint8_t* src, uint32_t src_mip, uint32_t src_slice, 
         linear.resize(bytes);
         if (!gx2_detile_mip0(sd, mem + source->address, source->available, linear.data())) return false;
     }
+    if (gx2interp::replaying()) return true; // the 120 FPS replay never writes guest memory
     std::vector<uint8_t> tiled(mem + destination->address, mem + destination->address + destination->available);
     if (!gx2_retile_mip0(dd, linear.data(), tiled.data(), tiled.size())) return false;
     if (dd.tile_mode <= 1 || dd.tile_mode == 16) {
@@ -2577,6 +2632,8 @@ struct EncodedScan {
 };
 EncodedScan s_encoded[2];
 std::string s_pending_present_capture;
+// Photo mode (F12, game thread): the next presented picture is saved.
+std::atomic<bool> s_photo_request{false};
 gx2vk::Image s_present_raw; // UNORM copy of an sRGB-format scan source
 // The console's scan buffer is a copy that keeps showing the last copied
 // frame. Presenting the game's colour buffer itself showed whatever it held
@@ -2606,6 +2663,10 @@ void gx2r_shutdown_scan_images() {
 void gx2r::capture_next_present(const std::string& path) {
     s_pending_present_capture = path;
 }
+void gx2_render_request_photo() {
+    s_photo_request.store(true, std::memory_order_relaxed);
+}
+static void save_photo(const std::vector<uint8_t>& rgba, uint32_t width, uint32_t height); // below (WIC)
 void gx2_render_set_scan_format(bool gamepad, uint32_t format) {
     S.scan_formats[gamepad] = format;
     RBREW_LOG_DEBUG("scan", "%s buffer format=%X (sRGB=%u)\n", gamepad ? "DRC" : "TV", format, (format >> 10) & 1);
@@ -2789,14 +2850,37 @@ static bool write_frame_bmp(VkFormat format, uint32_t width, uint32_t height, co
 static void dump_frame(gx2vk::Image& image, uint32_t width, uint32_t height, const char* prefix = "frame") {
     static const char* const directory = std::getenv("RBREW_FRAME_DUMP_DIR"); // per present: read once
     if (!directory || !*directory) return;
-    const unsigned frame = rbrew_benchmark::frame.load(std::memory_order_relaxed);
+    static const bool replay_position = [] {
+        const char* v = std::getenv("RBREW_FRAME_DUMP_REPLAY");
+        return v && v[0] == '1';
+    }();
+    const unsigned frame = replay_position ? rbrew_benchmark::replay_capture_frame.load(std::memory_order_relaxed)
+                                           : rbrew_benchmark::frame.load(std::memory_order_relaxed);
+    if (frame == UINT32_MAX) return;
     static const unsigned every = [] {
         const char* v = std::getenv("RBREW_FRAME_DUMP_EVERY");
         return v ? unsigned(std::strtoul(v, nullptr, 10)) : 30u;
     }();
     if (!every || ((frame % every != 0) && frame != 1)) return;
+    // RBREW_FRAME_DUMP_FROM / _TO (diagnostics): only frames in this range.
+    static const unsigned from = [] {
+        const char* v = std::getenv("RBREW_FRAME_DUMP_FROM");
+        return v ? unsigned(std::strtoul(v, nullptr, 10)) : 0u;
+    }();
+    static const unsigned to = [] {
+        const char* v = std::getenv("RBREW_FRAME_DUMP_TO");
+        return v ? unsigned(std::strtoul(v, nullptr, 10)) : ~0u;
+    }();
+    if (frame < from || frame > to) return;
+    static std::map<std::string, unsigned> last_capture;
+    auto& previous = last_capture.try_emplace(prefix, UINT32_MAX).first->second;
+    if (replay_position && previous == frame) return;
     std::vector<uint8_t> raw;
     if (!gx2vk::read_image(image, VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, width, height, raw)) return;
+    previous = frame;
+    if (replay_position)
+        std::fprintf(stderr, "[capture] %s recorded=%u live=%u\n", prefix, frame,
+                     rbrew_benchmark::frame.load(std::memory_order_relaxed));
     rbrew_benchmark::captured_frame.store(rbrew_benchmark::frame.load(), std::memory_order_relaxed);
     char name[64];
     std::snprintf(name, sizeof(name), "%s_%05u", prefix, frame);
@@ -2891,7 +2975,80 @@ static void frame_signature(gx2vk::Image&, uint32_t, uint32_t, bool) {}
 size_t gx2r_vertex_cache_entries(); // gx2_render_vk_draw.cpp
 uint64_t gx2r_vertex_cache_bytes();
 std::pair<uint64_t, uint64_t> gx2_dl_recording_counts(); // gx2_display_list.cpp
+// 120 FPS in-between frames (gx2_frame_interp.h). The held frame N is a
+// UNORM copy of the scan image (sRGB scan textures are blitted unconverted).
+gx2vk::Image s_interp_held;
+uint32_t s_interp_held_w = 0, s_interp_held_h = 0;
+static void interp_copy(gx2vk::Image& source, gx2vk::Image& target) {
+    const VkFormat format =
+        source.desc.format == VK_FORMAT_R8G8B8A8_SRGB ? VK_FORMAT_R8G8B8A8_UNORM : source.desc.format;
+    if (!target.image || target.desc.width != source.desc.width || target.desc.height != source.desc.height ||
+        target.desc.format != format) {
+        gx2vk::destroy_image(target);
+        gx2vk::ImageDesc desc;
+        desc.width = source.desc.width;
+        desc.height = source.desc.height;
+        desc.format = format;
+        desc.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        if (!gx2vk::create_image(target, desc)) return;
+    }
+    VkCommandBuffer cb = gx2vk::cmd();
+    gx2vk::barrier_if_dirty();
+    VkImageCopy copy{};
+    copy.srcSubresource = copy.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    copy.extent = {source.desc.width, source.desc.height, 1};
+    vkCmdCopyImage(cb, source.image, VK_IMAGE_LAYOUT_GENERAL, target.image, VK_IMAGE_LAYOUT_GENERAL, 1, &copy);
+    gx2vk::note_gpu_write(target);
+}
+void gx2_render_interp_hold(unsigned scan_index) {
+    end_rendering();
+    gx2vk::Image* image = S.scan_image[scan_index & 1];
+    s_interp_held_w = s_interp_held_h = 0;
+    if (!image || !image->image) return;
+    interp_copy(*image, s_interp_held);
+    s_interp_held_w = S.scan_w[scan_index & 1];
+    s_interp_held_h = S.scan_h[scan_index & 1];
+}
+void gx2_render_interp_present_scan(unsigned scan_index) {
+    end_rendering();
+    gx2vk::Image* image = S.scan_image[scan_index & 1];
+    const uint32_t w = S.scan_w[scan_index & 1], h = S.scan_h[scan_index & 1];
+    if (!image || !image->image || !w || !h) return;
+    gx2vk::Image* source = image;
+    if (image->desc.format == VK_FORMAT_R8G8B8A8_SRGB) {
+        interp_copy(*image, s_present_raw);
+        source = &s_present_raw;
+    }
+    dump_frame(*source, w, h, "interp");
+    gx2vk::present(*source, w, h);
+}
+void gx2_render_interp_present_held() {
+    end_rendering();
+    if (s_interp_held.image && s_interp_held_w && s_interp_held_h)
+        gx2vk::present(s_interp_held, s_interp_held_w, s_interp_held_h);
+}
+// 180 FPS mode: the second in-between frame is rendered right after the first
+// and kept until its turn (a third of a frame later).
+gx2vk::Image s_interp_mid;
+uint32_t s_interp_mid_w = 0, s_interp_mid_h = 0;
+void gx2_render_interp_keep_mid(unsigned scan_index) {
+    end_rendering();
+    gx2vk::Image* image = S.scan_image[scan_index & 1];
+    s_interp_mid_w = s_interp_mid_h = 0;
+    if (!image || !image->image) return;
+    interp_copy(*image, s_interp_mid);
+    s_interp_mid_w = S.scan_w[scan_index & 1];
+    s_interp_mid_h = S.scan_h[scan_index & 1];
+    dump_frame(s_interp_mid, s_interp_mid_w, s_interp_mid_h, "interp2");
+}
+void gx2_render_interp_present_mid() {
+    end_rendering();
+    if (s_interp_mid.image && s_interp_mid_w && s_interp_mid_h)
+        gx2vk::present(s_interp_mid, s_interp_mid_w, s_interp_mid_h);
+}
+
 void gx2_render_present(void* sdl_window, bool gamepad_mode) {
+    gx2interp::present_begin();
     TXDIAG(txdiag::present(gx2vk::recording_serial(), gx2vk::known_completed_serial()); txdiag::snapshot());
     Gx2PerfScope perf_scope(kPerfPresent);
     (void)sdl_window;
@@ -2955,20 +3112,27 @@ void gx2_render_present(void* sdl_window, bool gamepad_mode) {
     static const bool dump_gamepad = std::getenv("RBREW_FRAME_DUMP_GAMEPAD") != nullptr;
     if (dump_gamepad && S.scan_image[1] && *S.scan_image[1] && S.scan_w[1] && S.scan_h[1])
         dump_frame(*S.scan_image[1], S.scan_w[1], S.scan_h[1], "gamepad");
+    // 120 FPS (gx2_frame_interp.h): this frame is held and presented after
+    // the in-between frame the render thread draws next.
+    if (gx2vk::has_surface() && gx2interp::frame_complete(index)) return;
     if (gx2vk::has_surface()) {
         static gx2vk::Image none;
 #ifndef RBREW_DISABLE_LOGGING
-        const bool capture = !gamepad_mode && !s_pending_present_capture.empty();
+        const bool diagnostic_capture = !gamepad_mode && !s_pending_present_capture.empty();
 #else
-        constexpr bool capture = false; // screen captures are a diagnostic-build feature
+        constexpr bool diagnostic_capture = false; // screen captures are a diagnostic-build feature
 #endif
+        // Photo mode: the picture without the FPS overlay and the menu.
+        const bool photo = s_photo_request.exchange(false, std::memory_order_relaxed);
+        const bool capture = diagnostic_capture || photo;
         const bool previous = capture ? gx2vk::capture_presents(true) : false;
         const bool presented = gx2vk::present(source && source->image ? *source : none, w, h);
         if (capture) {
             gx2vk::capture_presents(previous);
             std::vector<uint8_t> rgba;
             uint32_t width = 0, height = 0;
-            if (presented && gx2vk::last_present(rgba, width, height)) {
+            if (presented && photo && gx2vk::last_present(rgba, width, height)) save_photo(rgba, width, height);
+            if (presented && diagnostic_capture && gx2vk::last_present(rgba, width, height)) {
                 // Readback is from the acquired swapchain image, not a replay
                 // or an earlier render target. No per-draw waits are enabled.
                 const auto path = std::exchange(s_pending_present_capture, {});
@@ -3501,6 +3665,61 @@ bool gx2_render_vk_set_unit_lod(uint32_t unit, uint32_t target, float min_lod, f
 #pragma comment(lib, "ole32.lib")
 #endif
 void gx2_render_vk_startup_warmup(void (*progress)(double));
+
+// Photo mode: Screenshots\Splatoon_<date>_<time>.png next to the executable
+// (PNG through WIC, on a short-lived thread like the splash decoder).
+static void save_photo(const std::vector<uint8_t>& rgba, uint32_t width, uint32_t height) {
+#if defined(_WIN32)
+    wchar_t exe[MAX_PATH];
+    const DWORD n = GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    if (!n || n >= MAX_PATH || rgba.size() < size_t(width) * height * 4) return;
+    const auto directory = std::filesystem::path(exe).parent_path() / L"Screenshots";
+    std::error_code error;
+    std::filesystem::create_directories(directory, error);
+    SYSTEMTIME t;
+    GetLocalTime(&t);
+    wchar_t name[64];
+    swprintf(name, 64, L"Splatoon_%04u-%02u-%02u_%02u-%02u-%02u", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute,
+             t.wSecond);
+    auto path = directory / (std::wstring(name) + L".png");
+    for (int suffix = 2; std::filesystem::exists(path, error); ++suffix)
+        path = directory / (std::wstring(name) + L"_" + std::to_wstring(suffix) + L".png");
+    std::vector<uint8_t> pixels(rgba);
+    for (size_t i = 3; i < pixels.size(); i += 4) pixels[i] = 255; // opaque
+    bool ok = false;
+    std::thread([&] {
+        if (FAILED(CoInitializeEx(nullptr, COINIT_MULTITHREADED))) return;
+        IWICImagingFactory* factory = nullptr;
+        IWICStream* stream = nullptr;
+        IWICBitmapEncoder* encoder = nullptr;
+        IWICBitmapFrameEncode* frame = nullptr;
+        WICPixelFormatGUID format = GUID_WICPixelFormat32bppRGBA;
+        if (SUCCEEDED(
+                CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory))) &&
+            SUCCEEDED(factory->CreateStream(&stream)) &&
+            SUCCEEDED(stream->InitializeFromFilename(path.c_str(), GENERIC_WRITE)) &&
+            SUCCEEDED(factory->CreateEncoder(GUID_ContainerFormatPng, nullptr, &encoder)) &&
+            SUCCEEDED(encoder->Initialize(stream, WICBitmapEncoderNoCache)) &&
+            SUCCEEDED(encoder->CreateNewFrame(&frame, nullptr)) && SUCCEEDED(frame->Initialize(nullptr)) &&
+            SUCCEEDED(frame->SetSize(width, height)) && SUCCEEDED(frame->SetPixelFormat(&format)) &&
+            IsEqualGUID(format, GUID_WICPixelFormat32bppRGBA) &&
+            SUCCEEDED(frame->WritePixels(height, width * 4, UINT(pixels.size()), pixels.data())) &&
+            SUCCEEDED(frame->Commit()) && SUCCEEDED(encoder->Commit()))
+            ok = true;
+        if (frame) frame->Release();
+        if (encoder) encoder->Release();
+        if (stream) stream->Release();
+        if (factory) factory->Release();
+        CoUninitialize();
+    }).join();
+    std::fprintf(stderr, "[photo] %s %ls (%ux%u)\n", ok ? "saved" : "could not save", path.c_str(), width, height);
+#else
+    (void)rgba;
+    (void)width;
+    (void)height;
+#endif
+}
+
 namespace {
 constexpr uint32_t kSplashWidth = 1280, kSplashHeight = 720, kSplashBarArea = 80;
 struct Splash {

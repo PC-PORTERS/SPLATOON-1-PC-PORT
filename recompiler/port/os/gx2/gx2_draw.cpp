@@ -6,6 +6,7 @@
 #include "../os_common.h"
 #include "../../runtime/benchmark_input.h"
 #include "../../runtime/native_control_defaults.h"
+#include "gx2_frame_interp.h"
 #include "gx2_attrib.h"
 #include "gx2_blend_state.h"
 #include "gx2_pm4_state.h"
@@ -17,7 +18,10 @@
 #include "gx2_surface_layout.h"
 #include "gx2_state_api.h"
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
+#include <immintrin.h>
+#include <thread>
 #include <mutex>
 #include <unordered_map>
 #include <stdio.h>
@@ -151,6 +155,8 @@ struct QueryGeneration {
     uint64_t serial = UINT64_MAX;
     uint32_t pending_reads = 0;
     uint64_t last_visible = 0;
+    uint64_t published_samples = 0;
+    bool has_samples = false;
 };
 std::mutex s_query_generation_mutex;
 std::unordered_map<uint32_t, QueryGeneration> s_query_generations;
@@ -168,10 +174,12 @@ void gx2_query_render_end(uint32_t address, uint64_t serial) {
     g.ended = true;
     g.serial = serial;
 }
-void gx2_query_render_published(uint32_t address) {
+void gx2_query_render_published(uint32_t address, uint64_t samples) {
     std::lock_guard lock(s_query_generation_mutex);
     auto& g = s_query_generations[address];
     g.published = g.executed;
+    g.published_samples = samples;
+    g.has_samples = true;
 }
 #ifdef RBREW_ADVANCED_TESTS
 std::atomic<uint64_t> s_query_fast_reads{0};
@@ -179,12 +187,13 @@ uint64_t gx2_query_fast_read_count_for_test() {
     return s_query_fast_reads.load();
 }
 #endif
+static bool query_list_reads();
 static bool read_published_query(uint32_t address, uint8_t* mem, uint64_t& samples) {
     std::lock_guard lock(s_query_generation_mutex);
     const auto it = s_query_generations.find(address);
     if (it == s_query_generations.end()) return false;
     auto& g = it->second;
-    if (g.listed && !gx2_query_list_counting() && !gx2_native_queue_idle()) return false;
+    if (g.listed && !query_list_reads() && !gx2_native_queue_idle()) return false;
     if (!g.executed || g.published != g.executed) return false;
     if (g.issued > g.executed) return false;
     g.pending_reads = 0;
@@ -214,16 +223,27 @@ Gx2CommandFn gx2_query_begin_command() {
 // Keep the immediate "not ready" prototype opt-in: without the drain the
 // game's later progress queries can miss the HUD for individual frames.
 // 1: both shortcuts below, 2: only the cleared-counter one, 3: only the
-// queued-begin one (testing).
+// queued-begin one (testing). 4: counting only: a listed query whose newest
+// counted begin is executed and published is read at once (the value the
+// drain would give); every other read still waits.
+// Default (unset): counting from the start, read at once (as 4) only in the
+// 120 FPS mode. There the drain waited for the in-between frame as well and
+// cost the game its 60 steps in heavy tutorial scenes (17 -> 11 ms game time,
+// ground ink and HUD unchanged, 2026-10-27). 0: no counting (always drain).
 static int query_list_mode() {
     static const int mode = [] {
         const char* v = std::getenv("RBREW_QUERY_LIST_COUNT");
-        return v && v[0] >= '1' && v[0] <= '3' ? v[0] - '0' : 0;
+        return v && v[0] >= '0' && v[0] <= '4' ? v[0] - '0' : 5;
     }();
     return mode;
 }
 bool gx2_query_list_counting() {
     return query_list_mode() != 0;
+}
+// Reads may trust the counts (no drain while a list might hold a begin).
+static bool query_list_reads() {
+    const int mode = query_list_mode();
+    return (mode >= 1 && mode <= 4) || (mode == 5 && gx2interp::mode_enabled());
 }
 void gx2_query_list_issued(uint32_t address) {
     std::lock_guard lock(s_query_generation_mutex);
@@ -276,10 +296,151 @@ static void GX2QueryGetOcclusionResult(CPUState* cpu) {
     uint64_t samples = 0;
     if (gx2_native_async_active() && ARG1 && rbrew_memory_accessible(MEM, ARG1, 8) &&
         rbrew_memory_accessible(MEM, ARG0, 64)) {
+        const bool busy = !gx2_native_queue_idle();
         if (read_published_query(ARG0, MEM, samples)) {
+            // RBREW_QUERY_VERIFY=<file> (diagnostics): a read answered while the
+            // queue was busy also drains it and logs whether both results agree.
+            static FILE* verify = [] {
+                const char* p = std::getenv("RBREW_QUERY_VERIFY");
+                return p && *p ? std::fopen(p, "w") : nullptr;
+            }();
+            if (verify && busy) {
+                uint32_t drained = 0;
+                gx2_native_run(true, [&] { drained = gx2_render_query_result(ARG0, ARG1, MEM) ? 1 : 0; });
+                const uint64_t exact = drained ? rbrew_read64(MEM, ARG1) : ~0ull;
+                static uint64_t reads = 0, differ = 0, visibility = 0;
+                ++reads;
+                if (exact != samples) {
+                    ++differ;
+                    if ((exact == 0) != (samples == 0)) ++visibility;
+                    std::fprintf(verify, "%u %08X fast %llu drained %llu\n",
+                                 rbrew_benchmark::frame.load(std::memory_order_relaxed), ARG0,
+                                 (unsigned long long)samples, (unsigned long long)exact);
+                }
+                if ((reads & 255) == 0)
+                    std::fprintf(verify, "# reads %llu differ %llu visibility %llu\n", (unsigned long long)reads,
+                                 (unsigned long long)differ, (unsigned long long)visibility);
+                std::fflush(verify);
+                RET = drained;
+                return;
+            }
             rbrew_write64(MEM, ARG1, samples);
             RET = 1;
             return;
+        }
+        // 120 FPS mode: Gambit re-runs its listed queries every frame and reads
+        // one right after, before the GPU finished it - with the in-between
+        // frame's GPU work queued ahead of it. That wait was 43% of the game
+        // thread (~7 ms per frame). The query's previous completed result (one
+        // execution older) is returned instead. RBREW_INTERP_QUERY_FAST=0: wait.
+        // Tried and dropped 2026-10-27: also answering while the query's end is
+        // still queued, or with a published result while a queued list may begin
+        // it again. Those are most of the remaining waits in heavy tutorial
+        // scenes, but both made the ground ink disappear.
+        // 2026-10-27: the older result had the wrong visibility in 28% of the
+        // reads (RBREW_QUERY_VERIFY_STALE). Now the read waits for exactly this
+        // query: the render thread submits the recorded work holding it and
+        // publishes it as soon as the GPU has it, between its other work, instead
+        // of the read draining the whole queue (in-between frame included). The
+        // game gets the exact value. If a queued list may begin the query again,
+        // or after 10 ms, the read drains as before.
+        // RBREW_INTERP_QUERY_FAST=1: the older result; =3: "not ready" like the
+        // console (kept Octo Valley black behind its fade); =0: always drain.
+        static const int interp_fast = [] {
+            const char* v = std::getenv("RBREW_INTERP_QUERY_FAST");
+            return v && (v[0] == '0' || v[0] == '1' || v[0] == '3') ? v[0] - '0' : 4;
+        }();
+        // The plaza keeps its own rule (assume visible, below), which holds its
+        // 60 FPS mode; these paths are for the other scenes.
+        const bool interp_reads = gx2interp::mode_enabled() && rbrew_control_defaults::active_scene_type(MEM) != 2;
+        if (interp_fast == 4 && interp_reads) {
+            // 1: ended, executed once more than published, no further begin queued
+            // (wait); 2: published (read now); 0: anything else (drain).
+            const auto state = [&] {
+                std::lock_guard lock(s_query_generation_mutex);
+                const auto it = s_query_generations.find(ARG0);
+                if (it == s_query_generations.end() || !it->second.listed || it->second.issued > it->second.executed)
+                    return 0;
+                if (it->second.executed == it->second.published) return 2;
+                return it->second.ended && it->second.executed == it->second.published + 1 ? 1 : 0;
+            };
+            if (state() == 1) {
+                gx2_native_query_waiter(true);
+                // 10 ms: the GPU result usually takes 3-10 ms here (the in-between
+                // frame's GPU work runs first). A 3 ms limit sent most reads to the
+                // drain path and the level ran at 5 FPS.
+                const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(10);
+                bool exact = false;
+                for (unsigned n = 0;; ++n) {
+                    const int now = state();
+                    // Published: read it, or drain if its counters were cleared since.
+                    if (now == 2) {
+                        exact = read_published_query(ARG0, MEM, samples);
+                        break;
+                    }
+                    if (now == 0 || std::chrono::steady_clock::now() > until) break;
+                    if (n > 64)
+                        std::this_thread::yield();
+                    else
+                        _mm_pause();
+                }
+                gx2_native_query_waiter(false);
+                if (exact) {
+                    rbrew_write64(MEM, ARG1, samples);
+                    RET = 1;
+                    return;
+                }
+            }
+        }
+        if (interp_fast == 3 && interp_reads) {
+            std::lock_guard lock(s_query_generation_mutex);
+            const auto it = s_query_generations.find(ARG0);
+            if (it != s_query_generations.end() && it->second.listed && it->second.ended && it->second.has_samples &&
+                it->second.executed == it->second.published + 1 && it->second.pending_reads < 2) {
+                ++it->second.pending_reads;
+                rbrew_write64(MEM, ARG1, 0);
+                RET = 0;
+                return;
+            }
+        }
+        if (interp_fast == 1 && interp_reads) {
+            // RBREW_QUERY_VERIFY_STALE=<file> (diagnostics): also drain and log how
+            // the older result compares with the exact one.
+            static FILE* verify = [] {
+                const char* p = std::getenv("RBREW_QUERY_VERIFY_STALE");
+                return p && *p ? std::fopen(p, "w") : nullptr;
+            }();
+            std::unique_lock lock(s_query_generation_mutex);
+            const auto it = s_query_generations.find(ARG0);
+            if (it != s_query_generations.end() && it->second.listed && it->second.ended && it->second.has_samples &&
+                it->second.executed == it->second.published + 1) {
+                const uint64_t older = it->second.published_samples;
+                if (verify) {
+                    lock.unlock();
+                    uint32_t drained = 0;
+                    gx2_native_run(true, [&] { drained = gx2_render_query_result(ARG0, ARG1, MEM) ? 1 : 0; });
+                    const uint64_t exact = drained ? rbrew_read64(MEM, ARG1) : ~0ull;
+                    static uint64_t reads = 0, differ = 0, visibility = 0;
+                    ++reads;
+                    if (exact != older) {
+                        ++differ;
+                        if ((exact == 0) != (older == 0)) ++visibility;
+                    }
+                    if ((exact == 0) != (older == 0))
+                        std::fprintf(verify, "%u %08X older %llu exact %llu\n",
+                                     rbrew_benchmark::frame.load(std::memory_order_relaxed), ARG0,
+                                     (unsigned long long)older, (unsigned long long)exact);
+                    if ((reads & 255) == 0)
+                        std::fprintf(verify, "# reads %llu differ %llu visibility %llu\n", (unsigned long long)reads,
+                                     (unsigned long long)differ, (unsigned long long)visibility);
+                    std::fflush(verify);
+                    RET = drained;
+                    return;
+                }
+                rbrew_write64(MEM, ARG1, older);
+                RET = 1;
+                return;
+            }
         }
         bool not_ready = false;
         // RBREW_QUERY_ASSUME_VISIBLE=1 (experimental): a listed read whose result

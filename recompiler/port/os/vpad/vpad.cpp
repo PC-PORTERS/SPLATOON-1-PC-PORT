@@ -29,6 +29,7 @@
 #include "../../runtime/benchmark_input.h"
 #include "game_controllers.h"
 #include "../gx2/vk/gx2_imgui_overlay.h"
+#include "../gx2/gx2_env_light.h"
 #include "../../runtime/port_settings.h"
 #include <atomic>
 #include <cstdlib>
@@ -106,6 +107,19 @@ static constexpr float KBM_MOUSE_SENSITIVITY = 0.005f;
 // the save: sensitivity 0 (neutral) and the player's own motion setting.
 // No progression or tutorial-completion flags are changed.
 void vpad_apply_motion_policy(uint8_t* mem) {
+    // Recording and replay sessions apply it every 6th game frame instead of
+    // every 100 ms: a wall-clock step lands on other frames at another frame
+    // rate, and replays of the tutorial drifted apart (stuck at the motion
+    // prompts).
+    if (rbrew_benchmark::recording() || rbrew_benchmark::replaying()) {
+        static uint32_t s_last_frame = UINT32_MAX;
+        const uint32_t frame = rbrew_benchmark::frame.load(std::memory_order_relaxed);
+        if (s_last_frame == UINT32_MAX || frame - s_last_frame >= 6) {
+            s_last_frame = frame;
+            rbrew_control_defaults::apply_live(mem);
+        }
+        return;
+    }
     static auto s_last_policy = std::chrono::steady_clock::now() - std::chrono::seconds(1);
     auto now = std::chrono::steady_clock::now();
     if (now - s_last_policy > std::chrono::milliseconds(100)) {
@@ -185,6 +199,11 @@ static std::mutex s_motion_lock;
 static VirtualMotion s_motion;
 static constexpr float kPi = 3.14159265358979f;
 static constexpr float kYawRate = 240.0f, kPitchRate = 150.0f, kPitchLimit = 80.0f; // degrees(/s)
+// Mouse aiming like a PC game ("Mouse aim: Direct"): each frame's mouse
+// movement in degrees turns the virtual GamePad, which the game's motion
+// aiming follows 1:1 - no stick speed limit, no dead zone.
+static float s_mouse_yaw = 0.0f, s_mouse_pitch = 0.0f; // degrees this frame (under s_motion_lock)
+static constexpr float kMouseDegreesPerCount = 0.035f; // 0.09 was far too fast
 
 // RBREW_GYRO=0 (or "Controller gyro: Off" in the ESC menu) ignores a
 // controller's gyro sensor (stick/mouse only).
@@ -225,6 +244,11 @@ void vpad_update_motion(uint8_t* mem, uint32_t buf, float rx, float ry, float dt
     const bool use_gyro = phys_gyro && physical_gyro_enabled();
     float yaw_rate = stick_yaw ? -rx * std::fabs(rx) * kYawRate : 0.0f;
     float pitch_rate = use_gyro && !stick_pitch_with_gyro ? 0.0f : -ry * std::fabs(ry) * kPitchRate;
+    if (dt > 0 && (s_mouse_yaw != 0.0f || s_mouse_pitch != 0.0f)) {
+        yaw_rate += s_mouse_yaw / dt;
+        pitch_rate += s_mouse_pitch / dt;
+        s_mouse_yaw = s_mouse_pitch = 0.0f;
+    }
     if (use_gyro) {
         constexpr float kGyroDeadzone = 0.02f; // rad/s: resting sensor noise/drift
         const float scale = rbrew_settings::g_gyro_scale.load(std::memory_order_relaxed); // ESC menu sensitivity
@@ -408,6 +432,16 @@ static void VPADRead(CPUState* cpu) {
         // mouse up looks up.
         int mdx = 0, mdy = 0;
         SDL_GetRelativeMouseState(&mdx, &mdy);
+        // Free fly camera (cinema / hacks page, F7): mouse looks, WASD
+        // moves, Space up, Ctrl down, Shift fast; the game gets a neutral pad.
+        if (gx2env::fly_camera()) {
+            const bool ctrl = keys[SDL_SCANCODE_LCTRL] || keys[SDL_SCANCODE_RCTRL];
+            // lx/ly: WASD or the controller's left stick; the right stick looks too.
+            gx2env::fly_input(mdx + int(rx * 14.f), mdy - int(ry * 14.f), ly, lx,
+                              (keys[SDL_SCANCODE_SPACE] ? 1.f : 0.f) - (ctrl ? 1.f : 0.f),
+                              keys[SDL_SCANCODE_LSHIFT] || keys[SDL_SCANCODE_RSHIFT]);
+            mdx = mdy = 0;
+        }
         const float mouse_scale = rbrew_settings::g_mouse_scale.load(std::memory_order_relaxed); // ESC menu
         float mrx = (float)mdx * KBM_MOUSE_SENSITIVITY * mouse_scale;
         float mry = -(float)mdy * KBM_MOUSE_SENSITIVITY * mouse_scale;
@@ -415,13 +449,21 @@ static void VPADRead(CPUState* cpu) {
         if (mrx > 1.0f) mrx = 1.0f;
         if (mry < -1.0f) mry = -1.0f;
         if (mry > 1.0f) mry = 1.0f;
-        // Blend: mouse delta is added to controller stick, clamped
-        rx += mrx;
-        if (rx < -1.0f) rx = -1.0f;
-        if (rx > 1.0f) rx = 1.0f;
-        ry += mry;
-        if (ry < -1.0f) ry = -1.0f;
-        if (ry > 1.0f) ry = 1.0f;
+        if (rbrew_settings::g_mouse_direct.load(std::memory_order_relaxed)) {
+            // PC aiming: straight to the motion aiming, not the stick.
+            std::lock_guard lock(s_motion_lock);
+            s_mouse_yaw += -float(mdx) * kMouseDegreesPerCount * mouse_scale;
+            // Negative pitch looks up: mouse up (mdy < 0) must look up.
+            s_mouse_pitch += float(mdy) * kMouseDegreesPerCount * mouse_scale;
+        } else {
+            // Blend: mouse delta is added to controller stick, clamped
+            rx += mrx;
+            if (rx < -1.0f) rx = -1.0f;
+            if (rx > 1.0f) rx = 1.0f;
+            ry += mry;
+            if (ry < -1.0f) ry = -1.0f;
+            if (ry > 1.0f) ry = 1.0f;
+        }
 
         // Buttons (defaults: left click ZR = fire, right click ZL = squid,
         // Return A, Space B = jump, Q X, E Y, R, F + = map, G - = options,
@@ -491,9 +533,9 @@ static void VPADRead(CPUState* cpu) {
     // ESC menu open (or its closing press still held): the game sees a
     // neutral pad. Mouse motion accumulated meanwhile is dropped too.
     {
-        const bool held = buttons != 0 || std::fabs(lx) > 0.2f || std::fabs(ly) > 0.2f || std::fabs(rx) > 0.2f ||
-                          std::fabs(ry) > 0.2f;
-        if (gx2_imgui::menu_blocks_input(held)) {
+        // Only buttons keep the block after closing (a drifting stick kept it).
+        const bool held = buttons != 0;
+        if (gx2_imgui::menu_blocks_input(held) || gx2env::fly_camera()) {
             buttons = 0;
             lx = ly = rx = ry = 0.0f;
             has_phys_gyro = has_phys_accel = false;

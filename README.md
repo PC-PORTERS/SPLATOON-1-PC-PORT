@@ -12,14 +12,37 @@ An unofficial native PC port of **Splatoon (Wii U)** for **Windows and Linux**, 
 
 ## What's new
 
+**Realistic graphics (experimental, off by default)**
+
+Turn it on in the settings menu with *Graphics preset* (Balanced, Realistic or Cinematic); *Original* keeps the clean game at 60 FPS.
+- The game's own lights follow a **time of day**: sunrise, golden hour, sunset and night with moon and stars, or the PC clock
+- **Weather**: clear, overcast, rain, thunderstorm with lightning, after the rain (wet ground), or *Live*, where it changes by itself
+- A physically based **sky** with **volumetric clouds**, two towering cumulus clouds, silver linings and **light shafts** through cloud gaps
+- **Contact shadows**, ambient occlusion, bloom, edge smoothing (FXAA + TAA), motion blur, focus blur and colour controls (saturation, contrast, warmth, vignette, saved looks)
+- Runs in the **plaza, Octo Valley and the tutorial**; story levels keep their own sky and lights and get the picture effects only
+
+**Camera, cinema mode and PC controls**
+- Field of view, camera distance and height, and a hand-held camera wiggle
+- **Cinema mode**: no HUD and a free camera to fly anywhere for screenshots; **F12** saves a photo without menus
+- Direct **PC mouse aiming** (1:1, like a PC shooter) and a key for every GamePad input
+- Camera spots and character spawn points for testing
+
+**HD textures (optional, built on your PC)**
+- `HD-Textures.bat` upscales the textures you saw while playing with Real-ESRGAN into `Game\textures`; nothing is downloaded or shared
+
+**Releases for Windows and Linux**
+- Each version tag publishes a Windows .zip and a Linux .tar.gz on the [Releases page](https://github.com/NEVESYA/SPLATOON-1-PC-PORT/releases) (source and setup only; you build the game from your own dump)
+
 **Settings menu (Esc / controller touchpad)**
-- Render resolution, Plaza 60 FPS on/off, fullscreen, performance overlay
+- Render resolution, Plaza 60 FPS on/off, frame rate (30 / 60 / 120 / 180), G-Sync / FreeSync, fullscreen, performance overlay
+- **Graphics preset (experimental):** Original (the clean game at 60 FPS, the default), Balanced, Realistic, Cinematic; pages for graphics, weather & time, camera & mouse, and cinema/photo/hacks, with a help line for every option
 - Gyro on/off, gyro and mouse sensitivity, invert gyro, volume
 - Rebind every button for keyboard/mouse and controller
 - HOME moved from Esc to H
 
 **Performance**
 - Plaza runs at 60 FPS with normal game speed (keeps NPCs)
+- New frame rates in the menu (experimental): 120 and 180 FPS with real extra frames between game steps (180 outside the plaza), 30 FPS for weak PCs; game speed stays normal in all
 - Fewer shader stutters, faster rendering in levels
 
 **Linux (CMake first)**
@@ -63,6 +86,17 @@ You can also pass folders directly, with quotes around paths that contain spaces
 Setup.bat -GameDump "D:\My Wii U games\Splatoon [AGMP01]"
 ```
 
+### Optional: HD textures
+
+The game starts; visit the places you want in HD and close it. The textures it showed are then upscaled (Real-ESRGAN) into the `textures` folder next to the game and load at the next start. Everything happens on your PC from your own copy of the game; the HD textures are never uploaded or shared, because they are derived from the game's files.
+
+- **Windows:** double-click `HD-Textures.bat`.
+- **Linux:** run `./HD-Textures.sh` from the project folder (after `./setup.sh`).
+
+Both need Python 3; the script offers to install `torch`, `numpy` and `pillow` with pip (on Linux you may need `python3-pip` from your distribution first). An NVIDIA graphics card with CUDA makes it many times faster than the CPU. Finished textures are kept, so you can stop and run it again later.
+
+> **macOS** is not supported yet: the setup and the renderer have no macOS path (no MoltenVK build), so there is no macOS package or script.
+
 ## Installation (Linux, CMake)
 
 1. Install the build tools (see [Requirements](#requirements)), for example on Arch:
@@ -105,7 +139,9 @@ For incremental rebuilds just run **`./build.sh`** — it reuses the configured 
 
 ## Controls
 
-**Esc** (or the touchpad button of a PlayStation controller) opens the port's settings menu: render resolution (applies at the next start), plaza 60 FPS on/off, fullscreen, performance overlay (ImGui), controller gyro on/off, gyro sensitivity, inverted gyro up/down, mouse sensitivity, volume and quit. Two pages show and rebind every GamePad input for keyboard & mouse and for the controller: select a row, press Enter/Cross, then the new key or button (a key already in use swaps with the old one; Delete/Square clears; "Reset to defaults" restores the layout below). The game keeps running but gets no input while the menu is open. Choices are saved in `settings.ini` next to the game executable (`Splatoon.exe` / `Splatoon`); an environment variable that is set (for example `RBREW_PLAZA_60FPS`, `RBREW_GYRO`, `RBREW_RENDER_RESOLUTION`) still wins over the file.
+**Esc** (or the touchpad button of a PlayStation controller) opens the port's settings menu (ImGui): render resolution (applies at the next start), the graphics preset, plaza 60 FPS on/off, frame rate, G-Sync / FreeSync, fullscreen, performance overlay, controller gyro on/off, gyro sensitivity, inverted gyro up/down, mouse sensitivity, volume and quit. Two pages show and rebind every GamePad input for keyboard & mouse and for the controller: select a row, press Enter/Cross, then the new key or button (a key already in use swaps with the old one; Delete/Square clears; "Reset to defaults" restores the layout below). The game keeps running but gets no input while the menu is open. Choices are saved in `settings.ini` next to the game executable (`Splatoon.exe` / `Splatoon`); an environment variable that is set (for example `RBREW_PLAZA_60FPS`, `RBREW_GYRO`, `RBREW_RENDER_RESOLUTION`) still wins over the file.
+
+**Graphics (experimental).** The default is the original look at 60 FPS. The *Graphics preset* turns on the new lighting: the game's own lights follow a time of day (sunrise, sunset, night with moon and stars) and the weather (clear, overcast, rain, thunderstorm, after the rain, or live), a physically based sky with volumetric clouds and light shafts, contact shadows, ambient occlusion, bloom, edge smoothing and colour controls. This runs in the plaza, Octo Valley and the tutorial; story levels keep their own sky and lights and get the picture effects only. The *Camera & mouse* page has direct PC mouse aiming (needs the game's Motion Controls on), field of view, camera distance/height and a camera wiggle. *Cinema, photo & hacks* hides the HUD and frees the camera (mouse to look, WASD to fly, Space/Ctrl up/down, Shift faster, F7 back), takes photos (**F12**, saved to `Screenshots`), and saves/restores camera spots and character spawn points. Every new effect has an environment switch back to the original behaviour (see `docs/performance.md`).
 
 The game starts in borderless fullscreen; **F11** switches to a 1280×720 window and back. The TV scene renders internally at the console's **1280×720** (light on the GPU) and is scaled to the window. For a sharper image set `RBREW_RENDER_RESOLUTION` before starting: `native` (your desktop resolution), `1080p`, `1440p` or any `WIDTHxHEIGHT`. The game's camera and UI keep their original layout.
 
@@ -131,6 +167,10 @@ Keyboard and mouse (default layout, rebindable in the menu):
 | Tab | GamePad view (the mouse becomes the touch screen) NOT WORKING YET|
 | F3 | Show/hide the debug overlay (ImGui windows: FPS, frame time, 1% low, frame-time graph, waits, RAM, shader compiles and diagnostics). |
 | F8 / F9 | Start/stop an extended diagnostic recording / save a diagnostic snapshot to `Game/Diagnostics` |
+
+**120 FPS mode** (menu, off by default, experimental; `RBREW_FPS120=interp` turns it on): Splatoon advances its game logic by a fixed step per frame, so the port keeps 60 game steps per second and draws one extra real frame between two steps. The extra frame re-renders the scene with camera, object and bone matrices halfway between the two steps. It is not an image-blending "frame generation". When the PC cannot draw both frames in time, extra frames are left out (you see between 60 and 120 FPS), but the game speed never changes. It works in the plaza too. Expect about half a frame more input latency. On a monitor faster than 120 Hz, turn on G-Sync/FreeSync in your driver and "G-Sync / FreeSync" in the menu so every frame is shown for the same time.
+
+**Frame rate** (menu): 60 (default), 120 (above), 180 (two extra frames per step, at a third and two thirds; the plaza stays at 120) and 30 for weak PCs (the game's own 30 FPS mode everywhere: two game steps per drawn frame, so the game speed stays normal). `RBREW_FRAME_RATE=30|60|120|180` sets it from the environment.
 
 Standing still with your weapon for about 5 seconds plays the inkling's look-around idle animation (`WaitHold_Nrml_LookAround`). It ships in the game's files but the original game never uses it. Set `RBREW_IDLE_LOOKAROUND=0` to turn it off.
 

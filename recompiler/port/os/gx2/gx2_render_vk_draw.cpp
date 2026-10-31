@@ -12,6 +12,9 @@
 #include "gx2_shader_program.h"
 #include "gx2_perf.h"
 #include "gx2_write_watch.h"
+#include "gx2_weather.h"
+#include "gx2_material_response.h"
+#include "../../runtime/port_settings.h"
 #include <bit>
 #include "gx2_shader_key.h"
 #include "r700_translation_reads.h"
@@ -48,6 +51,7 @@
 #include <thread>
 #include <type_traits>
 #include <unordered_set>
+#include "gx2_frame_interp.h"
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -1433,6 +1437,31 @@ void release_preloaded_translation(const std::string& dir, uint64_t key) {
     if (auto it = preload.entries.find(key); it != preload.entries.end()) released = std::move(it->second);
 }
 
+// Translations cached before the 2026-10-29 decompiler fixes that do not
+// compile: an undeclared cube map index, or a vertex output declared twice.
+// They are translated again (and the cache entry rewritten) instead of
+// failing every time.
+bool translation_predates_fixes(const char* glsl) {
+    if (!glsl) return false;
+    const std::string_view text(glsl);
+    for (size_t at = text.find("cubeMapArrayIndex"); at != std::string_view::npos;
+         at = text.find("cubeMapArrayIndex", at + 1)) {
+        size_t end = at + 17;
+        while (end < text.size() && text[end] >= '0' && text[end] <= '9') ++end;
+        const std::string declaration = "float " + std::string(text.substr(at, end - at)) + " ";
+        if (text.find(declaration) == std::string_view::npos) return true;
+    }
+    std::vector<std::string_view> outputs;
+    for (size_t at = text.find("out vec4 passParameterSem"); at != std::string_view::npos;
+         at = text.find("out vec4 passParameterSem", at + 1)) {
+        const size_t end = text.find(';', at);
+        if (end == std::string_view::npos) break;
+        const auto name = text.substr(at, end - at);
+        if (std::find(outputs.begin(), outputs.end(), name) != outputs.end()) return true;
+        outputs.push_back(name);
+    }
+    return false;
+}
 bool load_translation(uint64_t key, char*& vs, char*& ps, std::array<R700TranslationInfo, 2>& info) {
     const std::string dir = translation_cache_dir();
     if (dir.empty()) return false;
@@ -1517,6 +1546,7 @@ bool load_translation(uint64_t key, char*& vs, char*& ps, std::array<R700Transla
     }
     uint32_t end = read_u32();
     if (end != kTranslationMagic) ok = false;
+    if (ok && (translation_predates_fixes(v) || translation_predates_fixes(p))) ok = false;
     if (!ok) {
         std::free(v);
         std::free(p);
@@ -3593,9 +3623,25 @@ bool build_stage(uint8_t* mem, Program& prog, unsigned stage, StageDescriptors& 
         for (unsigned slot = 0; slot < 18; ++slot)
             gx2_render_set_sampler_comparison((stage == 0 ? 32 : 0) + slot, info.texture_compare[slot]);
     const uint32_t live_banks = prog.live_banks[stage], live_textures = prog.live_textures[stage];
+    const gx2material::Response* material = nullptr;
+    static uint64_t material_frame = ~0ull;
+    static bool material_enabled = false;
+    if (material_frame != gx2vk::present_count()) {
+        material_frame = gx2vk::present_count();
+        const auto settings = rbrew_settings::get();
+        material_enabled = settings.shader_quality && settings.realistic_look;
+    }
     // Resolve aliases before packing the texture-coordinate scale uniforms.
     for (uint32_t m = live_textures; m; m &= m - 1)
         refresh_bound_render_texture((stage == 0 ? 32 : 0) + unsigned(std::countr_zero(m)), mem);
+    // The PS albedo identifies the material for both stages; each bank must still match its full native signature.
+    if (material_enabled)
+        for (uint32_t m = prog.live_textures[1]; m && !material; m &= m - 1) {
+            const unsigned t = unsigned(std::countr_zero(m));
+            const unsigned dim = prog.info[1].vk.texture_dim[t];
+            const auto* tex = dim == 2 ? S.units[t][0] : nullptr;
+            if (tex) material = gx2material::response(tex->content_hash);
+        }
     // Uniform-variable block (uniforms that GPU keeps on the program).
     if (vk.uniform_vars_binding >= 0) {
         auto& block = prog.ufblock_scratch[stage];
@@ -3610,6 +3656,8 @@ bool build_stage(uint8_t* mem, Program& prog, unsigned stage, StageDescriptors& 
             if (size_t(vk.offset_remapped) <= block.size() &&
                 remapped_bytes <= block.size() - size_t(vk.offset_remapped)) {
                 char* values = block.data() + vk.offset_remapped;
+                std::array<unsigned, 16> material_layouts{};
+                std::array<bool, 16> material_checked{};
                 for (const auto& entry : info.remapped) {
                     if (entry.mapped_index >= info.remapped.size()) continue;
                     char* dst = values + entry.mapped_index * 16;
@@ -3620,6 +3668,55 @@ bool build_stage(uint8_t* mem, Program& prog, unsigned stage, StageDescriptors& 
                         const uint64_t offset = uint64_t(entry.index) * 16;
                         if (!source.address || offset + 16 > source.size) continue;
                         std::memcpy(dst, mem + source.address + uint32_t(offset), 16);
+                        if (material) {
+                            if (!material_checked[entry.bank]) {
+                                material_checked[entry.bank] = true;
+                                if (rbrew_memory_accessible(mem, source.address, source.size))
+                                    material_layouts[entry.bank] =
+                                        gx2material::layout({mem + source.address, source.size}, *material);
+                                if (!material_layouts[entry.bank] && source.size >= 424 &&
+                                    rbrew_memory_accessible(mem, source.address, source.size) &&
+                                    std::getenv("RBREW_MATERIAL_LOG")) {
+                                    static uint64_t seen = 0;
+                                    const auto bit = 1ull
+                                                     << (unsigned(material - gx2material::responses) * 16 + entry.bank);
+                                    if (!(seen & bit)) {
+                                        seen |= bit;
+                                        const std::span<const uint8_t> v{mem + source.address, source.size};
+                                        std::fprintf(stderr,
+                                                     "[material] unmapped %016llx bank=%u bytes=%u "
+                                                     "byte=(%.4g,%.4g,%.4g / %.4g / %.4g) ",
+                                                     (unsigned long long)material->albedo_hash, entry.bank, source.size,
+                                                     gx2material::value(v, 240), gx2material::value(v, 244),
+                                                     gx2material::value(v, 248), gx2material::value(v, 384),
+                                                     gx2material::value(v, 420));
+                                        if (source.size >= 1684)
+                                            std::fprintf(stderr, "word=(%.4g,%.4g,%.4g / %.4g / %.4g)",
+                                                         gx2material::value(v, 960), gx2material::value(v, 964),
+                                                         gx2material::value(v, 968), gx2material::value(v, 1536),
+                                                         gx2material::value(v, 1680));
+                                        std::fputc('\n', stderr);
+                                    }
+                                }
+                            }
+                            const unsigned scale = material_layouts[entry.bank];
+                            if (scale && gx2material::apply_range({reinterpret_cast<uint8_t*>(dst), 16}, size_t(offset),
+                                                                  *material, scale)) {
+                                static const bool log = [] {
+                                    const char* v = std::getenv("RBREW_MATERIAL_LOG");
+                                    return v && v[0] == '1';
+                                }();
+                                static uint32_t seen = 0;
+                                const auto bit = 1u << (unsigned(material - gx2material::responses) * 2 + stage);
+                                if (log && !(seen & bit)) {
+                                    seen |= bit;
+                                    std::fprintf(stderr,
+                                                 "[material] remapped %016llx stage=%u bank=%u units=%u bytes=%u\n",
+                                                 (unsigned long long)material->albedo_hash, stage, entry.bank, scale,
+                                                 source.size);
+                                }
+                            }
+                        }
                     }
                 }
                 if (stage == 1 && g_trace_active && remapped_bytes) {
@@ -3665,6 +3762,11 @@ bool build_stage(uint8_t* mem, Program& prog, unsigned stage, StageDescriptors& 
                 const auto scale = tex ? tex->coordinate_scale : std::array<float, 2>{1, 1};
                 put(vk.offset_tex_scale[t], scale.data(), 8);
             }
+        // 120 FPS in-between frame: record N's block, or use the N-1/N blend.
+        if (gx2interp::replaying())
+            gx2interp::replay_uf(stage, block.data(), block.size());
+        else if (gx2interp::capturing())
+            gx2interp::record_uf(stage, block.data(), block.size());
         auto& cached = prog.ufblock_cache[stage];
         auto& span = prog.ufblock_span[stage];
         const bool changed = cached != block;
@@ -3677,6 +3779,8 @@ bool build_stage(uint8_t* mem, Program& prog, unsigned stage, StageDescriptors& 
         }
         auto& buffer = d.buffers[d.buffer_count++];
         buffer = {span.buffer, span.offset, cached.size()};
+        if (gx2interp::capturing())
+            gx2interp::note_ubo(stage, 255, uint64_t(reinterpret_cast<uintptr_t>(span.buffer)), span.offset);
         auto& w = d.writes[d.write_count++];
         w = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
         w.dstBinding = uint32_t(vk.uniform_vars_binding);
@@ -3707,6 +3811,25 @@ bool build_stage(uint8_t* mem, Program& prog, unsigned stage, StageDescriptors& 
         auto& block = S.uniform_blocks[stage][bank];
         bool bound_now = false;
         if (gl_binding >= 0 && gl_binding < 48 && block.address && block.size &&
+            rbrew_memory_accessible(mem, block.address, block.size)) {
+            // 120 FPS in-between frame: N's recorded bytes blended with N-1's
+            // (the game may already be writing the next frame's data).
+            if (gx2interp::replaying()) {
+                if (const uint8_t* blended = gx2interp::replay_bank(stage, bank, block.size)) {
+                    const VkDeviceSize declared = VkDeviceSize(vk.uniform_buffer_vec4s[bank]) * 16;
+                    const VkDeviceSize bytes = std::max<VkDeviceSize>(std::max<VkDeviceSize>(block.size, declared), 16);
+                    const auto span = gx2vk::upload(bytes, ubo_align);
+                    if (!span.data) return false;
+                    std::memcpy(span.data, blended, block.size);
+                    if (bytes > block.size) std::memset(span.data + block.size, 0, bytes - block.size);
+                    S.ubo_binding_points[gl_binding] = span;
+                    bound_now = true;
+                }
+            } else if (gx2interp::capturing()) {
+                gx2interp::record_bank(stage, bank, mem + block.address, block.size);
+            }
+        }
+        if (!bound_now && gl_binding >= 0 && gl_binding < 48 && block.address && block.size &&
             rbrew_memory_accessible(mem, block.address, block.size)) {
             const uint64_t written = block_generations[bank];
             const VkDeviceSize declared = VkDeviceSize(vk.uniform_buffer_vec4s[bank]) * 16;
@@ -3807,10 +3930,34 @@ bool build_stage(uint8_t* mem, Program& prog, unsigned stage, StageDescriptors& 
         gx2vk::Span span = gl_binding >= 0 && gl_binding < 48 ? S.ubo_binding_points[gl_binding] : gx2vk::Span{};
         if (!bound_now && !gx2vk::span_alive(span)) span = zero_buffer();
         if (!span.buffer) return false;
+        if (material && span.data && gx2material::matches({span.data, size_t(span.size)}, *material)) {
+            // Keep guest data and the shared unmodified upload cache intact,
+            // so Original/Off and other draws immediately retain their values.
+            // shortcut: clone matching blocks per draw; cache by write generation
+            // if profiling shows this small material subset needs it.
+            auto adjusted = gx2vk::upload(span.size, ubo_align);
+            if (!adjusted.data) return false;
+            std::memcpy(adjusted.data, span.data, size_t(span.size));
+            gx2material::apply({adjusted.data, size_t(span.size)}, *material);
+            span = adjusted;
+            static const bool log = [] {
+                const char* v = std::getenv("RBREW_MATERIAL_LOG");
+                return v && v[0] == '1';
+            }();
+            static uint32_t seen = 0;
+            const auto bit = 1u << unsigned(material - gx2material::responses);
+            if (log && !(seen & bit)) {
+                seen |= bit;
+                std::fprintf(stderr, "[material] calibrated %016llx stage=%u bank=%u bytes=%llu\n",
+                             (unsigned long long)material->albedo_hash, stage, bank, (unsigned long long)span.size);
+            }
+        }
         const VkDeviceSize range =
             std::min<VkDeviceSize>(std::max<VkDeviceSize>(span.size, 16), gx2vk::caps().limits.maxUniformBufferRange);
         auto& buffer = d.buffers[d.buffer_count++];
         buffer = {span.buffer, span.offset, range};
+        if (gx2interp::capturing())
+            gx2interp::note_ubo(stage, bank, uint64_t(reinterpret_cast<uintptr_t>(span.buffer)), span.offset);
         auto& w = d.writes[d.write_count++];
         w = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
         w.dstBinding = uint32_t(vk.uniform_buffer_bindings[bank]);
@@ -4050,14 +4197,16 @@ bool is_triangle_topology(VkPrimitiveTopology t) {
            t == VK_PRIMITIVE_TOPOLOGY_LINE_LIST_WITH_ADJACENCY; // QUADS assemble into triangles in the GS
 }
 
-bool apply_dynamic_state(VkCommandBuffer cb, VkPrimitiveTopology topology, bool indexed_restart) {
+bool apply_dynamic_state(VkCommandBuffer cb, VkPrimitiveTopology topology, bool indexed_restart,
+                         bool atmosphere_sky = false) {
     const auto& g = S.raster;
     const auto area = s_area;
     // Viewport: GPU UPPER_LEFT (guest top at row 0) = negative-height Vulkan
     // viewport; LOWER_LEFT (guest h < 0) = positive height.
     if (g.viewport[2] <= 0 || g.viewport[3] <= 0) return false;
     const auto scale = framebuffer_coordinate_scale();
-    const VkViewport vp = resolution_viewport(g.viewport, g.clip_origin == wire::UPPER_LEFT, g.depth_range, scale);
+    VkViewport vp = resolution_viewport(g.viewport, g.clip_origin == wire::UPPER_LEFT, g.depth_range, scale);
+    if (atmosphere_sky) vp.minDepth = vp.maxDepth = 1.f;
     if (!s_dyn.viewport_valid || std::memcmp(&vp, &s_dyn.viewport, sizeof(vp)) != 0) {
         vkCmdSetViewport(cb, 0, 1, &vp);
         s_dyn.viewport = vp;
@@ -4099,7 +4248,7 @@ bool apply_dynamic_state(VkCommandBuffer cb, VkPrimitiveTopology topology, bool 
         vkCmdSetDepthWriteEnable(cb, depth_write);
         s_dyn.depth_write = depth_write;
     }
-    const VkCompareOp depth_op = gl_compare_to_vk(g.depth_func);
+    const VkCompareOp depth_op = atmosphere_sky ? VK_COMPARE_OP_LESS_OR_EQUAL : gl_compare_to_vk(g.depth_func);
     if (depth_op != s_dyn.depth_op) {
         vkCmdSetDepthCompareOp(cb, depth_op);
         s_dyn.depth_op = depth_op;
@@ -4612,6 +4761,19 @@ bool issue_draw_program(Program* prog, uint8_t* mem, uint32_t prim, uint32_t cou
                              prog->id, S.cur_vs, S.cur_ps, S.current_fbo_id, prim, count, S.target_masks,
                              S.raster.viewport[0], S.raster.viewport[1], S.raster.viewport[2], S.raster.viewport[3]));
     const bool streamout_only = prog->info[0].streamout_mask && (S.regs[0xA2AC] & 1) && (S.regs[0xA204] & (1u << 22));
+    // 120 FPS replay: RBREW_INTERP_SKIP_DEPTH=1 (experimental) keeps frame
+    // N's off-screen depth-only passes instead of redrawing them. Off by
+    // default: characters and balloons vanished from the in-between frame
+    // (2026-10-26 tutorial), so some of those passes are not shadow maps.
+    static const bool skip_depth = [] {
+        const char* v = std::getenv("RBREW_INTERP_SKIP_DEPTH");
+        return v && v[0] == '1';
+    }();
+    if (gx2interp::replaying() && skip_depth && !streamout_only && S.framebuffer.depth && !(S.target_masks & 1u)) {
+        const uint64_t w = S.framebuffer.depth->width, h = S.framebuffer.depth->height;
+        const bool screen_shaped = w && h && (w * 9 > h * 16 ? w * 9 - h * 16 : h * 16 - w * 9) <= w / 4;
+        if (!screen_shaped) return true;
+    }
     if (!ensure_rendering(streamout_only)) return trace_skip("ensure_rendering");
     if (!streamout_only) {
         const bool depth_only_pass = s_active_fb.depth && !(S.target_masks & 1u);
@@ -4673,7 +4835,9 @@ bool issue_draw_program(Program* prog, uint8_t* mem, uint32_t prim, uint32_t cou
     VkCommandBuffer cb = gx2vk::cmd();
     if (s_dynamic_serial != gx2vk::recording_serial()) reset_command_tracking();
     const bool restart = indices.indexed && indices.restart;
-    if (!apply_dynamic_state(cb, topology, restart)) return trace_skip("dynamic-state");
+    if (gx2weather::hud_hidden()) return trace_skip("cinema");
+    const bool atmosphere_sky = gx2weather::sky_draw(mem, count);
+    if (!apply_dynamic_state(cb, topology, restart, atmosphere_sky)) return trace_skip("dynamic-state");
     uint64_t applied_epoch = s_tracking_epoch;
     frame_trace_draw(*prog);
     const unsigned mode = prim & 31;
@@ -4684,6 +4848,27 @@ bool issue_draw_program(Program* prog, uint8_t* mem, uint32_t prim, uint32_t cou
         // GPU offsets instance attributes after division; Latte divides the
         // effective instance index, so nonzero base instances draw singly.
         S.instance_uniform = S.draw_first_instance + i;
+        if (gx2interp::capturing() || gx2interp::replaying()) {
+            // Same draw in consecutive frames: program, geometry and instance.
+            uint64_t key = uint64_t(prog->id) << 32 ^ uint64_t(prim) << 24 ^ count;
+            key = key * 0x100000001B3ull ^ (uint64_t(first_vertex) << 32 | indices.count);
+            key = key * 0x100000001B3ull ^ (uint64_t(S.attrib[0].guest_addr) << 32 | S.attrib[1].guest_addr);
+            key = key * 0x100000001B3ull ^ (uint64_t(i) << 32 | S.draw_instances);
+            gx2interp::draw_unit(key, S.raster.blend);
+            // Not recorded in frame N: its data would come from the next frame.
+            if (gx2interp::replaying() && !gx2interp::replay_draw_known()) continue;
+        }
+        // The plaza sky (gx2_weather.h) replaces the dome's colour draw.
+        if (atmosphere_sky && i == 0) {
+            if (!ensure_rendering(streamout_only)) return any;
+            cb = gx2vk::cmd();
+            if (gx2weather::draw_sky(mem, cb, r.colors, r.depth, r.stencil)) {
+                reset_command_tracking();
+                ++C.draws;
+                any = true;
+                break;
+            }
+        }
         VertexBindings vb;
         setup_vertex_attribs(mem, *prog, vb);
         r.input = vb.input;
@@ -4701,7 +4886,8 @@ bool issue_draw_program(Program* prog, uint8_t* mem, uint32_t prim, uint32_t cou
         if (s_dynamic_serial != gx2vk::recording_serial()) reset_command_tracking();
         // Packing descriptors does not change guest raster state. Revalidate
         // only if an upload/readback/internal pass invalidated command state.
-        if (applied_epoch != s_tracking_epoch && !apply_dynamic_state(cb, topology, restart)) return any;
+        if (applied_epoch != s_tracking_epoch && !apply_dynamic_state(cb, topology, restart, atmosphere_sky))
+            return any;
         applied_epoch = s_tracking_epoch;
         if (pipeline != s_bound_pipeline) {
             vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
@@ -4758,6 +4944,7 @@ bool issue_draw_program(Program* prog, uint8_t* mem, uint32_t prim, uint32_t cou
             gx2vk::note_gpu_write(fb.depth->image);
         gx2vk::note_gpu_write();
         any = true;
+        gx2weather::observe_draw(mem, prim, count);
         if (g_trace_active) {
             const uint32_t fragments = streamout && streamout->mask ? streamout->fragments : frame_trace_end_query(cb);
             trace_fragments = fragments == ~0u || trace_fragments == ~0u ? ~0u : trace_fragments + fragments;
@@ -4780,6 +4967,8 @@ bool recurring_target(const Framebuffer& fb) {
 
 bool issue_draw(uint8_t* mem, uint32_t prim, uint32_t count, uint32_t first_vertex, const IndexStream& indices,
                 bool xfb, void (*hook)(bool, VkCommandBuffer)) {
+    // The 120 FPS replay never produces stream-out data for the guest.
+    if (xfb && gx2interp::replaying()) return true;
     s_async_draw = async_shaders_enabled() && !xfb && !hook && !s_query_segment && !(S.regs[0xA2AC] & 1) &&
                    recurring_target(S.framebuffer);
     Program* prog = resolve_active_program(mem);
@@ -5183,7 +5372,7 @@ bool query_samples(NativeQuery& q, bool wait, uint64_t& total) {
         }
         rbrew_write_memory(q.mem, q.address, counters.data(), uint32_t(counters.size()));
         q.published = true;
-        gx2_query_render_published(q.address);
+        gx2_query_render_published(q.address, total);
     }
     return true;
 }
@@ -5201,6 +5390,7 @@ void recycle_deferred_queries() {
 } // namespace
 
 void gx2_render_query_begin(uint32_t type, uint32_t address, uint8_t* mem) {
+    if (gx2interp::replaying()) return; // the guest only sees frame N's queries
     if ((type != 0 && type != 2) || !address || !rbrew_memory_accessible(mem, address, 64)) {
         RBREW_LOG_ERROR("gx2", "Unsupported or invalid query begin type=%u address=%08X\n", type, address);
         return;
@@ -5219,6 +5409,7 @@ void gx2_render_query_begin(uint32_t type, uint32_t address, uint8_t* mem) {
     open_query_segment();
 }
 void gx2_render_query_end(uint32_t type, uint32_t address, uint8_t* mem) {
+    if (gx2interp::replaying()) return;
     auto* q = find_query(mem, address);
     if (!q || !q->open || q->type != type) {
         RBREW_LOG_INFO("gx2", "Query end without matching begin %08X type=%u\n", address, type);
@@ -5328,6 +5519,29 @@ void gx2_render_conditional_end() {
     S.conditional_draw = true;
 }
 
+// A guest read waits for one occlusion query (gx2_draw.cpp, 120 FPS mode):
+// submit the recorded work that holds an ended, unpublished query and
+// publish the finished ones, without draining the render queue.
+void gx2_render_query_service_waiter() {
+    if (!gx2vk::ready()) return;
+    const uint64_t recording = gx2vk::recording_serial();
+    bool submit = false;
+    for (auto& [key, q] : s_native_queries) {
+        if (!q.ended || q.published) continue;
+        for (const auto& segment : q.segments)
+            if (!segment->ready && segment->serial >= recording) {
+                submit = true;
+                break;
+            }
+        if (submit) break;
+    }
+    if (submit) {
+        end_rendering();
+        gx2vk::submit(false);
+    }
+    gx2_render_query_poll_completed();
+}
+
 // GX2Flush / GX2DrawDone (gx2_vk_context.cpp)
 void gx2_render_vk_flush() {
     if (!gx2vk::ready()) return;
@@ -5349,6 +5563,24 @@ void gx2_render_vk_flush() {
 bool gx2_render_vk_finish() {
     if (!gx2vk::ready()) return false;
     end_rendering();
+    // GX2DrawDone (Gambit calls it at every frame end) waited for the GPU to
+    // go idle, and the game with it. The guest only reads GPU results back
+    // through stream-out exports (published here), occlusion queries (their
+    // reads wait for their own completion) and readbacks (synchronous), and
+    // the GPU reads uploaded copies, not guest buffers the game may reuse.
+    // Without pending exports the work is submitted and the call returns.
+    // Only in the 120 FPS mode, where that wait also held the game behind
+    // the in-between frame's GPU work; the normal mode showed no gain.
+    // RBREW_DRAWDONE_GPU_WAIT=1 always waits for the GPU (old behaviour).
+    static const bool always_wait = [] {
+        const char* v = std::getenv("RBREW_DRAWDONE_GPU_WAIT");
+        return v && v[0] == '1';
+    }();
+    if (!always_wait && gx2interp::mode_enabled() && !s_streamout_batch.pending_count) {
+        gx2vk::submit(false);
+        gx2_render_query_poll();
+        return true;
+    }
     const bool ok = gx2vk::finish();
     // GX2DrawDone: the guest may read exported data now (GPU already idle).
     if (ok && s_streamout_batch.pending_count) flush_streamouts(s_last_mem);
