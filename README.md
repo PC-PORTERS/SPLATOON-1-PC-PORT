@@ -1,16 +1,17 @@
-# Splatoon 1 PC Port
+# Splatoon 1 🦑 PC Port
+[![contributions - welcome](https://img.shields.io/badge/contributions-welcome-blue)](/CODE_OF_CONDUCT.md "Go to contributions doc")  [![OS - Linux](https://img.shields.io/badge/OS-Linux-blue?logo=linux&logoColor=white)](https://www.linux.org/ "Go to Linux homepage") [![OS - Windows](https://img.shields.io/badge/OS-Windows-blue?logo=windows&logoColor=white)](https://www.microsoft.com/ "Go to Microsoft homepage") [![Licence - Mozilla Public License 2.0](https://img.shields.io/badge/Licence-Mozilla_Public_License_2.0-2ea44f)](https://) [![Youtube - Demo](https://img.shields.io/badge/Youtube-Demo-FF0000?logo=youtube)](https://www.youtube.com/watch?v=TY3kYmz3RQM)
 ## The original repo is https://github.com/ApfelTeeSaft/RebrewU , Our Splatoon 1 PC Port is simply a continuation of ApfelTeeSaft's RebrewU Project
 
-# IF YOU WANT TO HELP US DM sussy_0897 IN DISCORD OR START A FORK (PREFERABLY DM ME ON DISCORD SINCE U MIGHT GET ADDED TO OUR TEAM)
-# IF YOU POST ANYTHING RELATED TO OUR PORT ON TIKTOK TAG @nevesboy67 @77emul AND @splatoon1multiplayer
+> IF YOU WANT TO HELP US DM `sussy_0897` IN DISCORD OR START A FORK (PREFERABLY DM ME ON DISCORD SINCE U MIGHT GET ADDED TO OUR TEAM), **Follow Code of conduct.md**
+> IF YOU POST ANYTHING RELATED TO OUR PORT ON TIKTOK TAG @nevesboy67 @77emul AND @splatoon1multiplayer
 
-An unofficial native PC port of **Splatoon (Wii U)** for **Windows and Linux**, made by statically recompiling the game's code into a native program, with a Vulkan renderer. Windows is set up with `Setup.bat`; Linux is set up with CMake through `setup.sh` / `build.sh`.
+An unofficial native PC port of **Splatoon (Wii U)** for **Windows and Linux**, made by statically recompiling the game's code into a native program, with a Vulkan renderer.
 
 > **This project contains no Nintendo code, assets or game files.** You need your own copy of the game, dumped from your own Wii U. The setup builds the port on your PC from your files.
 
-> ⚠️ **Work in progress.** Expect graphical glitches, missing effects, stutter and crashes. You need **strong hardware** (see below). If something goes wrong, please [open an issue](https://github.com/NEVESYA/SPLATOON-1-PC-PORT/issues). Include your PC specs and the text from the setup window or a screenshot. AMD GPUs are not supported, only NVIDIA
+> ⚠️ **Work in progress.** Expect graphical glitches, missing effects, stutter and crashes. You need **strong hardware** (see below). If something goes wrong, please [open an issue](https://github.com/NEVESYA/SPLATOON-1-PC-PORT/issues). Include your PC specs and the text from the setup window or a screenshot. **AMD GPUs are not supported**, only NVIDIA
 
-## What's new
+## Features
 
 **Realistic graphics (experimental, off by default)**
 
@@ -28,7 +29,7 @@ Turn it on in the settings menu with *Graphics preset* (Balanced, Realistic or C
 - Camera spots and character spawn points for testing
 
 **HD textures (optional, built on your PC)**
-- `HD-Textures.bat` upscales the textures you saw while playing with Real-ESRGAN into `Game\textures`; nothing is downloaded or shared
+- `HD-Textures` upscales the textures you saw while playing with Real-ESRGAN into `Game\textures`; nothing is downloaded or shared
 
 **Releases for Windows and Linux**
 - Each version tag publishes a Windows .zip and a Linux .tar.gz on the [Releases page](https://github.com/NEVESYA/SPLATOON-1-PC-PORT/releases) (source and setup only; you build the game from your own dump)
@@ -45,13 +46,6 @@ Turn it on in the settings menu with *Graphics preset* (Balanced, Realistic or C
 - New frame rates in the menu (experimental): 120 and 180 FPS with real extra frames between game steps (180 outside the plaza), 30 FPS for weak PCs; game speed stays normal in all
 - Fewer shader stutters, faster rendering in levels
 
-**Linux (CMake first)**
-- `setup.sh` builds the whole port natively on Linux with CMake; `build.sh` does incremental rebuilds
-- Dependencies come from your distribution plus pinned upstream sources (SDL2, glslang, volk) — no vcpkg, no Visual Studio
-- `Setup.bat` still drives the unchanged Windows build
-
-**Fix:** Setup now works when the folder path contains accents (issue #10) and retries a failed vcpkg download
-
 ---
 
 ## Requirements
@@ -63,7 +57,7 @@ Turn it on in the settings menu with *Graphics preset* (Balanced, Realistic or C
 - **Disk:** about 40 GB free during setup FINAL BUILD IS 6GB COUNTING THE SHADER CACHES
 - **Your own game dump:** Supported Splatoon version (see VersionDb.md), with the folders `code`, `content` and `meta` (for example made with *Dumpling* on your Wii U).
 
-## Installation (simple)
+## Installation (Windows)
 
 1. Click **Code → Download ZIP** on this page and extract it to a short path, for example `C:\SplatoonPort`.
 2. Double-click **`Setup.bat`**.
@@ -76,7 +70,7 @@ Setup creates the Wii U `mlc01` directory layout and the port's empty save folde
 
 Existing Mii graphics resources are detected automatically beside your game dump/repository, in `wiiu-system/mlc`, or in Cemu's default/configured MLC. These are optional to setup: missing resources produce a warning and may affect Mii graphics. Setup does not generate or download Nintendo's Mii graphics. Developers can optionally use `-Mlc "D:\My system dump"` to add a resource location; players are never prompted for it.
 
-**Updating:** download the new version, then run `Setup.bat` (Windows) or `./setup.sh` (Linux) again. Your save (`Game/save`) and shader cache are kept.
+**Updating:** download the new version, then run `Setup.bat` again. Your save (`Game/save`) and shader cache are kept.
 
 Options: `Setup.bat -Clean` rebuilds everything, and `-Output D:\Splatoon` picks a different game folder.
 
@@ -86,18 +80,7 @@ You can also pass folders directly, with quotes around paths that contain spaces
 Setup.bat -GameDump "D:\My Wii U games\Splatoon [AGMP01]"
 ```
 
-### Optional: HD textures
-
-The game starts; visit the places you want in HD and close it. The textures it showed are then upscaled (Real-ESRGAN) into the `textures` folder next to the game and load at the next start. Everything happens on your PC from your own copy of the game; the HD textures are never uploaded or shared, because they are derived from the game's files.
-
-- **Windows:** double-click `HD-Textures.bat`.
-- **Linux:** run `./HD-Textures.sh` from the project folder (after `./setup.sh`).
-
-Both need Python 3; the script offers to install `torch`, `numpy` and `pillow` with pip (on Linux you may need `python3-pip` from your distribution first). An NVIDIA graphics card with CUDA makes it many times faster than the CPU. Finished textures are kept, so you can stop and run it again later.
-
-> **macOS** is not supported yet: the setup and the renderer have no macOS path (no MoltenVK build), so there is no macOS package or script.
-
-## Installation (Linux, CMake)
+## Installation (Linux)
 
 1. Install the build tools (see [Requirements](#requirements)), for example on Arch:
    ```bash
@@ -111,6 +94,21 @@ Both need Python 3; the script offers to install `torch`, `numpy` and `pillow` w
 3. Play: **`./Game/Splatoon`**.
 
 Options: `./setup.sh --clean` rebuilds everything, `--output ~/Games/Splatoon` picks a different game folder, `--mlc PATH` adds a system-resource location, `--jobs N` sets the compile parallelism. Re-running the setup keeps your save (`Game/save`) and shader cache; run it again after pulling updates.
+
+**Updating:** download the new version, then run `Setup.sh` again. Your save (`Game/save`) and shader cache are kept.
+
+---
+
+### Optional: HD textures
+
+The game starts; visit the places you want in HD and close it. The textures it showed are then upscaled (Real-ESRGAN) into the `textures` folder next to the game and load at the next start. Everything happens on your PC from your own copy of the game; the HD textures are never uploaded or shared, because they are derived from the game's files.
+
+- **Windows:** double-click `HD-Textures.bat`.
+- **Linux:** run `./HD-Textures.sh` from the project folder (after `./setup.sh`).
+
+Both need Python 3; the script offers to install `torch`, `numpy` and `pillow` with pip (on Linux you may need `python3-pip` from your distribution first). An NVIDIA graphics card with CUDA makes it many times faster than the CPU. Finished textures are kept, so you can stop and run it again later.
+
+> **macOS** is not supported yet: the setup and the renderer have no macOS path (no MoltenVK build), so there is no macOS package or script.
 
 ### Building with CMake directly
 
@@ -168,21 +166,38 @@ Keyboard and mouse (default layout, rebindable in the menu):
 | F3 | Show/hide the debug overlay (ImGui windows: FPS, frame time, 1% low, frame-time graph, waits, RAM, shader compiles and diagnostics). |
 | F8 / F9 | Start/stop an extended diagnostic recording / save a diagnostic snapshot to `Game/Diagnostics` |
 
-**120 FPS mode** (menu, off by default, experimental; `RBREW_FPS120=interp` turns it on): Splatoon advances its game logic by a fixed step per frame, so the port keeps 60 game steps per second and draws one extra real frame between two steps. The extra frame re-renders the scene with camera, object and bone matrices halfway between the two steps. It is not an image-blending "frame generation". When the PC cannot draw both frames in time, extra frames are left out (you see between 60 and 120 FPS), but the game speed never changes. It works in the plaza too. Expect about half a frame more input latency. On a monitor faster than 120 Hz, turn on G-Sync/FreeSync in your driver and "G-Sync / FreeSync" in the menu so every frame is shown for the same time.
-
-**Frame rate** (menu): 60 (default), 120 (above), 180 (two extra frames per step, at a third and two thirds; the plaza stays at 120) and 30 for weak PCs (the game's own 30 FPS mode everywhere: two game steps per drawn frame, so the game speed stays normal). `RBREW_FRAME_RATE=30|60|120|180` sets it from the environment.
-
-Standing still with your weapon for about 5 seconds plays the inkling's look-around idle animation (`WaitHold_Nrml_LookAround`). It ships in the game's files but the original game never uses it. Set `RBREW_IDLE_LOOKAROUND=0` to turn it off.
-
-With a DualShock 4 / DualSense, the controller's gyro aims wherever the game uses motion aiming (set `RBREW_GYRO=0` or turn the gyro off in the menu to ignore it). As on the GamePad, aiming up and down is then done by tilting the controller only: the right stick turns left/right but no longer tilts the camera (`RBREW_STICK_GYRO_PITCH=1` restores stick tilt). Without a gyro the right stick or mouse still tilts the virtual GamePad.
-
 ## Runtime switches
 
-`RBREW_PAIRED_INLINE=0` restores interpreted paired-single instructions for A/B comparisons. By default, generated code decodes common floating-point instruction words at compile time, preserving the existing rounding and memory access checks.
-
-Runtime switches for comparisons (set before starting the game): `RBREW_QUERY_ASYNC=0` (all queued occlusion-query reads wait), `RBREW_SCAN_COPY=0`, `RBREW_STICK_GYRO_YAW=1`, `RBREW_AC_CONNECT=ok` (old online attempt at boot), `RBREW_BLEND_COMBINE_OLD=1`, `RBREW_SCAN_SLICE_MATCH=0`, `RBREW_STREAMOUT_FLUSH_PUBLISH=1`, `RBREW_FRAME_PACING=0` (no flip pacing) / `=auto` (hold 30 FPS in heavy scenes) / `=vsync` (console-strict), `RBREW_AX_FILTERS=0`, `RBREW_GYRO_INVERT_PITCH=1` / `RBREW_GYRO_INVERT_YAW=1`, `RBREW_STREAMOUT_EAGER=1` (old per-draw stream-out readback), `RBREW_FPS_OVERLAY=0`, `RBREW_ASYNC_SHADERS=0` (wait for every shader compile instead of skipping the draw), `RBREW_PLAZA_60FPS=0` (plaza at the console's 30 FPS; `=1` fixed 60 FPS mode), `RBREW_QUERY_ASSUME_VISIBLE=0` (plaza waits for occlusion results), `RBREW_CONTEXT_STATE_SYNC=1`, `RBREW_SUBMIT_EVERY_DRAWS=0`, `SPLATOON_DIAGNOSTICS=off` (no automatic stutter reports).
-
-Input recording and replay: `RBREW_INPUT_RECORD=<file>` records every frame's GamePad input (buttons, sticks, touch, controller gyro, motion time step) with scene-change marks; `RBREW_INPUT_REPLAY=<file>` plays it back, waiting at each scene change and each end of a loading screen until the game has caught up, and hands control back when the recording ends or the controller is used. `RBREW_SAVE_DIR=<dir>` uses another save folder than `save`, so a replay can start from the save it was recorded with.
+| Category / Variable | Options / Default | Description |
+| --- | --- | --- |
+| **`RBREW_PAIRED_INLINE`** | `0` *(Default: compile-time decode)* | Restores interpreted paired-single instructions for A/B comparisons. |
+| **`RBREW_QUERY_ASYNC`** | `0` | Forces all queued occlusion-query reads to wait. |
+| **`RBREW_SCAN_COPY`** | `0` | Controls scan copy behavior. |
+| **`RBREW_STICK_GYRO_YAW`** | `1` | Enables gyro yaw tied to the stick. |
+| **`RBREW_AC_CONNECT`** | `ok` | Simulates the legacy online connection attempt at boot. |
+| **`RBREW_BLEND_COMBINE_OLD`** | `1` | Uses the legacy blend combine method. |
+| **`RBREW_SCAN_SLICE_MATCH`** | `0` | Disables scan slice matching. |
+| **`RBREW_STREAMOUT_FLUSH_PUBLISH`** | `1` | Enables immediate stream-out flush publishing. |
+| **`RBREW_FRAME_PACING`** | `0`, `auto`, `vsync` | Configures frame pacing: `0` (no flip pacing), `auto` (holds 30 FPS in heavy scenes), `vsync` (console-strict). |
+| **`RBREW_AX_FILTERS`** | `0` | Disables AX audio filters. |
+| **`RBREW_GYRO_INVERT_PITCH`** | `1` | Inverts gyro pitch control. |
+| **`RBREW_GYRO_INVERT_YAW`** | `1` | Inverts gyro yaw control. |
+| **`RBREW_STREAMOUT_EAGER`** | `1` | Uses legacy per-draw stream-out readback. |
+| **`RBREW_IDLE_LOOKAROUND`** | `1` | Plays the inkling's look-around idle animation |
+| **`RBREW_FPS_OVERLAY`** | `0` | Disables the FPS counter overlay. |
+| **`RBREW_ASYNC_SHADERS`** | `0` | Waits for every shader compile instead of skipping the draw call. |
+| **`RBREW_PLAZA_60FPS`** | `0`, `1` | Plaza frame rate mode: `0` (console-native 30 FPS), `1` (locked 60 FPS mode). |
+| **`RBREW_FRAME_RATE`** | `30`, `60` | Frame rate (menu) |
+| **`RBREW_FPS120`** | `interp` | 120 FPS mode (menu), beta |
+| **`RBREW_STICK_GYRO_PITCH`** | `1` | Restores stick tilt |
+| **`RBREW_GYRO`** | `0` | Disable DualSense Gyro |
+| **`RBREW_QUERY_ASSUME_VISIBLE`** | `0` | Forces the plaza to wait for occlusion query results. |
+| **`RBREW_CONTEXT_STATE_SYNC`** | `1` | Synchronizes context state. |
+| **`RBREW_SUBMIT_EVERY_DRAWS`** | `0` | Disables submission on every draw call. |
+| **`SPLATOON_DIAGNOSTICS`** | `off` | Disables automatic stutter report generation. |
+| **`RBREW_INPUT_RECORD`** | `<file>` | Records every frame's GamePad input (buttons, sticks, touch, controller gyro, motion time step) along with scene-change markers to the specified file. |
+| **`RBREW_INPUT_REPLAY`** | `<file>` | Replays a recorded input file, pausing at each scene change and loading screen until the game catches up, returning control upon completion or manual input. |
+| **`RBREW_SAVE_DIR`** | `<dir>` | Specifies a custom save directory instead of `save`, allowing replays to start from the exact save file recorded with. |
 
 ## Why this project is legal
 
@@ -197,16 +212,22 @@ Do not share your game files or the generated `build` folder. This explanation i
 
 ## How the port works
 
-1. **Static recompilation (RebrewU).** The recompiler loads `Gambit.rpx`, the game's PowerPC executable. It discovers functions using the RPX and the supported version's checked boundary-address profile in `profiles/`, builds control-flow graphs, and translates PowerPC instructions into equivalent C++. The profile contains addresses, not game code. Setup checks that the supported function table is complete before building. The result is about 200 C++ files that CMake builds with MSVC (Windows) or GCC/Clang (Linux) into a native x64 program. No emulator CPU runs at play time.
-2. **Native Cafe OS runtime.** The game calls Wii U system libraries (coreinit, GX2, VPAD, sound and others). The runtime (`recompiler/port/os`) provides those functions natively: memory, threads, files (reading your `content` folder), saves, input through SDL2, and audio through miniaudio.
-3. **GX2 → Vulkan renderer.** The game's GPU commands are replayed on a dedicated render thread. Latte (Wii U GPU) shaders are translated to GLSL by a decompiler adapted from Cemu, then compiled to SPIR-V with glslang. Textures are detiled and uploaded, and render targets map to Vulkan images.
-4. **Performance work in this version:**
-   - asynchronous render thread and display-list recording;
-   - asynchronous shader and pipeline compilation with a persistent shader cache and boot warm-up;
-   - texture, vertex, index and uniform caches that use OS write tracking instead of re-hashing every frame;
-   - shader-key memoisation;
-   - fixes for stale vertex layouts after level changes, 17-input vertex shaders, instance step rates, and out-of-bounds packed vertex attributes.
-5. **Shader cache.** The game builds `Game\vulkan_cache` locally as you play and reuses it on later launches. First-time shader compilation may cause stutter.
+```mermaid
+graph LR
+
+GAMEORIGINAL[Original game ROM] --> STATIC(Static Recompilation, fork of RebrewU in C++) --> TARGET[Final, native build]
+
+CustomRuntime[Native Cafe OS runtime.] --> STATIC
+
+Renderer[Custom Render, GX2 to Vulkan] --> STATIC
+
+ShaderCache[Shader cache] --> Renderer
+
+CemuShader[Cemu Shader converter] --> Renderer
+
+CemuShader --> ShaderCache
+
+```
 
 ## Credits and licenses
 
